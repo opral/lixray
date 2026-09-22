@@ -45,7 +45,7 @@ async function serveResource() {
 		);
 		try {
 			const tools = await client.listTools();
-			const uri = tools.tools.find((tool) => tool.name === "write_files")?._meta
+			const uri = tools.tools.find((tool) => tool.name === "execute_sql")?._meta
 				?.ui?.resourceUri;
 			assert.ok(uri);
 			const resource = await client.readResource({ uri });
@@ -54,15 +54,16 @@ async function serveResource() {
 					contents: `
         import { AppBridge, PostMessageTransport } from '@modelcontextprotocol/ext-apps/app-bridge';
         const frame = document.querySelector('iframe');
-        const bridge = new AppBridge(null, { name: 'test-host', version: '1' }, { openLinks: {} });
+        const bridge = new AppBridge(null, { name: 'test-host', version: '1' }, { openLinks: {} }, { hostContext: window.hostContext || {} });
         window.bridge = bridge;
         window.errors = [];
         window.heights = [];
         bridge.onerror = error => window.errors.push(String(error));
         bridge.onopenlink = async ({ url }) => { window.openedUrl = url; return {}; };
-        bridge.onsizechange = ({ height }) => window.heights.push(height);
+        window.sizes = [];
+        bridge.onsizechange = size => { window.heights.push(size.height); window.sizes.push(size); };
         bridge.oninitialized = async () => {
-          await bridge.sendToolInput({ arguments: { files: [{ path: '/mcp-ui-demo.md' }] } });
+          await bridge.sendToolInput({ arguments: { statements: [{ sql: 'INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA))' }] } });
           window.ready = true;
         };
         await bridge.connect(new PostMessageTransport(frame.contentWindow, frame.contentWindow));
@@ -102,7 +103,7 @@ async function openHost(browser, options = {}) {
 		if (path === "/")
 			return route.fulfill({
 				contentType: "text/html",
-				body: '<iframe sandbox="allow-scripts" style="width:760px;height:700px;border:0"></iframe><script type="module" src="/host.js"></script>',
+				body: `<iframe sandbox="allow-scripts" style="width:760px;height:700px;border:0"></iframe><script>window.hostContext = ${JSON.stringify(options.hostContext ?? {})};</script><script type="module" src="/host.js"></script>`,
 			});
 		if (path === "/host.js")
 			return route.fulfill({ contentType: "text/javascript", body: host });
@@ -372,6 +373,65 @@ void test("the chrome follows the chat, the rendered file keeps Atelier's light 
 		}
 		assert.equal(dark.flipped.card, dark.card);
 		assert.equal(light.flipped.card, light.card);
+	} finally {
+		await browser.close();
+	}
+});
+
+void test("a closed card in a host that names its theme leaves no opaque block below the bar", async () => {
+	const browser = await chromium.launch();
+	try {
+		// ChatGPT's shape: the system is dark, the document the view is
+		// embedded in declares no scheme, and the host names the chat's theme.
+		// A view left on the system scheme differs from its embedder, and the
+		// browser paints its whole frame with an opaque canvas.
+		const { page } = await openHost(browser, {
+			colorScheme: "dark",
+			hostContext: { theme: "light" },
+		});
+		const receipt = demoReceipt([
+			{
+				path: "/mcp-ui-demo.md",
+				url: DEMO_URL,
+				after: new TextEncoder().encode(DEMO_MARKDOWN),
+			},
+		]);
+		await page.evaluate(
+			(receipt2) => window.bridge.sendToolResult(receipt2),
+			receipt,
+		);
+		const view = page.frameLocator("iframe");
+		await view.getByRole("button", { name: /1 file added/ }).waitFor();
+		const frame = appFrameOf(page);
+		assert.equal(
+			await frame.evaluate(
+				() => getComputedStyle(document.documentElement).colorScheme,
+			),
+			"light",
+		);
+		// The frame here stays 700px tall, so everything below the bar is
+		// the canvas: it must show the host page through, pixel for pixel
+		// the same as the page beside the frame.
+		const box = await page.locator("iframe").boundingBox();
+		const below = await page.screenshot({
+			clip: { x: box.x + 40, y: box.y + 200, width: 20, height: 20 },
+		});
+		const beside = await page.screenshot({
+			clip: { x: box.x + box.width + 2, y: box.y + 200, width: 20, height: 20 },
+		});
+		assert.ok(below.equals(beside), "the frame below the bar is opaque");
+		// The size names the width as well as the height, as the ext-apps
+		// SDK sends it: ChatGPT kept its default height without it.
+		const size = await page.evaluate(() => window.sizes.at(-1));
+		assert.equal(size.height, 44);
+		assert.equal(typeof size.width, "number");
+		// A theme change in the chat reaches the chrome.
+		await page.evaluate(() =>
+			window.bridge.setHostContext({ ...window.hostContext, theme: "dark" }),
+		);
+		await frame.waitForFunction(
+			() => getComputedStyle(document.documentElement).colorScheme === "dark",
+		);
 	} finally {
 		await browser.close();
 	}

@@ -59,6 +59,11 @@ interface WorkerLixRuntimeClientOptions {
 	signal?: AbortSignal;
 	lixFetch?: (lixId: string, request: Request) => Promise<Response>;
 	lixSummaries?: ReadonlyArray<LixSummary>;
+	/**
+	 * How a session opens its Lix. Defaults to the remote Lix server behind
+	 * lixFetch; tests pass an in-memory Lix to run the real engine.
+	 */
+	openLix?: (lixId: string) => Promise<Lix>;
 }
 
 interface LixSession {
@@ -78,6 +83,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		| ((lixId: string, request: Request) => Promise<Response>)
 		| undefined;
 	private readonly lixSummaries: ReadonlyArray<LixSummary> | undefined;
+	private readonly openLix: ((lixId: string) => Promise<Lix>) | undefined;
 	private readonly sessions = new Map<string, Promise<LixSession>>();
 	private readonly openingSpans = new Map<string, SpanContext>();
 	private closePromise: Promise<void> | undefined;
@@ -96,6 +102,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 		this.signal = options.signal;
 		this.lixFetch = options.lixFetch;
 		this.lixSummaries = options.lixSummaries;
+		this.openLix = options.openLix;
 	}
 
 	hasOpenRuntime(lixId: string): boolean {
@@ -508,13 +515,15 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 	}
 
 	private async openSession(lixId: string): Promise<LixSession> {
-		const lix = await openLix({
-			server: {
-				url: `https://mcp.lixray.invalid/lix/${lixId}`,
-				fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-					this.protocolFetch(lixId, input, init),
-			},
-		});
+		const lix = this.openLix
+			? await this.openLix(lixId)
+			: await openLix({
+					server: {
+						url: `https://mcp.lixray.invalid/lix/${lixId}`,
+						fetch: (input: RequestInfo | URL, init?: RequestInit) =>
+							this.protocolFetch(lixId, input, init),
+					},
+				});
 		return {
 			lix,
 			queue: Promise.resolve(),

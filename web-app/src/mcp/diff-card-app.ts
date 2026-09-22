@@ -61,8 +61,9 @@ export const DIFF_CARD_HTML = String.raw`<!doctype html>
 <style>
 /* The card's chrome — head, foot, the ground they sit on — belongs to the
    chat and follows the scheme that chat is in, so a closed card reads as one
-   more line of it. The host has the last word: it sets the scheme on this
-   document directly. The rendered file does not follow (see .panel). */
+   more line of it. The host has the last word: the theme it names at
+   initialize (and on a context change) is set on this document. The
+   rendered file does not follow (see .panel). */
 :root { color-scheme: light dark; }
 html, body { margin: 0; padding: 0; background: transparent; }
 body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
@@ -303,11 +304,25 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
     : (expanded ? OPEN : BAR);
   // A host that honours the notification resizes on it; one that measures the
   // frame instead reads this document's own height, and finds the card and
-  // nothing else — no strip of the host's background below it.
+  // nothing else — no strip of the host's background below it. ChatGPT kept
+  // its default frame height on a notification that named only the height,
+  // so it carries the width too, as the ext-apps SDK sends it, and ChatGPT's
+  // own intrinsic-height call is made where it exists.
   const reportSize = () => {
     const next = height();
     document.documentElement.style.height = next + 'px';
-    if (ready) notify('ui/notifications/size-changed', { height: next });
+    if (!ready) return;
+    notify('ui/notifications/size-changed', { width: Math.ceil(window.innerWidth), height: next });
+    try { window.openai?.notifyIntrinsicHeight?.(next); } catch {}
+  };
+  // The chat's scheme, as the host names it. Until it does, the document
+  // follows the system (:root above). A frame whose scheme differs from the
+  // one it is embedded in gets an opaque canvas from the browser — the dark
+  // block ChatGPT showed under a closed card — and hosts embed a view in the
+  // scheme they announce, so the document takes that one.
+  const applyTheme = context => {
+    const theme = context && context.theme;
+    if (theme === 'light' || theme === 'dark') document.documentElement.style.colorScheme = theme;
   };
   const size = new ResizeObserver(() => { fitFolder(); reportSize(); });
   size.observe(document.body);
@@ -514,6 +529,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
       if (event.origin !== 'null') hostOrigin = event.origin;
       ready = true;
       canOpenLinks = !!message.result.hostCapabilities?.openLinks;
+      applyTheme(message.result.hostContext);
       notify('ui/notifications/initialized', {});
       reportSize();
       return;
@@ -527,6 +543,7 @@ body { font: 13px/1.4 system-ui, sans-serif; color: var(--atelier-fg); }
       return;
     }
     if (message.method === 'ui/notifications/tool-result') render(message.params || {});
+    else if (message.method === 'ui/notifications/host-context-changed') applyTheme(message.params);
     else if (message.method === 'ui/notifications/tool-cancelled') {
       payload = null;
       card.hidden = true;

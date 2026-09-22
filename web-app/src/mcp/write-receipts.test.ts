@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { Lix } from "@lix-js/sdk";
 import { openMemoryWasmBinding } from "../../../vendor/lix/packages/js-sdk/dist/binding.node-wasm.js";
-import { fileWriteStatements } from "./file-tools.ts";
 
 void test("a write's receipt names a span, and the span says what changed", async () => {
 	const lix = new Lix(await openMemoryWasmBinding());
@@ -15,20 +14,14 @@ void test("a write's receipt names a span, and the span says what changed", asyn
 		);
 		const tx = await lix.beginTransaction();
 		activeTransaction = tx;
-		const statements = fileWriteStatements([
-			{ path: "/notes.md", content: "after" },
-			{ path: "/new.md", content: "" },
-		]);
-		for (const statement of statements) {
+		for (const [path, content] of [
+			["/notes.md", "after"],
+			["/new.md", ""],
+		])
 			await tx.execute(
-				statement.sql,
-				statement.params.map((param) => {
-					if (param.kind !== "text")
-						throw new Error("fixture expects text parameters");
-					return param.value;
-				}),
+				"INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+				[path, content],
 			);
-		}
 		activeTransaction = undefined;
 		const receipt = await tx.commit();
 		assert.ok(receipt.commit);

@@ -85,8 +85,7 @@ const isSqlTool = (name: string) =>
 	name === "query_sql" || name === "execute_sql";
 /** Tools whose card carries a guide, not one line. */
 const isGuidedTool = (name: string) =>
-	isSqlTool(name) ||
-	["list_files", "read_files", "write_files", "diff"].includes(name);
+	isSqlTool(name) || ["list_files", "read_files", "diff"].includes(name);
 
 function toolText(result: {
 	content?: Array<{ type: string; text?: string }>;
@@ -776,7 +775,6 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"get_entity_urls",
 				"list_files",
 				"read_files",
-				"write_files",
 				"diff",
 				"query_sql",
 				"execute_sql",
@@ -828,8 +826,18 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(queryTool.description ?? "", /not SQLite/);
 		assert.match(executeSqlTool.description ?? "", /UPDATE lix_file SET path/);
 		assert.match(executeSqlTool.description ?? "", /outcome is unknown/);
-		assert.match(executeSqlTool.description ?? "", /create_checkpoint/);
-		// The file recipe lives on write_files; the SQL cards point at it.
+		assert.match(executeSqlTool.description ?? "", /checkpoint: true/);
+		assert.match(executeSqlTool.description ?? "", /one write path/);
+		const executeInput = executeSqlTool.inputSchema as {
+			properties: Record<string, unknown>;
+		};
+		assert.ok(executeInput.properties.last_seen_commit_id);
+		assert.ok(executeInput.properties.checkpoint);
+		const executeOutput = executeSqlTool.outputSchema as {
+			properties: Record<string, unknown>;
+		};
+		assert.ok(executeOutput.properties.checkpoint_commit_id);
+		assert.ok(executeOutput.properties.warning);
 		const undoTool = tools.tools.find((tool) => tool.name === "undo")!;
 		assert.match(undoTool.description ?? "", /latest undoable/);
 		assert.match(undoTool.description ?? "", /SELECT commit_id FROM lix_undo/);
@@ -840,12 +848,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		const sqlGuide = await client.readResource({ uri: "lixray://docs/sql" });
 		assert.ok(sqlGuide.contents[0] && "text" in sqlGuide.contents[0]);
 		assert.equal(sqlGuide.contents[0].text, LIX_SQL_OPERATING_GUIDE);
-		const writeFilesTool = tools.tools.find(
-			(tool) => tool.name === "write_files",
+		assert.equal(
+			tools.tools.some((tool) => tool.name === "write_files"),
+			false,
 		);
-		assert.match(writeFilesTool?.description ?? "", /last_seen_commit_id/);
-		assert.match(writeFilesTool?.description ?? "", /lixcol_metadata/);
-		assert.match(executeSqlTool.description ?? "", /Prefer write_files/);
+		assert.match(executeSqlTool.description ?? "", /last_seen_commit_id/);
+		assert.match(executeSqlTool.description ?? "", /lixcol_metadata/);
 		assert.match(queryTool.description ?? "", /read_files and list_files/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 		// The listing stays bounded: the guide lives on two tools only, the
@@ -924,12 +932,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				?.destructiveHint,
 			true,
 		);
-		// The file tools are the only file-named surface; no typed CRUD beyond them.
+		// The file read tools are the only file-named surface; writes are SQL.
 		assert.deepEqual(
 			tools.tools
 				.map((tool) => tool.name)
 				.filter((name) => name.includes("file")),
-			["list_files", "read_files", "write_files"],
+			["list_files", "read_files"],
 		);
 		const opened = await client.callTool({
 			name: "open_lix",
@@ -1320,8 +1328,8 @@ void test("checkpoint copy encourages agent judgment at meaningful milestones", 
 	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /not required to save/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
-	// execute_sql states persistence and points at create_checkpoint in one
-	// sentence; the policy itself is not repeated there.
+	// execute_sql states persistence and what checkpoint: true is for; the
+	// policy itself is not repeated there.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /saving needs no checkpoint/);
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /Use judgment/);
@@ -2457,7 +2465,7 @@ void test("every MCP guidance surface tells clients to use returned canonical UR
 	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /canonical url/);
 });
 
-void test("file tools list, read, and write files with metadata and conflict checks", async () => {
+void test("file read tools list and read files; writes go through execute_sql", async () => {
 	const runtime = new FakeRuntime();
 	const service = new LixService(runtime, {
 		contextSigningKey: "file-tools",
@@ -2529,65 +2537,14 @@ void test("file tools list, read, and write files with metadata and conflict che
 		assert.deepEqual(contents.missing, ["/missing.md"]);
 		assert.match(toolText(read), /Read 1 file; missing: \/missing\.md/);
 
-		// A write: parent directories, one file per statement, metadata along.
-		const written = await client.callTool({
-			name: "write_files",
-			arguments: {
-				context,
-				last_seen_commit_id: "commit-1",
-				files: [
-					{
-						path: "/gtm/campaigns/icp.md",
-						content: "# ICP",
-						lixcol_metadata: { atelier_csv: { version: 1, columns: [] } },
-					},
-					{ path: "/skills/hello.md", lixcol_metadata: null },
-				],
-			},
-		});
-		assert.equal(written.isError, undefined, JSON.stringify(written));
-		const wrote = written.structuredContent as {
-			commit_id: string;
-			files: Array<{ id: string; path: string; url: string }>;
-		};
-		assert.deepEqual(
-			wrote.files.map((file) => file.path),
-			["/gtm/campaigns/icp.md", "/skills/hello.md"],
+		// There is no file write tool: execute_sql is the one write path.
+		await assert.rejects(
+			client.callTool({
+				name: "write_files",
+				arguments: { context, files: [{ path: "/a.md", content: "a" }] },
+			}),
 		);
-		assert.match(
-			wrote.files[0]!.url,
-			/^https:\/\/dev\.lixray\.com\/@acme\/company\/file\//,
-		);
-		assert.deepEqual(runtime.writes, [
-			"INSERT INTO lix_file (path, content, lixcol_metadata) VALUES ($1, CAST($2 AS BYTEA), $3) ON CONFLICT (path) DO UPDATE SET content = excluded.content, lixcol_metadata = excluded.lixcol_metadata RETURNING id, path",
-			"UPDATE lix_file SET lixcol_metadata = $2 WHERE path = $1 RETURNING id, path",
-		]);
-		assert.match(runtime.lastOriginKey ?? "", /^mcp:/);
-		assert.match(
-			toolText(written),
-			/Wrote gtm\/campaigns\/icp\.md · skills\/hello\.md/,
-		);
-		assert.equal(
-			written.content?.filter((block) => block.type === "resource_link").length,
-			2,
-		);
-		// Every client gets a normal receipt; only the optional metadata carries HTML.
-		assert.deepEqual(
-			written.content?.map((block) => block.type),
-			["text", "resource_link", "resource_link", "text"],
-		);
-		const card = written._meta?.[DIFF_CARD_META] as DiffCardPayload;
-		assert.equal(card.title, "1 file added");
-		assert.equal(card.folder, "/gtm/campaigns");
-		// The title said it; the tally would be saying it twice.
-		assert.equal(card.tally, "");
-		assert.equal(card.repository, "@acme/company");
-		assert.equal(card.files.length, 1);
-		assert.equal(card.files[0]!.status, "added");
-		assert.match(card.files[0]!.html ?? "", /<h1[^>]*>ICP<\/h1>/);
-		assert.equal(card.files[0]!.url, wrote.files[0]!.url);
-		assert.equal("_ui" in (written.structuredContent as object), false);
-		assert.doesNotMatch(JSON.stringify(written.content), /<h1/);
+
 		const resources = await client.listResources();
 		assert.ok(
 			resources.resources.some((resource) => resource.uri === DIFF_CARD_URI),
@@ -2596,9 +2553,8 @@ void test("file tools list, read, and write files with metadata and conflict che
 		assert.equal(resource.contents[0]?.mimeType, MCP_APP_HTML);
 		assert.ok(resource.contents[0] && "text" in resource.contents[0]);
 		assert.equal(resource.contents[0].text, DIFF_CARD_HTML);
-		assert.doesNotMatch(resource.contents[0].text, /ICP|campaigns/);
 		const tools = await client.listTools();
-		for (const name of ["write_files", "execute_sql", "diff"])
+		for (const name of ["execute_sql", "diff"])
 			assert.deepEqual(
 				tools.tools.find((tool) => tool.name === name)?._meta?.ui,
 				{ resourceUri: DIFF_CARD_URI },
@@ -2608,73 +2564,12 @@ void test("file tools list, read, and write files with metadata and conflict che
 			tools.tools.find((tool) => tool.name === "read_files")?._meta?.ui,
 			undefined,
 		);
-
-		// Metadata alone on a file that does not exist is refused before writing.
-		const orphan = await client.callTool({
-			name: "write_files",
-			arguments: {
-				context,
-				files: [{ path: "/nowhere.md", lixcol_metadata: { a: 1 } }],
-			},
-		});
-		assert.equal(orphan.isError, true);
-		assert.equal(toolErrorContent(orphan).error.code, "not_found");
-
-		// A conflicting file since last_seen_commit_id refuses the write and
-		// hands back the current contents; unrelated changes never block.
-		runtime.changedSinceLastSeen = ["/skills/hello.md"];
-		const conflict = await client.callTool({
-			name: "write_files",
-			arguments: {
-				context,
-				last_seen_commit_id: "commit-0",
-				files: [
-					{ path: "/skills/hello.md", content: "# Hello again" },
-					{ path: "/other.md", content: "x" },
-				],
-			},
-		});
-		assert.equal(conflict.isError, true);
-		const conflictError = toolErrorContent(conflict).error;
-		assert.equal(conflictError.code, "conflict");
-		assert.match(conflictError.message, /\/skills\/hello\.md/);
-		assert.deepEqual(conflictError.details, {
-			current_commit_id: "commit-1",
-			files: [
-				{
-					path: "/skills/hello.md",
-					content: "# Hello\n",
-					lixcol_metadata: null,
-				},
-			],
-		});
-		// Nothing was written.
-		assert.equal(runtime.writes.length, 2);
-		const unrelated = await client.callTool({
-			name: "write_files",
-			arguments: {
-				context,
-				last_seen_commit_id: "commit-0",
-				files: [{ path: "/other.md", content: "x" }],
-			},
-		});
-		assert.equal(unrelated.isError, undefined, JSON.stringify(unrelated));
-		const unknown = await client.callTool({
-			name: "write_files",
-			arguments: {
-				context,
-				last_seen_commit_id: "unknown-commit",
-				files: [{ path: "/other.md", content: "y" }],
-			},
-		});
-		assert.equal(unknown.isError, true);
-		assert.equal(toolErrorContent(unknown).error.code, "invalid_request");
 	} finally {
 		await client.close();
 	}
 });
 
-void test("a change query that fails leaves the write saved, with a warning", async () => {
+void test("a change query that fails leaves the batch saved, without a card", async () => {
 	const runtime = new FakeRuntime();
 	runtime.changesFailure = new Error("upstream is having a day");
 	const service = new LixService(runtime, {
@@ -2702,25 +2597,27 @@ void test("a change query that fails leaves the write saved, with a warning", as
 		});
 		const context = (opened.structuredContent as { context: string }).context;
 		const written = await client.callTool({
-			name: "write_files",
+			name: "execute_sql",
 			arguments: {
 				context,
-				files: [{ path: "/gtm/notes.md", content: "# Notes" }],
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) RETURNING id, path",
+						params: [
+							{ kind: "text", value: "/skills/hello.md" },
+							{ kind: "text", value: "# Notes" },
+						],
+					},
+				],
 			},
 		});
-		// The card is a courtesy; the write it describes already happened, and
-		// the agent is told not to try again.
+		// The card is a courtesy; the batch it describes already happened.
 		assert.equal(written.isError, undefined, JSON.stringify(written));
-		const result = written.structuredContent as {
-			files: Array<{ path: string }>;
-			warning?: string;
-		};
+		assert.equal(written._meta?.[DIFF_CARD_META], undefined);
 		assert.deepEqual(
-			result.files.map((file) => file.path),
-			["/gtm/notes.md"],
+			(written.structuredContent as { commit: unknown }).commit,
+			{ before: "commit-0", after: "commit-1" },
 		);
-		assert.match(result.warning ?? "", /preview unavailable/);
-		assert.match(result.warning ?? "", /Do not repeat the write/);
 		assert.equal(
 			(written.content ?? []).some((block) => block.type === "resource"),
 			false,

@@ -80,7 +80,7 @@ for (const version of ["v2", "v1"]) {
 	try {
 		await client.connect(transport);
 		const tools = await client.listTools();
-		const tool = tools.tools.find((t) => t.name === "write_files");
+		const tool = tools.tools.find((t) => t.name === "execute_sql");
 		const opened = await client.callTool({
 			name: "query_sql",
 			arguments: { lix_ref: "@opral/demo", sql: "SELECT 1 AS ready" },
@@ -88,10 +88,18 @@ for (const version of ["v2", "v1"]) {
 		assert.equal(opened.isError, void 0, JSON.stringify(opened));
 		const context = opened.structuredContent.context;
 		const written = await client.callTool({
-			name: "write_files",
+			name: "execute_sql",
 			arguments: {
 				context,
-				files: [{ path: "/mcp-ui-demo.md", content: markdown }],
+				statements: [
+					{
+						sql: "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
+						params: [
+							{ kind: "text", value: "/mcp-ui-demo.md" },
+							{ kind: "text", value: markdown },
+						],
+					},
+				],
 			},
 		});
 		await writeFile(
