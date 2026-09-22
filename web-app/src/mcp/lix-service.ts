@@ -12,6 +12,11 @@ import {
 	type FileWrite,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import {
+	destinationFromParams,
+	namespaceConflictMessage,
+	parseNamespaceConflict,
+} from "./sql-errors.ts";
 
 const LIX_UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -538,14 +543,69 @@ export class LixService {
 
 	async executeBatch(contextToken: string, request: ExecuteBatchRequest) {
 		const context = await this.readContext(contextToken);
-		return {
-			context: contextToken,
-			...(await this.client.executeBatch(
-				context.lixId,
-				context.branchId,
-				request,
-			)),
-		};
+		try {
+			return {
+				context: contextToken,
+				...(await this.client.executeBatch(
+					context.lixId,
+					context.branchId,
+					request,
+				)),
+			};
+		} catch (caught) {
+			throw await this.explainBatchError(context, request, caught);
+		}
+	}
+
+	/**
+	 * A namespace conflict names the parent directory by id, and the batch
+	 * that would have created it may just have been rolled back. Name the
+	 * destination path instead: the parent's path when it still exists, or
+	 * the statement's own parameter that ends in the entry's name.
+	 */
+	private async explainBatchError(
+		context: LixContext,
+		batch: ExecuteBatchRequest,
+		caught: unknown,
+	): Promise<unknown> {
+		if (!isLixError(caught)) return caught;
+		const conflict = parseNamespaceConflict(caught.message);
+		if (!conflict) return caught;
+		let parentPath: string | undefined =
+			conflict.parentId === "<root>" ? "" : undefined;
+		if (parentPath === undefined && ENTITY_UUID_PATTERN.test(conflict.parentId))
+			try {
+				const found = await this.client.execute(
+					context.lixId,
+					context.branchId,
+					{
+						sql: "SELECT path FROM lix_directory WHERE id = $1",
+						params: [{ kind: "text", value: conflict.parentId }],
+					},
+				);
+				const path = found.rows[0]?.[0];
+				if (path?.kind === "text") parentPath = path.value.replace(/\/$/, "");
+			} catch {
+				// The id stays unresolved; the parameters may still name it.
+			}
+		const index = (caught.details as { statementIndex?: unknown } | undefined)
+			?.statementIndex;
+		const statement =
+			typeof index === "number" ? batch.statements[index] : undefined;
+		const destination =
+			parentPath !== undefined
+				? `${parentPath}/${conflict.name}`
+				: destinationFromParams(statement?.params ?? [], conflict.name);
+		const explained = namespaceConflictMessage(conflict, destination);
+		return createLixError(
+			caught.code ?? "LIX_ERROR_UNIQUE",
+			explained.message,
+			{
+				hint: explained.hint,
+				details: caught.details,
+				status: caught.status,
+			},
+		);
 	}
 
 	async createBranch(contextToken: string, input: CreateBranchInput) {

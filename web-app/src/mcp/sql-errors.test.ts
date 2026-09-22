@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { sqlToolError } from "./sql-errors.ts";
+import {
+	BINARY_CONTENT_HINT,
+	NAMESPACE_CONFLICT_HINT,
+	SQL_TEXT_WRITE_RECIPE,
+	destinationFromParams,
+	namespaceConflictMessage,
+	parseNamespaceConflict,
+	sqlToolError,
+} from "./sql-errors.ts";
 
 const running = {
 	write: true,
@@ -70,4 +78,81 @@ void test("invalid statement indexes are not reported", () => {
 			undefined,
 		);
 	}
+});
+
+void test("text in the byte column gets the one binding it needs, in either phrasing", () => {
+	for (const message of [
+		"lix_file.content expects binary content",
+		"lix_file fast write column 'content' expects blob content",
+	]) {
+		const error = sqlToolError(
+			{
+				code: "LIX_TYPE_MISMATCH",
+				message,
+				hint: "Use CAST($1 AS BYTEA) with a text parameter for file contents.",
+				details: { statementIndex: 1 },
+			},
+			running,
+		);
+		assert.equal(error.statement_index, 1);
+		assert.equal(error.outcome, "not_committed");
+		assert.ok(error.hint!.startsWith(BINARY_CONTENT_HINT), error.hint);
+		assert.doesNotMatch(
+			error.hint!,
+			/CAST\(\$1 AS BYTEA\) with a text parameter/,
+		);
+		assert.equal(error.hint!.includes(SQL_TEXT_WRITE_RECIPE), false);
+	}
+});
+
+void test("a namespace conflict is read, and restated with the destination path", () => {
+	const conflict = parseNamespaceConflict(
+		'filesystem namespace conflict: parent "01a0c785-4ce2-7283-9c4a-6412c1287904" already contains file entry "b.md"',
+	);
+	assert.deepEqual(conflict, {
+		parentId: "01a0c785-4ce2-7283-9c4a-6412c1287904",
+		kind: "file",
+		name: "b.md",
+	});
+	assert.deepEqual(
+		parseNamespaceConflict(
+			'filesystem namespace conflict: parent "<root>" already contains directory entry "gtm"',
+		),
+		{ parentId: "<root>", kind: "directory", name: "gtm" },
+	);
+	assert.equal(
+		parseNamespaceConflict("unique constraint violation"),
+		undefined,
+	);
+	// SET and VALUES come first, so the new path is found before the old one.
+	assert.equal(
+		destinationFromParams(
+			[
+				{ kind: "text", value: "/gtm/archive/b.md" },
+				{ kind: "text", value: "/gtm/b.md" },
+			],
+			"b.md",
+		),
+		"/gtm/archive/b.md",
+	);
+	assert.equal(
+		destinationFromParams([{ kind: "text", value: "b.md" }], "b.md"),
+		undefined,
+	);
+	assert.deepEqual(namespaceConflictMessage(conflict!, "/gtm/archive/b.md"), {
+		message: "Destination /gtm/archive/b.md already exists (file).",
+		hint: NAMESPACE_CONFLICT_HINT,
+	});
+	assert.match(
+		namespaceConflictMessage(conflict!, undefined).message,
+		/named "b\.md"/,
+	);
+});
+
+void test("a guard conflict is a definite rollback", () => {
+	const error = sqlToolError(
+		{ code: "conflict", message: "changed since last_seen_commit_id" },
+		running,
+	);
+	assert.equal(error.outcome, "not_committed");
 });
