@@ -1,3 +1,4 @@
+import { sanitizeRepositoryErrorFrames } from "../lib/repository-error-stack.ts";
 import { repositoryOpenDiagnostics } from "../lib/repository-open-telemetry.ts";
 import {
 	isProductionTelemetryEnvironment,
@@ -26,7 +27,12 @@ export function parseRepositoryOpenReport(body: unknown) {
 		typeof input.release === "string" && /^[a-f0-9]{40}$/.test(input.release)
 			? input.release
 			: "unknown";
-	return { repositoryId: input.repositoryId, release, fields };
+	return {
+		repositoryId: input.repositoryId,
+		release,
+		fields,
+		frames: sanitizeRepositoryErrorFrames(input.frames),
+	};
 }
 
 export async function captureRepositoryOpenReport(
@@ -69,6 +75,9 @@ export async function captureRepositoryOpenReport(
 									"RepositoryOpenError",
 								value: "Repository opening failed",
 								mechanism: { handled: true, type: "generic" },
+								...(report.frames.length
+									? { stacktrace: { type: "raw", frames: report.frames } }
+									: {}),
 							},
 						],
 					},

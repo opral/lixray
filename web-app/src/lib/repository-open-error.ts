@@ -13,6 +13,10 @@ export function formatRepositoryOpenError(caught: unknown): string {
 		return `Repository migration failed (${code}): ${message}`;
 	}
 
+	if (code === "LIX_OWNER_VERSION_MISMATCH") {
+		return "Another tab is running a different Lix version. Save any unsaved edits, close all other lixray.com tabs and app windows, then retry. Your saved repository data remains in this browser.";
+	}
+
 	return message;
 }
 

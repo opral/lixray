@@ -1,3 +1,4 @@
+import { repositoryErrorFrames } from "./repository-error-stack.ts";
 export const REPOSITORY_OPEN_DIAGNOSTICS_PATH =
 	"/api/repository-open-diagnostics";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
@@ -88,6 +89,7 @@ export async function reportRepositoryOpenFailure(
 				repositoryId: context.repositoryId,
 				release: context.release,
 				diagnostic: repositoryOpenDiagnostics(error),
+				frames: repositoryErrorFrames(error),
 			}),
 			signal: AbortSignal.timeout(8_000),
 			keepalive: true,

@@ -37,6 +37,16 @@ void test("preserves unrelated repository opening errors", () => {
 	);
 });
 
+void test("tells the user how to recover from an outdated repository owner", () => {
+	assert.equal(
+		formatRepositoryOpenError({
+			code: "LIX_OWNER_VERSION_MISMATCH",
+			message: "Another tab is running a different Lix version.",
+		}),
+		"Another tab is running a different Lix version. Save any unsaved edits, close all other lixray.com tabs and app windows, then retry. Your saved repository data remains in this browser.",
+	);
+});
+
 void test("explains a terminal automatic migration failure", () => {
 	for (const code of [
 		"LIX_ERROR_MIGRATION_FAILED",

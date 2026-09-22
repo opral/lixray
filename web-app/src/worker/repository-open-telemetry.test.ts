@@ -21,6 +21,7 @@ void test("server independently sanitizes browser diagnostics", () => {
 		repositoryId: id,
 		release: "a".repeat(40),
 		fields: { lix_error_code: "LIX_ADMISSION_EPOCH", httpStatus: 426 },
+		frames: [],
 	});
 	assert.equal(parseRepositoryOpenReport({ repositoryId: "invalid" }), null);
 });
@@ -124,4 +125,41 @@ void test("anonymous reports are accepted only for public repositories", async (
 		}),
 	});
 	assert.equal(denied.status, 404);
+});
+
+void test("gateway keeps validated stack frames in PostHog and rejects arbitrary frame data", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {},
+		frames: [
+			{
+				filename: "/assets/app-Abc.js",
+				function: "open",
+				lineno: 12,
+				colno: 34,
+				vars: { secret: "private" },
+				context_line: "private code",
+			},
+			{ filename: "https://private.example/document", lineno: 1, colno: 1 },
+		],
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{ POSTHOG_PROJECT_TOKEN: "token", POSTHOG_ENVIRONMENT: "production" },
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}");
+		},
+	);
+	const props = payload.properties as {
+		$exception_list: Array<{ stacktrace: { type: string; frames: unknown[] } }>;
+	};
+	assert.equal(props.$exception_list[0]!.stacktrace.type, "raw");
+	assert.equal(props.$exception_list[0]!.stacktrace.frames.length, 1);
+	assert.doesNotMatch(
+		JSON.stringify(payload),
+		/private|secret|context_line|vars/,
+	);
 });
