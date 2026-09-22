@@ -15,6 +15,7 @@ export async function resolveLixServerImage({
 	loadImage = loadDockerImage,
 	inspectLoadedImage = inspectDockerImage,
 	inspectLocalImage = localImageMatches,
+	runCommand = run,
 }) {
 	if (mode !== "ci" && mode !== "local") {
 		throw new Error(`Unsupported Lix server resolution mode ${mode}.`);
@@ -132,8 +133,10 @@ export async function resolveLixServerImage({
 	);
 	if (mode === "local") {
 		const localTag = `lixray-lix-server-local:${sourceRevision}`;
-		run("docker", [
+		runCommand("docker", [
 			"build",
+			"--build-arg",
+			`LIX_SOURCE_REVISION=${sourceRevision}`,
 			"--file",
 			join(lixRoot, "packages", "server", "Dockerfile"),
 			"--tag",

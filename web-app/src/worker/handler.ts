@@ -1,3 +1,5 @@
+import { context, trace } from "@opentelemetry/api";
+import { failSpan, withSpan } from "../telemetry.ts";
 import { downloadPublishedFile } from "./published-file.ts";
 import { handlePublishedEntity, type EntityKind } from "./published-entity.ts";
 import { deleteHostedRepository } from "./repository-delete.ts";
@@ -31,7 +33,6 @@ import {
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
 import { LixService, type LixSummary } from "../mcp/lix-service.ts";
 import {
-	aiTraceContextForMcpRequest,
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
 	MCP_PATH,
@@ -45,11 +46,6 @@ import {
 	withMcpRequestId,
 	type McpToolCallObservation,
 } from "../mcp/server.ts";
-import {
-	createMcpTelemetrySession,
-	type McpTelemetrySession,
-	type McpRequestObservation,
-} from "./mcp-telemetry.ts";
 import {
 	createLixrMcpTelemetrySession,
 	analyzeSqlOperation,
@@ -151,7 +147,6 @@ interface HandleRequestOptions {
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
 	executionContext?: RequestExecutionContext;
-	createMcpTelemetry?: typeof createMcpTelemetrySession;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 	captureSignup?: typeof captureUserSignedUp;
 }
@@ -517,53 +512,19 @@ export async function handleRequest(
 
 	if (url.pathname === MCP_PATH) {
 		const requestId = requestIdForMcpRequest(request);
+		trace.getActiveSpan()?.setAttribute("request.id", requestId);
 		if (request.method === "OPTIONS") {
 			return withMcpRequestId(corsPreflight(), requestId);
 		}
 		const executionContext = options.executionContext ?? noopExecutionContext();
-		const startedAt = performance.now();
-		const incomingTrace = aiTraceContextForMcpRequest(request);
-		const traceContext = {
-			...incomingTrace,
-			traceId: incomingTrace.traceId ?? crypto.randomUUID(),
-		};
-		let telemetry: McpTelemetrySession | null = null;
-		let cleanupOwnsFlush = false;
-		let observed = false;
-		let stage: McpRequestObservation["stage"] = "authentication";
-		const initializeTelemetry = (
-			identity: Parameters<typeof createMcpTelemetrySession>[1],
-		): void => {
-			try {
-				telemetry = (options.createMcpTelemetry ?? createMcpTelemetrySession)(
-					env,
-					identity,
-				);
-			} catch {
-				// Telemetry must never change the result of an MCP request.
-			}
-		};
-		const onTransport = (observation: McpRequestObservation): void => {
-			if (observed) return;
-			observed = true;
-			try {
-				telemetry?.onTransport?.(observation);
-			} catch {
-				/* best effort */
-			}
-		};
+		let stage = "authentication";
 		const captureFailure = (statusCode: number, errorCode: string): void => {
-			// Only authenticated requests have a telemetry session. Auth challenges
-			// and retries must not create billable AI traces or anonymous people.
-			if (!telemetry) return;
-			onTransport({
-				requestId,
-				...traceContext,
-				durationMs: performance.now() - startedAt,
-				statusCode,
-				outcome: "error",
-				errorCode,
-				stage,
+			const span = trace.getActiveSpan();
+			if (span) failSpan(span, errorCode);
+			trace.getActiveSpan()?.setAttributes({
+				"http.response.status_code": statusCode,
+				"error.type": errorCode,
+				"mcp.failure.stage": stage,
 			});
 		};
 		const internalError = (): Response =>
@@ -585,17 +546,14 @@ export async function handleRequest(
 		try {
 			const authenticateMcp =
 				options.authenticateMcp ?? authenticateMcpWithSupabase;
-			const authResult = await authenticateMcp(request, env);
+			const authResult = await withSpan("mcp.authentication", () =>
+				authenticateMcp(request, env),
+			);
 			if (!authResult.ok) {
 				captureFailure(authResult.response.status, "MCP_AUTHENTICATION_FAILED");
 				return withMcpRequestId(authResult.response, requestId);
 			}
 			stage = "setup";
-			initializeTelemetry({
-				userId: authResult.auth.userId,
-				clientId: authResult.auth.clientId,
-				isDemo: authResult.auth.isDemo,
-			});
 			const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
 			// This positive cache is recreated for every MCP HTTP request.
 			const authorizedLixIds = new Set<string>();
@@ -608,7 +566,15 @@ export async function handleRequest(
 				authResult.auth,
 				async (lixId, auth) => {
 					if (authorizedLixIds.has(lixId)) return null;
-					const failure = await authorizeLix(lixId, auth, env);
+					const failure = await withSpan(
+						"mcp.repository.authorize",
+						async (span) => {
+							const failure = await authorizeLix(lixId, auth, env);
+							if (failure) failSpan(span, "authorization_denied");
+							return failure;
+						},
+						{ "lix.id": lixId },
+					);
 					if (failure === null) authorizedLixIds.add(lixId);
 					return failure;
 				},
@@ -704,12 +670,6 @@ export async function handleRequest(
 					}
 				}
 
-				try {
-					telemetry?.onToolCall(observation);
-				} catch {
-					/* best effort */
-				}
-
 				if (
 					authResult.auth.isDemo ||
 					observation.outcome !== "success" ||
@@ -742,8 +702,9 @@ export async function handleRequest(
 				: undefined;
 			let responseCleanupDeferred = false;
 			const cleanup = async (): Promise<void> => {
-				await Promise.allSettled(pendingConnectionRecords);
-				scheduleMcpTelemetryFlush(executionContext, telemetry);
+				await withSpan("mcp.connection_records", () =>
+					Promise.allSettled(pendingConnectionRecords),
+				);
 				try {
 					if (lixrTelemetry) {
 						if (importSession.fileWrites.size > 0) {
@@ -770,7 +731,7 @@ export async function handleRequest(
 					});
 				}
 				try {
-					await client.close();
+					await withSpan("mcp.cleanup", () => client.close());
 				} catch (error) {
 					console.warn("Failed to close MCP runtime client", {
 						requestId,
@@ -778,7 +739,6 @@ export async function handleRequest(
 					});
 				}
 			};
-			cleanupOwnsFlush = true;
 			try {
 				const service = new LixService(client, {
 					contextSigningKey: env.LIXRAY_CONTEXT_SIGNING_KEY,
@@ -792,8 +752,6 @@ export async function handleRequest(
 					await (options.mcpTransport ?? handleMcpTransport)(request, service, {
 						authMode: isDemoMode(env) ? "none" : "oauth",
 						requestId,
-						traceContext,
-						onTransport,
 						onToolCall,
 						posthogToken,
 						posthogHost: env.POSTHOG_HOST,
@@ -829,9 +787,6 @@ export async function handleRequest(
 					: "MCP_SETUP_FAILED",
 			);
 			return internalError();
-		} finally {
-			if (!cleanupOwnsFlush)
-				scheduleMcpTelemetryFlush(executionContext, telemetry);
 		}
 	}
 
@@ -1463,35 +1418,41 @@ function deferResponseCleanup(
 ): Response {
 	if (!response.body) return response;
 	const reader = response.body.getReader();
+	const operationContext = context.active();
 	let cleanedUp = false;
 	const finish = async (): Promise<void> => {
 		if (cleanedUp) return;
 		cleanedUp = true;
 		await cleanup();
 	};
-	const body = new ReadableStream<Uint8Array>({
-		async pull(controller) {
-			try {
-				const { done, value } = await reader.read();
-				if (done) {
-					await finish();
-					controller.close();
-					return;
-				}
-				if (value) controller.enqueue(value);
-			} catch (error) {
-				await finish();
-				controller.error(error);
-			}
+	const body = new ReadableStream<Uint8Array>(
+		{
+			pull: (controller) =>
+				context.with(operationContext, async () => {
+					try {
+						const { done, value } = await reader.read();
+						if (done) {
+							await finish();
+							controller.close();
+							return;
+						}
+						if (value) controller.enqueue(value);
+					} catch (error) {
+						await finish();
+						controller.error(error);
+					}
+				}),
+			cancel: (reason) =>
+				context.with(operationContext, async () => {
+					try {
+						await reader.cancel(reason);
+					} finally {
+						await finish();
+					}
+				}),
 		},
-		async cancel(reason) {
-			try {
-				await reader.cancel(reason);
-			} finally {
-				await finish();
-			}
-		},
-	});
+		{ highWaterMark: 0 },
+	);
 	return new Response(body, {
 		status: response.status,
 		statusText: response.statusText,
@@ -2542,7 +2503,7 @@ function corsPreflight(): Response {
 			"access-control-allow-origin": "*",
 			"access-control-allow-methods": "GET, POST, DELETE, OPTIONS",
 			"access-control-allow-headers":
-				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*, Traceparent, Tracestate, X-PostHog-AI-Trace-ID, X-PostHog-AI-Parent-ID, X-PostHog-AI-Session-ID",
+				"Authorization, Content-Type, MCP-Protocol-Version, Mcp-Method, Mcp-Name, Mcp-Param-*, Traceparent, Tracestate",
 			"access-control-max-age": "86400",
 		},
 	});
@@ -2695,21 +2656,6 @@ function noopExecutionContext(): RequestExecutionContext {
 		passThroughOnException: () => undefined,
 		props: {},
 	};
-}
-
-function scheduleMcpTelemetryFlush(
-	executionContext: RequestExecutionContext,
-	telemetry: McpTelemetrySession | null,
-): void {
-	if (!telemetry) return;
-	try {
-		const flush = telemetry.flush().catch((caught: unknown) => {
-			console.warn("Failed to flush MCP telemetry", caught);
-		});
-		executionContext.waitUntil(flush);
-	} catch (caught) {
-		console.warn("Failed to start MCP telemetry flush", caught);
-	}
 }
 
 function json(value: unknown, init?: ResponseInit): Response {
