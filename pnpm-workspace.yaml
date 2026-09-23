@@ -16,3 +16,5 @@ publicHoistPattern:
 
 patchedDependencies:
   '@glideapps/glide-data-grid@6.0.3': vendor/atelier/patches/@glideapps__glide-data-grid@6.0.3.patch
+  '@opral/zettel-html@1.1.0': vendor/atelier/patches/@opral__zettel-html@1.1.0.patch
+  '@opral/zettel-lexical@1.1.0': vendor/atelier/patches/@opral__zettel-lexical@1.1.0.patch

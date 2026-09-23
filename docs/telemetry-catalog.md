@@ -51,7 +51,7 @@ needed for joins and group analytics, but names and content are not.
 | `diff_resolved`           | Diff decision completes                       | `file_extension`, `outcome`                                                                             | web      |
 | `resource_published`      | Public read access succeeds                   | `resource_kind`                                                                                         | web      |
 | `resource_unpublished`    | Public read access removal succeeds           | `resource_kind`                                                                                         | web      |
-| `share_link_copied`       | Public link is copied                         | `share_mode`                                                                                            | web      |
+| `share_link_copied`       | Share link is copied                          | `share_mode` (`public`, or `members` for a private conversation)                                        | web      |
 | `auth_session_orphaned`   | Invalid local session is cleared              | stable validation and auth error fields                                                                 | web      |
 
 `user_signed_up` is server-validated against the authoritative auth user,
