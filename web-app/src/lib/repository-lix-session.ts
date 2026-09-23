@@ -5,6 +5,7 @@ import {
 	type LixOpenProgress,
 	type RemoteLixFetch,
 	type PartialReplicaLixServerOptions,
+	type LixTelemetryOptions,
 } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
 import {
@@ -14,6 +15,8 @@ import {
 } from "./repository-replica-replacement.ts";
 import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
+import { fetchLixWithTrace } from "../telemetry.ts";
+import { createLixTelemetryOptions } from "../browser-telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import {
 	repositoryBrowserReplicaId,
@@ -231,7 +234,15 @@ async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
 	const requestFailureReporting = { enabled: false };
-	const lix = await openOpfsSyncSession(options, requestFailureReporting);
+	const telemetry: LixTelemetryOptions = createLixTelemetryOptions(
+		options.repositoryId,
+		options.getAccessToken,
+	);
+	const lix = await openOpfsSyncSession(
+		options,
+		requestFailureReporting,
+		telemetry,
+	);
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
 
 	try {
@@ -306,6 +317,7 @@ async function openRepositoryLixSessionOnce(
 async function openOpfsSyncSession(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 	requestFailureReporting: { enabled: boolean },
+	telemetry: LixTelemetryOptions,
 ): Promise<Lix> {
 	options.signal?.throwIfAborted();
 	const fetcher = createTelemetryFetch(options.fetch ?? networkFetch, {
@@ -339,7 +351,7 @@ async function openOpfsSyncSession(
 		}),
 		mode: "partial_replica",
 	};
-	return openLix({ storage, server, onProgress });
+	return openLix({ storage, server, onProgress, telemetry });
 }
 
 async function repositoryRequestHeaders(
@@ -421,7 +433,12 @@ export function createTelemetryFetch(
 			signals.length > 0 ? { ...init, signal: AbortSignal.any(signals) } : init;
 		let response: Response;
 		try {
-			response = await fetcher(input, requestInit);
+			const request = new Request(input, requestInit);
+			response = await fetchLixWithTrace(
+				context.repositoryId,
+				request,
+				(_repositoryId, tracedRequest) => fetcher(tracedRequest),
+			);
 		} catch (error) {
 			if (
 				context.shouldCaptureRequestFailures?.() !== false &&
@@ -444,12 +461,21 @@ export function createTelemetryFetch(
 			context.refreshAccessToken &&
 			requestInit?.method !== "DELETE"
 		) {
+			await response.body?.cancel().catch(() => {});
 			try {
 				const token = await context.refreshAccessToken();
 				if (token) {
 					const headers = new Headers(requestInit?.headers);
 					headers.set("Authorization", `Bearer ${token}`);
-					response = await fetcher(input, { ...requestInit, headers });
+					const retryRequest = new Request(input, {
+						...requestInit,
+						headers,
+					});
+					response = await fetchLixWithTrace(
+						context.repositoryId,
+						retryRequest,
+						(_repositoryId, tracedRequest) => fetcher(tracedRequest),
+					);
 				}
 			} catch {
 				// Preserve the original auth response when the refresh itself fails.

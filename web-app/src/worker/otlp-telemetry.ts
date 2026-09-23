@@ -138,14 +138,16 @@ async function openedEvent(span: OtlpSpan) {
 export async function handleOtlpTelemetry(
 	request: Request,
 	env: OtlpTelemetryEnvironment,
-	dependencies: { fetch?: typeof fetch } = {},
+	dependencies: { fetch?: typeof fetch; authenticatedBrowser?: boolean } = {},
 ): Promise<Response> {
-	if (
-		!env.LIXRAY_INTERNAL_TOKEN ||
-		request.headers.get("authorization") !==
-			`Bearer ${env.LIXRAY_INTERNAL_TOKEN}`
-	) {
-		return new Response("Unauthorized", { status: 401 });
+	if (!dependencies.authenticatedBrowser) {
+		if (
+			!env.LIXRAY_INTERNAL_TOKEN ||
+			request.headers.get("authorization") !==
+				`Bearer ${env.LIXRAY_INTERNAL_TOKEN}`
+		) {
+			return new Response("Unauthorized", { status: 401 });
+		}
 	}
 	if (request.method !== "POST")
 		return new Response("Method not allowed", { status: 405 });

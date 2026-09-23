@@ -2,8 +2,11 @@ import { RouterProvider } from "@tanstack/react-router";
 import { StartClient } from "@tanstack/react-start/client";
 import { StrictMode, startTransition } from "react";
 import { createRoot, hydrateRoot } from "react-dom/client";
+import { installBrowserTelemetry } from "./browser-telemetry";
 import { isDemoModeEnabled } from "./lib/demo-client";
 import { getRouter } from "./router";
+
+installBrowserTelemetry();
 
 async function startClient() {
 	if (isDemoModeEnabled) {

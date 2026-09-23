@@ -248,6 +248,7 @@ const REMOTE_LIX_API_PATH =
 const PUBLISHED_LIX_DIRECTORY_PATH =
 	/^\/api\/published\/lix\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/directory$/;
 const PROD_DEV_AUTH_PATH = "/auth/email";
+const BROWSER_OTLP_PATH = "/api/telemetry/browser/otlp/v1/traces";
 const OPENAI_APPS_CHALLENGE_PATH = "/.well-known/openai-apps-challenge";
 const OPENAI_APPS_CHALLENGE_TOKEN =
 	"RBTbX7uPYZwmyPGnWXM2eMruvkdC6MlM3Xsh95AqROU";
@@ -358,6 +359,45 @@ export async function handleRequest(
 
 	if (url.pathname === "/api/telemetry/otlp/v1/traces") {
 		return handleOtlpTelemetry(request, env);
+	}
+
+	if (url.pathname === BROWSER_OTLP_PATH) {
+		if (request.method !== "POST") {
+			return new Response("Method not allowed\n", { status: 405 });
+		}
+		if (
+			!request.headers.has("authorization") &&
+			!request.headers.has("x-lixray-repository-id")
+		) {
+			return new Response(null, {
+				status: 204,
+				headers: { "content-type": "application/x-protobuf" },
+			});
+		}
+		const repositoryId = request.headers
+			.get("x-lixray-repository-id")
+			?.trim()
+			.toLowerCase();
+		if (!repositoryId || !UUID_PATTERN.test(repositoryId)) {
+			return new Response("A valid repository ID is required\n", {
+				status: 400,
+			});
+		}
+		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
+			request,
+			env,
+		);
+		if (!auth.ok) return auth.response;
+		const denied = await (options.authorizeLix ?? authorizeLixWithSupabase)(
+			repositoryId,
+			auth.auth,
+			env,
+		);
+		if (denied) return denied;
+		return handleOtlpTelemetry(request, env, {
+			fetch: options.fetch ?? fetch,
+			authenticatedBrowser: true,
+		});
 	}
 
 	if (request.method === "GET" && url.pathname === "/healthz") {
