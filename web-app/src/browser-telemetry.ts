@@ -20,7 +20,7 @@ const SERVICE_VERSION =
 
 type AccessTokenProvider = () => Promise<string | null>;
 
-let accessTokenProvider: AccessTokenProvider = async () => null;
+let accessTokenProvider: AccessTokenProvider = () => Promise.resolve(null);
 let repositoryIdProvider: () => string | null = () => null;
 let providerInstalled = false;
 const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(

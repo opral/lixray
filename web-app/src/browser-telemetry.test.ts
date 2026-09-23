@@ -41,7 +41,7 @@ function encodeRequest(name: string): Uint8Array {
 		.finish();
 }
 
-test("browser uploader stamps host resource identity and merges OTLP requests", () => {
+void test("browser uploader stamps host resource identity and merges OTLP requests", () => {
 	const first = stampLixResource(encodeRequest("SELECT"), "repo-one");
 	const second = stampLixResource(encodeRequest("UPDATE"), "repo-two");
 	const decoded = requestType.decode(mergeOtlpRequests([first, second]));
@@ -88,7 +88,7 @@ test("browser uploader stamps host resource identity and merges OTLP requests", 
 	);
 });
 
-test("Lix parent context follows the active browser W3C trace context", () => {
+void test("Lix parent context follows the active browser W3C trace context", () => {
 	propagation.setGlobalPropagator(new W3CTraceContextPropagator());
 	const activeSpan = trace.wrapSpanContext({
 		traceId: "0123456789abcdef0123456789abcdef",
@@ -102,7 +102,7 @@ test("Lix parent context follows the active browser W3C trace context", () => {
 	});
 });
 
-test("Lix uploader retains a failed batch and clears it only after delivery", async () => {
+void test("Lix uploader retains a failed batch and clears it only after delivery", async () => {
 	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
 	const originalFetch = globalThis.fetch;
 	const originalWarn = console.warn;
@@ -121,12 +121,12 @@ test("Lix uploader retains a failed batch and clears it only after delivery", as
 			"repo-one",
 			async () => "token",
 		);
-		const flush = telemetry.flush;
-		assert.ok(flush);
+		assert.equal(typeof telemetry.flush, "function");
+		const flush = async () => {
+			await telemetry.flush?.();
+		};
 		telemetry.onExport(encodeRequest("SELECT"));
-		await assert.rejects(async () => {
-			await flush();
-		}, /failed \(503\)/);
+		await assert.rejects(flush, /failed \(503\)/);
 		assert.equal(attempts, 1);
 		await flush();
 		assert.equal(attempts, 2);

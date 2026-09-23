@@ -65,7 +65,7 @@ void test("browser OTLP route authorizes the repository and forwards standard OT
 			},
 			fetch: async (input, init) => {
 				calls.push({
-					url: new URL(input.toString()),
+					url: new URL(input instanceof Request ? input.url : input.toString()),
 					authorization: new Headers(init?.headers).get("authorization"),
 				});
 				return new Response(new Uint8Array(), { status: 200 });
