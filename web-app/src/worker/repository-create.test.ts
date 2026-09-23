@@ -247,6 +247,68 @@ void test("empty creation uses the same protocol path and selected namespace", a
 	]);
 });
 
+void test("initial creation uses the conditional registration RPC", async () => {
+	const req = request();
+	req.headers.set("x-lixray-initial-repository", "1");
+	const calls: string[] = [];
+	const response = await createHostedRepository(
+		req,
+		env,
+		account,
+		async (input, init) => {
+			const upstream = new Request(input, init);
+			const pathname = new URL(upstream.url).pathname;
+			calls.push(pathname);
+			if (pathname.endsWith("/authorize_hosted_lix_creation")) {
+				return Response.json(namespaceId);
+			}
+			if (pathname === "/lix/v1") {
+				assert.equal(upstream.headers.get("x-lixray-initial-repository"), null);
+				return Response.json({ id }, { status: 201 });
+			}
+			return new Response(null, { status: 204 });
+		},
+	);
+	assert.equal(response.status, 201);
+	assert.deepEqual(calls, [
+		"/rest/v1/rpc/authorize_hosted_lix_creation",
+		"/lix/v1",
+		"/rest/v1/rpc/register_initial_hosted_lix",
+	]);
+});
+
+void test("a losing initial creation removes its unregistered hosted storage", async () => {
+	const req = request();
+	req.headers.set("x-lixray-initial-repository", "1");
+	const calls: string[] = [];
+	const response = await createHostedRepository(
+		req,
+		env,
+		account,
+		async (input, init) => {
+			const upstream = new Request(input, init);
+			const pathname = new URL(upstream.url).pathname;
+			calls.push(`${upstream.method} ${pathname}`);
+			if (pathname.endsWith("/authorize_hosted_lix_creation")) {
+				return Response.json(namespaceId);
+			}
+			if (pathname === "/lix/v1") return Response.json({ id }, { status: 201 });
+			if (pathname.endsWith("/register_initial_hosted_lix")) {
+				return Response.json({ code: "23505" }, { status: 409 });
+			}
+			assert.equal(upstream.headers.get("authorization"), "Bearer internal");
+			return new Response(null, { status: 204 });
+		},
+	);
+	assert.equal(response.status, 409);
+	assert.deepEqual(calls, [
+		"POST /rest/v1/rpc/authorize_hosted_lix_creation",
+		"POST /lix/v1",
+		"POST /rest/v1/rpc/register_initial_hosted_lix",
+		`DELETE /lix/v1/${id}`,
+	]);
+});
+
 void test("a taken name is rejected before uploading", async () => {
 	let calls = 0;
 	const response = await createHostedRepository(

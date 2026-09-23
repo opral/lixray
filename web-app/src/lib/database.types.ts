@@ -567,6 +567,16 @@ export type Database = {
 					namespace_name: string;
 				}[];
 			};
+			initial_personal_repository_state: {
+				Args: never;
+				Returns: {
+					namespace_id: string;
+					namespace_handle: string;
+					repository_id: string | null;
+					repository_slug: string | null;
+					needs_creation: boolean;
+				}[];
+			};
 			create_lix_share_token: {
 				Args: { p_lix_id: string };
 				Returns: {

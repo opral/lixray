@@ -4,6 +4,10 @@ import { peekAuthReturnTo, takeAuthReturnTo } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
 import {
+	browserSignupDestination,
+	ensureInitialPersonalRepository,
+} from "~/lib/initial-personal-repository";
+import {
 	markRepositoryShareJoined,
 	peekRepositoryShareCapability,
 	stageRepositoryShareJoinError,
@@ -16,6 +20,30 @@ interface CallbackSearch {
 	code?: string;
 	error?: string;
 	error_description?: string;
+}
+
+const exchangeCode = (code: string) =>
+	getBrowserSupabaseClient().auth.exchangeCodeForSession(code);
+let pendingExchange: {
+	code: string;
+	promise: ReturnType<typeof exchangeCode>;
+} | null = null;
+
+function exchangeCodeOnce(code: string) {
+	if (pendingExchange?.code === code) return pendingExchange.promise;
+	const promise = exchangeCode(code);
+	pendingExchange = { code, promise };
+	return promise;
+}
+
+async function finishBrowserSignup(accessToken: string) {
+	const result = await ensureInitialPersonalRepository(
+		getBrowserSupabaseClient(),
+		accessToken,
+		window.location.origin,
+	);
+	const returnTo = takeAuthReturnTo();
+	window.location.replace(browserSignupDestination(returnTo, result));
 }
 
 export const Route = createFileRoute("/auth/callback")({
@@ -33,6 +61,23 @@ export const Route = createFileRoute("/auth/callback")({
 function AuthCallbackPage() {
 	const search = Route.useSearch();
 	const [error, setError] = useState<string | null>(null);
+	const [setupRetryable, setSetupRetryable] = useState(false);
+	const retrySetup = async () => {
+		setError(null);
+		try {
+			const { data, error: sessionError } =
+				await getBrowserSupabaseClient().auth.getSession();
+			if (sessionError) throw sessionError;
+			if (!data.session) throw new Error("Sign in again to finish setup.");
+			await finishBrowserSignup(data.session.access_token);
+		} catch (caught) {
+			setError(
+				caught instanceof Error
+					? caught.message
+					: "Unable to set up your repository.",
+			);
+		}
+	};
 
 	useEffect(() => {
 		if (search.error) {
@@ -45,8 +90,7 @@ function AuthCallbackPage() {
 		}
 
 		let disposed = false;
-		void getBrowserSupabaseClient()
-			.auth.exchangeCodeForSession(search.code)
+		void exchangeCodeOnce(search.code)
 			.then(async ({ data: sessionData, error: exchangeError }) => {
 				if (disposed) return;
 				if (exchangeError) {
@@ -87,7 +131,29 @@ function AuthCallbackPage() {
 					}
 				}
 				if (disposed) return;
-				window.location.replace(takeAuthReturnTo());
+				if (!sessionData.session) {
+					setError("Sign in again to finish setup.");
+					return;
+				}
+				try {
+					if (
+						new URL(peekAuthReturnTo(), window.location.origin).pathname ===
+						"/oauth/consent"
+					) {
+						window.location.replace(takeAuthReturnTo());
+						return;
+					}
+					await finishBrowserSignup(sessionData.session.access_token);
+				} catch (setupError) {
+					if (!disposed) {
+						setSetupRetryable(true);
+						setError(
+							setupError instanceof Error
+								? setupError.message
+								: "Unable to set up your repository.",
+						);
+					}
+				}
 			})
 			.catch((caught: unknown) => {
 				if (!disposed) {
@@ -122,11 +188,17 @@ function AuthCallbackPage() {
 						variant="featured"
 						className="h-auto w-full rounded-[9px] py-2.75 text-[13.5px] font-bold"
 					>
-						<a
-							href={`/sign-in?returnTo=${encodeURIComponent(peekAuthReturnTo())}`}
-						>
-							Try again
-						</a>
+						{setupRetryable ? (
+							<button type="button" onClick={() => void retrySetup()}>
+								Retry setup
+							</button>
+						) : (
+							<a
+								href={`/sign-in?returnTo=${encodeURIComponent(peekAuthReturnTo())}`}
+							>
+								Try again
+							</a>
+						)}
 					</Button>
 					<a
 						href="/"

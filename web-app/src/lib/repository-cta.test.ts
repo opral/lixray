@@ -5,15 +5,14 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { REPOSITORY_HOME_PATH, repositoryCtaHref } from "./repository-cta.ts";
 
-void test("marketing CTA always opens home, not the last repository", () => {
-	assert.equal(REPOSITORY_HOME_PATH, "/home");
-	assert.equal(repositoryCtaHref(true), "/home");
-	assert.equal(repositoryCtaHref(false), "/sign-in?returnTo=%2Fhome");
+void test("marketing CTA opens the repository entry route", () => {
+	assert.equal(REPOSITORY_HOME_PATH, "/open");
+	assert.equal(repositoryCtaHref(true), "/open");
+	assert.equal(repositoryCtaHref(false), "/sign-in?returnTo=%2Fopen");
 	assert.doesNotMatch(repositoryCtaHref(true), /\/@/);
-	assert.doesNotMatch(repositoryCtaHref(false), /\/open/);
 });
 
-void test("landing and header CTAs use the home destination", () => {
+void test("landing and header CTAs use the repository entry route", () => {
 	const src = join(dirname(fileURLToPath(import.meta.url)), "..");
 	const header = readFileSync(join(src, "components/site-header.tsx"), "utf8");
 	assert.match(header, /repositoryCtaHref\(Boolean\(user\)\)/);

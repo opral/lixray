@@ -1,9 +1,9 @@
-/** Repository home — the marketing "open the app" destination. */
-export const REPOSITORY_HOME_PATH = "/home";
+/** Opens the selected repository, provisioning one for a new browser account. */
+export const REPOSITORY_HOME_PATH = "/open";
 
 /**
  * Auth-aware href for landing / header / marketing CTAs.
- * Always opens home. Last-repository restore lives on `/open`, not here.
+ * Opens the repository selected by the browser, or a new user's first repo.
  */
 export function repositoryCtaHref(signedIn: boolean): string {
 	if (signedIn) return REPOSITORY_HOME_PATH;
