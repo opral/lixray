@@ -1,4 +1,4 @@
-import { createLix } from "@lix-js/sdk";
+import type { createLix } from "@lix-js/sdk";
 import type { LixraySupabaseClient } from "./supabase";
 
 const INITIAL_REPOSITORY_NAME = "repo";
@@ -26,7 +26,7 @@ export async function ensureInitialPersonalRepository(
 	client: LixraySupabaseClient,
 	accessToken: string,
 	origin: string,
-	create: typeof createLix = createLix,
+	create?: typeof createLix,
 ): Promise<InitialRepositoryResult> {
 	const bootstrap = await client.rpc("bootstrap_personal_namespace");
 	if (bootstrap.error) throw bootstrap.error;
@@ -51,7 +51,8 @@ export async function ensureInitialPersonalRepository(
 		return { path: pathFor(initial), created: false };
 
 	try {
-		await create({
+		const createHosted = create ?? (await import("@lix-js/sdk")).createLix;
+		await createHosted({
 			server: {
 				url: origin,
 				headers: {

@@ -5,11 +5,11 @@ export const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const nameTakenMessage = (name: string) =>
 	`A repository named “${name}” already exists in this namespace. Choose another name.`;
-const failure = (status: number, message: string) =>
-	Response.json(
-		{ error: { code: "LIX_HOST_CREATION_FAILED", message } },
-		{ status },
-	);
+const failure = (
+	status: number,
+	message: string,
+	code = "LIX_HOST_CREATION_FAILED",
+) => Response.json({ error: { code, message } }, { status });
 
 /** The reference server owns snapshot validation and durable, account-scoped retries. */
 export async function createHostedRepository(
@@ -127,8 +127,50 @@ export async function createHostedRepository(
 		);
 		await registration.body?.cancel();
 		// A name claimed between the check and registration loses the race.
-		if (registration.status === 409)
+		if (registration.status === 409) {
+			if (initialRepository) {
+				// Storage was uploaded before conditional registration. No receipt
+				// exists for this ID, so retire the losing, unregistered host.
+				try {
+					const cleanup = await fetcher(
+						new Request(new URL(`/lix/v1/${id}`, service), {
+							method: "DELETE",
+							headers: lixServiceRequestHeaders(
+								new Headers({
+									"x-lixray-idempotency-principal": account.userId,
+								}),
+								env.LIXRAY_INTERNAL_TOKEN,
+							),
+						}),
+					);
+					await cleanup.body?.cancel();
+					if (cleanup.status !== 204 && cleanup.status !== 404) {
+						console.error("Unregistered initial repository cleanup failed", {
+							repositoryId: id,
+							status: cleanup.status,
+						});
+						return failure(
+							503,
+							"Unused repository storage could not be cleaned up.",
+							"LIX_HOST_CLEANUP_FAILED",
+						);
+					}
+				} catch {
+					console.error(
+						"Unregistered initial repository cleanup request failed",
+						{
+							repositoryId: id,
+						},
+					);
+					return failure(
+						503,
+						"Unused repository storage could not be cleaned up.",
+						"LIX_HOST_CLEANUP_FAILED",
+					);
+				}
+			}
 			return failure(409, nameTakenMessage(name));
+		}
 		if (!registration.ok)
 			return failure(
 				503,

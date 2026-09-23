@@ -1,6 +1,6 @@
--- Existing accounts have already passed onboarding, including accounts whose
--- last personal repository was intentionally deleted. Only future accounts
--- receive a personal repository on their first browser sign-in.
+-- Existing personal namespaces have already passed onboarding, including
+-- accounts whose last repository was intentionally deleted. Older accounts
+-- without a personal namespace can still complete browser onboarding.
 alter table public.accounts
   add column initial_repository_provisioned boolean not null default false;
 update public.accounts set initial_repository_provisioned = true
