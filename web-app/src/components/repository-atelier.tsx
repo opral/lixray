@@ -1057,6 +1057,11 @@ export function RepositoryAtelier({
 			return;
 		}
 		const openingBranchId = branchIdRef.current ?? null;
+		const openingFileId =
+			routeChildRef.current.kind === "file"
+				? parseEntityUrlSplat(routeChildRef.current.splat)?.id
+				: undefined;
+		if (openingFileId) fileOpenTrace.ensureRepositoryAttempt(openingFileId);
 		void fileOpenTrace.run(() =>
 			openRepositoryLixSession({
 				namespace,

@@ -107,6 +107,11 @@ export function createBrowserFileOpenTraceController(
 			if (!active && completedFileId === fileId) return;
 			start(fileId);
 		},
+		/** A retry is a new open even when the route and file ID are unchanged. */
+		ensureRepositoryAttempt(fileId: string): void {
+			if (active?.fileId === fileId) return;
+			start(fileId);
+		},
 		/** Atelier also opens files without a fresh URL route. */
 		documentAttempted(filePath: string, supported: boolean): void {
 			// Route opens are identified by file ID. Restoration of a different tab
