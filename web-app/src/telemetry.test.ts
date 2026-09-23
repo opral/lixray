@@ -255,6 +255,80 @@ void test("repository shell observations join an active file open only", async (
 	]);
 });
 
+void test("repository and document transactions join the active file-open root", async () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	const observedParents: Array<string | undefined> = [];
+	const lix = {
+		beginTransaction: async () => ({
+			execute: async () => {
+				observedParents.push(
+					trace.getSpan(context.active())?.spanContext().spanId,
+				);
+				return { rows: [] };
+			},
+			rollback: async () => undefined,
+		}),
+	} as unknown as Lix;
+	const repositoryLix = controller.scopeRepositoryLix(lix);
+	controller.ensureRoute("file-id");
+	const shellTransaction = await repositoryLix.beginTransaction();
+	await Promise.resolve();
+	await shellTransaction.execute("SELECT 1");
+	const documentLix = controller.scopeLix(
+		"/posts.csv",
+		"file-id",
+		repositoryLix,
+	);
+	const documentTransaction = await documentLix.beginTransaction();
+	await Promise.resolve();
+	await documentTransaction.execute("SELECT 2");
+	controller.cancel();
+	await shellTransaction.execute("SELECT 3");
+	const [root] = exporter.getFinishedSpans();
+	assert.deepEqual(observedParents, [
+		root?.spanContext().spanId,
+		root?.spanContext().spanId,
+		undefined,
+	]);
+});
+
+void test("an old document cannot join a newer file's root through the repository proxy", async () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	const observedParents: Array<string | undefined> = [];
+	const lix = {
+		execute: async () => {
+			observedParents.push(
+				trace.getSpan(context.active())?.spanContext().spanId,
+			);
+			return { rows: [] };
+		},
+	} as unknown as Lix;
+	const repositoryLix = controller.scopeRepositoryLix(lix);
+	controller.ensureRoute("file-a");
+	const oldDocumentLix = controller.scopeLix("/a.csv", "file-a", repositoryLix);
+	await oldDocumentLix.execute("SELECT 1");
+	controller.ensureRoute("file-b");
+	await oldDocumentLix.execute("SELECT 2");
+	await repositoryLix.execute("SELECT 3");
+	controller.cancel();
+	const [fileA, fileB] = exporter.getFinishedSpans();
+	assert.deepEqual(observedParents, [
+		fileA?.spanContext().spanId,
+		undefined,
+		fileB?.spanContext().spanId,
+	]);
+});
+
 void test("a stalled repository shell observation does not delay a rendered file", async () => {
 	exporter.reset();
 	const controller = createBrowserFileOpenTraceController(

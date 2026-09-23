@@ -6,8 +6,7 @@ import {
 	type AtelierExtensionView,
 } from "@opral/atelier";
 import { Folder, Home, Settings, Users } from "lucide-react";
-import { StrictMode, useMemo } from "react";
-import type { Lix } from "@lix-js/sdk";
+import { StrictMode } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView } from "./directory-view";
@@ -150,7 +149,6 @@ function RepositoryDirectoryExtension({
 	teamApi,
 	hasAgentConnected,
 	visibility,
-	scopeRepositoryLix,
 }: {
 	atelier: AtelierExtensionRuntime;
 	view: AtelierExtensionView;
@@ -160,19 +158,14 @@ function RepositoryDirectoryExtension({
 	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
 	visibility: "private" | "public";
-	scopeRepositoryLix: (lix: Lix) => Lix;
 }) {
 	// The folder a new file of each type goes in is the repository's answer,
 	// not a surface's: home reads and writes the one the Files view keeps.
 	const { folders: defaultFolders, setFolder } = useDefaultFolders(atelier);
-	const directoryLix = useMemo(
-		() => scopeRepositoryLix(atelier.lix),
-		[atelier.lix, scopeRepositoryLix],
-	);
 	return (
 		<StrictMode>
 			<DirectoryView
-				lix={directoryLix}
+				lix={atelier.lix}
 				diffSession={atelier.diff?.session ?? null}
 				onOpenHistory={() => openHistoryFromView(atelier)}
 				{...(atelier.diff
@@ -236,7 +229,6 @@ const createLixrayHomeExtension = (
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
 	visibility: "private" | "public",
-	scopeRepositoryLix: (lix: Lix) => Lix,
 ): AtelierExtensionRegistration => ({
 	id: LIXRAY_HOME_EXTENSION_ID,
 	name: "Home",
@@ -254,14 +246,12 @@ const createLixrayHomeExtension = (
 			teamApi={teamApi}
 			hasAgentConnected={hasAgentConnected}
 			visibility={visibility}
-			scopeRepositoryLix={scopeRepositoryLix}
 		/>
 	),
 });
 
 const createLixrayDirExtension = (
 	connection: LixRepositoryConnection,
-	scopeRepositoryLix: (lix: Lix) => Lix,
 ): AtelierExtensionRegistration => ({
 	id: LIXRAY_DIR_EXTENSION_ID,
 	name: "Folder",
@@ -277,7 +267,6 @@ const createLixrayDirExtension = (
 			dirPath={dirPathFromViewState}
 			isHome={false}
 			connection={connection}
-			scopeRepositoryLix={scopeRepositoryLix}
 			teamApi={null}
 			hasAgentConnected={null}
 			visibility="private"
@@ -314,16 +303,9 @@ export const createLixrayRepositoryExtensions = (
 	teamApi: RepositoryTeamApi | null,
 	settingsApi: RepositorySettingsApi | null,
 	visibility: "private" | "public",
-	scopeRepositoryLix: (lix: Lix) => Lix,
 ): readonly AtelierExtensionRegistration[] => [
-	createLixrayHomeExtension(
-		connection,
-		hasAgentConnected,
-		teamApi,
-		visibility,
-		scopeRepositoryLix,
-	),
-	createLixrayDirExtension(connection, scopeRepositoryLix),
+	createLixrayHomeExtension(connection, hasAgentConnected, teamApi, visibility),
+	createLixrayDirExtension(connection),
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
 ];
