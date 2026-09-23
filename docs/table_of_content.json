@@ -4,6 +4,7 @@
 		{ "path": "mcp.md", "label": "MCP" }
 	],
 	"Guides": [
+		{ "path": "getting-started.md", "label": "Get started" },
 		{ "path": "internal-apps.md", "label": "Build an internal app" },
 		{ "path": "access-tokens.md", "label": "Create an access token" }
 	]

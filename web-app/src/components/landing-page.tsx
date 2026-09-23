@@ -1,5 +1,7 @@
 import { Link } from "@tanstack/react-router";
+import { Table2 } from "lucide-react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
+import { WhyRepositoryIllustration } from "~/components/why-repository-illustration";
 
 const primaryButton =
 	"inline-flex items-center justify-center rounded-[10px] bg-[image:var(--atelier-accent-gradient)] px-[22px] py-3 text-base font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105";
@@ -21,11 +23,13 @@ export function LandingPage() {
 						className="m-0 text-[clamp(2.25rem,5.5vw,2.875rem)] leading-[1.12] font-bold tracking-[-.03em] text-balance"
 						id="landing-title"
 					>
-						Version control, made simple.
+						All your work.
+						<span className="block">In one repository.</span>
 					</h1>
 					<p className="m-0 text-lg leading-[1.6] text-fg-muted text-pretty">
-						A repository for any file type. Every change is tracked and
-						reversible. Shared with your team and your agents.
+						Files and application data, like customer and order tables, share
+						one version history. Agents and services can propose changes for
+						checks and review.
 					</p>
 					<div className="mt-0.5 flex flex-wrap items-center gap-3">
 						<a className={primaryButton} href={repositoryTo}>
@@ -62,12 +66,55 @@ export function LandingPage() {
 						</div>
 						<div className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-5 px-5 pt-2 pb-3">
 							<span className={repoColumnHeading}>Name</span>
-							<span className={repoColumnHeading}>Last change</span>
-							{repoFiles.map((file) => (
-								<RepoFileRow key={file.name} {...file} />
+							<span className={repoColumnHeading}>Author</span>
+							{repoItems.map((item) => (
+								<RepoItemRow key={item.name} {...item} />
 							))}
 						</div>
 					</div>
+				</section>
+
+				<section
+					className="flex flex-col gap-[18px]"
+					aria-labelledby="why-title"
+				>
+					<h2
+						className="m-0 text-2xl font-bold tracking-[-.02em]"
+						id="why-title"
+					>
+						Why a repository?
+					</h2>
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
+						Putting open-format files and application data in one repository
+						lets tools and services interoperate. Adding version control on top
+						leads to an automation layer with built-in reviews.
+					</p>
+					<p className="m-0 text-base leading-[1.65] text-fg-muted">
+						Building{" "}
+						<a
+							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
+							href="https://inlang.com"
+							target="_blank"
+							rel="noreferrer"
+						>
+							inlang
+						</a>{" "}
+						showed us a better way to deliver a product: plug into the
+						customer’s repository, work on their data, and use their CI/CD and
+						pull requests for automation and review. But Git cannot store
+						application data as tables in the repository. That became our main
+						limitation and led us to build{" "}
+						<a
+							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
+							href="https://lix.dev"
+							target="_blank"
+							rel="noreferrer"
+						>
+							Lix
+						</a>
+						{"."}
+					</p>
+					<WhyRepositoryIllustration />
 				</section>
 
 				<section
@@ -78,26 +125,24 @@ export function LandingPage() {
 						className="m-0 text-2xl font-bold tracking-[-.02em]"
 						id="comparison-title"
 					>
-						Comparison
+						How it compares
 					</h2>
 					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<Link
+						<a
 							className="text-fg-muted underline decoration-fg-muted/30 underline-offset-2 hover:text-link hover:decoration-link/40"
-							to="/lp/lixray-vs-github"
+							href="https://inlang.com/blog/update-on-inlang-v2"
 						>
-							<b>GitHub</b> is too complicated for non-developers. Branch,
-							commit, pull request is designed for software engineers, and
-							non-code files are secondary.
-						</Link>
+							<b>GitHub</b> has version control, but application data lives
+							outside the repository.
+						</a>
 					</p>
 					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Google Drive</b> lacks version control. Per-file history, no
-						state across files, so anything with dependencies between files,
-						like code, doesn't work.
+						<b>Notion</b> uses proprietary pages, not a filesystem. Uploaded
+						code, Excel, Word, and media files cannot be edited in place.
 					</p>
 					<p className="m-0 text-base leading-[1.65] text-fg-muted">
-						<b>Notion</b> is not file-based. It can't store code and lacks the
-						interoperability of files.
+						<b>Google Drive</b> stores files, but has no database tables for
+						application data or version control across files.
 					</p>
 				</section>
 			</main>
@@ -142,68 +187,86 @@ export function LandingPage() {
 const repoColumnHeading =
 	"pt-2 pb-1.5 text-[11.5px] font-semibold tracking-[.03em] text-fg-faint uppercase";
 
-type RepoFile = {
+type RepoItem = {
 	name: string;
-	icon: string;
+	icon?: string;
+	rows?: string;
 	author: string;
 	/** Agent brand mark shown before the author; people have none. */
 	authorIcon?: string;
-	when: string;
 };
 
-const repoFiles: RepoFile[] = [
-	{ name: "brand", icon: "icon-folder", author: "Anna", when: "Mar 3" },
-	{ name: "handbook.md", icon: "icon-sq-md", author: "Anna", when: "1h ago" },
-	{
-		name: "leads.csv",
-		icon: "icon-sq-csv",
-		author: "Claude",
-		authorIcon: "claude-spark",
-		when: "4 min ago",
-	},
+const repoItems: RepoItem[] = [
+	{ name: "brand", icon: "icon-folder", author: "Anna" },
+	{ name: "handbook.md", icon: "icon-sq-md", author: "Anna" },
 	{
 		name: "crm-sync.py",
 		icon: "icon-sq-py",
 		author: "Claude",
 		authorIcon: "claude-spark",
-		when: "2h ago",
 	},
 	{
 		name: "launch-deck.pdf",
 		icon: "icon-sq-pdf",
 		author: "Tom",
-		when: "yesterday",
 	},
 	{
 		name: "launch-video.mp4",
 		icon: "icon-sq-mp4",
 		author: "ChatGPT",
 		authorIcon: "brand-openai",
-		when: "Mon",
 	},
-	{ name: "logo.png", icon: "icon-sq-png", author: "Anna", when: "Mar 3" },
+	{
+		name: "orders",
+		rows: "12,400 rows",
+		author: "Claude",
+		authorIcon: "claude-spark",
+	},
+	{
+		name: "customers",
+		rows: "3,180 rows",
+		author: "Anna",
+	},
 ];
 
-function RepoFileRow({ name, icon, author, authorIcon, when }: RepoFile) {
+function RepoItemRow({ name, icon, rows, author, authorIcon }: RepoItem) {
 	return (
 		<>
-			<span className="inline-flex min-w-0 items-center gap-2.5 border-t border-fg/6 py-2 font-medium">
-				<img
-					className="size-[18px] shrink-0"
-					src={`/landing/${icon}.svg`}
-					alt=""
-				/>
+			<span
+				className="inline-flex min-w-0 items-center gap-2.5 border-t border-fg/6 py-2 font-medium"
+				aria-label={rows ? `${name}, table with ${rows}` : undefined}
+			>
+				{icon ? (
+					<img
+						className="size-[18px] shrink-0"
+						src={`/landing/${icon}.svg`}
+						alt=""
+					/>
+				) : (
+					<Table2
+						className="size-[18px] shrink-0 text-fg-subtle"
+						strokeWidth={1.5}
+						aria-hidden="true"
+					/>
+				)}
 				<span className="truncate">{name}</span>
+				{rows ? (
+					<span className="ml-auto hidden shrink-0 text-xs font-normal text-fg-subtle min-[480px]:inline">
+						{rows}
+					</span>
+				) : null}
 			</span>
 			<span className="inline-flex items-center gap-[7px] border-t border-fg/6 py-2 whitespace-nowrap text-fg-muted">
 				{authorIcon ? (
 					<img
-						className="size-[13px] object-contain"
+						className="size-[13px] shrink-0 object-contain"
 						src={`/landing/${authorIcon}.svg`}
 						alt=""
 					/>
-				) : null}
-				{author} · {when}
+				) : (
+					<span className="size-[13px] shrink-0" aria-hidden="true" />
+				)}
+				{author}
 			</span>
 		</>
 	);

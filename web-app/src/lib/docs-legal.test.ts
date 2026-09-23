@@ -66,7 +66,13 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 	assert.equal(toc.Legal, undefined);
 	assert.deepEqual(
 		Object.values(toc).flatMap((items) => items.map((item) => item.path)),
-		["what-is-lixray.md", "mcp.md", "internal-apps.md", "access-tokens.md"],
+		[
+			"what-is-lixray.md",
+			"mcp.md",
+			"getting-started.md",
+			"internal-apps.md",
+			"access-tokens.md",
+		],
 	);
 
 	assert.match(

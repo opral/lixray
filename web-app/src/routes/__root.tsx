@@ -15,9 +15,9 @@ import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
 import pwaIcons from "../pwa-icons.json";
 import appCss from "../styles.css?url";
 
-const title = "LixRay — Version control, made simple";
+const title = "LixRay — All your work. In one repository.";
 const description =
-	"A repository for any file type. Every change is tracked and reversible. Shared with your team and your agents.";
+	"Files and application data share one version history. Agents and services can propose changes for checks and review.";
 // Absolute URL: link-preview crawlers do not resolve relative image paths.
 const ogImage = "https://lixray.com/og.png";
 
