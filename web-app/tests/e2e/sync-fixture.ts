@@ -17,6 +17,7 @@ import {
 	isRetainedBodyUpload,
 	isRetryableMergeConflict,
 } from "./retained-body-recovery";
+import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
 
 import {
 	installSyncDiagnostics,
@@ -640,6 +641,11 @@ export async function createSyncFixture({
 			}
 		};
 		const observePage = (page: Page, label: string) => {
+			// Chromium can report a failed resource to the console after the
+			// context has come back online. Keep the originating requests until
+			// their console messages arrive instead of sampling the current phase.
+			const offlineConsoleRequests =
+				createOfflineConsoleRequestTracker<Request>();
 			const pageColdReads: string[] = [];
 			coldReads.set(page, pageColdReads);
 			const pagePendingColdReads = new Set<Request>();
@@ -655,7 +661,10 @@ export async function createSyncFixture({
 			const pageBlobLanePayloadSizes: number[] = [];
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
-				if (intentionallyOffline) offlineRequests.add(request);
+				if (intentionallyOffline) {
+					offlineRequests.add(request);
+					offlineConsoleRequests.started(request);
+				}
 				if (
 					(request.method() === "GET" &&
 						/\/sync\/(history|blob|chunk)(?:\?|$)/.test(request.url())) ||
@@ -698,6 +707,7 @@ export async function createSyncFixture({
 			});
 			page.on("requestfinished", (request) => {
 				pendingBlobLaneRequests.delete(request);
+				offlineConsoleRequests.finished(request);
 			});
 			page.on("pageerror", (error) => {
 				runtimeFailures.push(`${label} pageerror: ${error.message}`);
@@ -710,8 +720,9 @@ export async function createSyncFixture({
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 409/i.test(message.text());
 				const expectedOfflineNoise =
-					intentionallyOffline &&
-					/ERR_INTERNET_DISCONNECTED/.test(message.text());
+					/ERR_INTERNET_DISCONNECTED/.test(message.text()) &&
+					(offlineConsoleRequests.consume(message.location().url) ||
+						intentionallyOffline);
 				if (
 					message.type() === "error" &&
 					!expectedCasNoise &&
@@ -723,6 +734,8 @@ export async function createSyncFixture({
 			page.on("requestfailed", (request) => {
 				pendingBlobLaneRequests.delete(request);
 				const errorText = request.failure()?.errorText ?? "unknown";
+				if (!/ERR_INTERNET_DISCONNECTED/.test(errorText))
+					offlineConsoleRequests.finished(request);
 				if (
 					(intentionallyOffline || offlineRequests.has(request)) &&
 					/ERR_INTERNET_DISCONNECTED/.test(errorText)
