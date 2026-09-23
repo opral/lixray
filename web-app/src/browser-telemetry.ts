@@ -7,6 +7,7 @@ import { resourceFromAttributes } from "@opentelemetry/resources";
 import { BatchSpanProcessor } from "@opentelemetry/sdk-trace-base";
 import { WebTracerProvider } from "@opentelemetry/sdk-trace-web";
 import type { LixTelemetryOptions } from "@lix-js/sdk";
+import { isDemoModeEnabled } from "./lib/demo-client.ts";
 import schema from "./worker/otlp-traces.schema.json" with { type: "json" };
 
 const OTLP_PATH = "/api/telemetry/browser/otlp/v1/traces";
@@ -29,7 +30,8 @@ const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(
 
 /** Install the browser SDK before rendering so async UI and repository work share context. */
 export function installBrowserTelemetry(): void {
-	if (providerInstalled || typeof window === "undefined") return;
+	if (providerInstalled || isDemoModeEnabled || typeof window === "undefined")
+		return;
 	providerInstalled = true;
 	const exporter = new OTLPTraceExporter({
 		url: new URL(OTLP_PATH, window.location.origin).toString(),
@@ -69,6 +71,17 @@ export function createLixTelemetryOptions(
 	repositoryId: string,
 	getAccessToken: AccessTokenProvider,
 ): LixTelemetryOptions {
+	// Demo sessions use a synthetic identity that cannot authenticate with the
+	// telemetry gateway. Match the server-side PostHog policy and drop demo spans.
+	if (isDemoModeEnabled) {
+		return {
+			flush: () => Promise.resolve(),
+			onExport() {},
+			parentContext() {
+				return undefined;
+			},
+		};
+	}
 	accessTokenProvider = getAccessToken;
 	repositoryIdProvider = () => repositoryId;
 	const pending: Uint8Array[] = [];
