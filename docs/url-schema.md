@@ -150,8 +150,8 @@ repository-wide grant.
 token-only route; readable browser URLs add the current path. The MCP returns both `url`
 (token-only, for storage) and `display_url` (readable, for users). Preserve `?branch=` when
 selecting a non-default branch, and exclude invite capabilities and unrelated view state from
-canonical metadata. A branchless browser URL opens the active branch from the fresh
-repository session, retained as that session's default.
+canonical metadata. A branchless browser URL follows the repository's current default
+branch from the fresh session; a URL with `?branch=` stays pinned to that branch ID.
 
 **Migration.** This is a hard cut. Existing path-based file and directory URLs are not
 aliases. There are no compatibility redirects. Generated links always use UUID tokens.
