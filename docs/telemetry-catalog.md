@@ -77,7 +77,7 @@ transition before it is used for billing or exact-once automation.
 | MCP analytics             | `$mcp_initialize`, `$mcp_tools_list`, `$mcp_tool_call`                                                           | Official `@posthog/mcp` events; do not recreate                  |
 | MCP native spans          | HTTP server root, `mcp.tool`, authorization, response and cleanup phases                                          | Native OTLP performance trace; no custom MCP AI event clocks     |
 | Repository-open span      | `$ai_span` with `$ai_span_name=lix.repository.opened`                                                            | Only repository-open north-star clock                            |
-| Lix native spans          | `lix.repository.opened`, `lix.protocol.request`, `lix.sql.query`, `lix.sql.batch`, `lix.sql.coherent_read_batch` | Vendor-neutral OTLP pipeline; do not duplicate as product events |
+| Lix native spans          | Repository and protocol lifecycle spans; SQL spans named from `db.query.summary` (for example, `SELECT` or `BATCH SELECT`) | Vendor-neutral OTLP pipeline; identify SQL statements by database attributes, not span name |
 | PostHog-derived/system    | `$ai_trace_summary`, `$recording_observed` and other configured `$*` events                                      | Platform-owned; not application emitters                         |
 
 ## Legacy event migration
