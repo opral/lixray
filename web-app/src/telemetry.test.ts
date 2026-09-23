@@ -219,6 +219,66 @@ void test("file-open root covers a document's first live observation", async () 
 	assert.equal(root.attributes["lixray.file.open.outcome"], "loaded");
 });
 
+void test("repository shell observations join an active file open only", async () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	const observedParents: Array<string | undefined> = [];
+	const lix = {
+		observe: () => ({
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+			next: async () => {
+				observedParents.push(
+					trace.getSpan(context.active())?.spanContext().spanId,
+				);
+				return { done: true as const, value: undefined };
+			},
+		}),
+	} as unknown as Lix;
+	const shellLix = controller.scopeRepositoryLix(lix);
+	await shellLix.observe("SELECT 1").next();
+	controller.ensureRoute("file-id");
+	await shellLix.observe("SELECT 2").next();
+	controller.cancel();
+	await shellLix.observe("SELECT 3").next();
+	const [root] = exporter.getFinishedSpans();
+	assert.equal(root?.name, "lixray.file.open");
+	assert.deepEqual(observedParents, [
+		undefined,
+		root.spanContext().spanId,
+		undefined,
+	]);
+});
+
+void test("a stalled repository shell observation does not delay a rendered file", async () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	const lix = {
+		observe: () => ({
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+			next: () => new Promise<IteratorResult<never>>(() => {}),
+		}),
+	} as unknown as Lix;
+	controller.ensureRoute("file-id");
+	controller.resolved("file-id", "/posts.csv");
+	void controller.scopeRepositoryLix(lix).observe("SELECT 1").next();
+	controller.documentLoaded("/posts.csv", "file-id");
+	await new Promise((resolve) => setTimeout(resolve, 550));
+	const [root] = exporter.getFinishedSpans();
+	assert.equal(root?.attributes["lixray.file.open.outcome"], "loaded");
+});
+
 void test("restored document observation joins the route root before ID lookup finishes", async () => {
 	exporter.reset();
 	const controller = createBrowserFileOpenTraceController(

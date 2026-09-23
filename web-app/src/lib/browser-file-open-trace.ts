@@ -101,6 +101,80 @@ export function createBrowserFileOpenTraceController(
 			finish(scope, "loaded");
 	};
 
+	const scopeLix = (
+		filePath: string | undefined,
+		fileId: string | null | undefined,
+		lix: Lix,
+		trackInitialReads: boolean,
+	): Lix => {
+		const run = <T>(operation: () => T, track = false): T => {
+			const scope =
+				fileId === null
+					? active
+					: active?.fileId === fileId
+						? active
+						: undefined;
+			if (scope && filePath && scope.filePath === undefined)
+				scope.filePath = filePath;
+			const result = scope
+				? context.with(scope.context, operation)
+				: operation();
+			if (
+				scope &&
+				trackInitialReads &&
+				track &&
+				result &&
+				typeof (result as unknown as PromiseLike<unknown>).then === "function"
+			) {
+				scope.pendingInitialReads++;
+				void Promise.resolve(result).then(
+					() => {
+						scope.pendingInitialReads--;
+						maybeFinishLoaded(scope);
+					},
+					() => {
+						scope.pendingInitialReads--;
+						maybeFinishLoaded(scope);
+					},
+				);
+			}
+			return result;
+		};
+		return new Proxy(lix, {
+			get(target, key) {
+				const value = Reflect.get(target, key, target) as unknown;
+				if (typeof value !== "function") return value;
+				if (key === "observe") {
+					return (...args: unknown[]) => {
+						let firstNext = true;
+						const iterable = run(() =>
+							callMethod(value, target, args),
+						) as object;
+						return new Proxy(iterable, {
+							get(source, iteratorKey, iteratorProxy: object) {
+								if (iteratorKey === Symbol.asyncIterator)
+									return () => iteratorProxy;
+								const method = Reflect.get(source, iteratorKey) as unknown;
+								return typeof method === "function"
+									? (...methodArgs: unknown[]) => {
+											const track = iteratorKey === "next" && firstNext;
+											if (track) firstNext = false;
+											return run(
+												() => callMethod(method, source, methodArgs),
+												track,
+											);
+										}
+									: method;
+							},
+						});
+					};
+				}
+				return (...args: unknown[]) =>
+					run(() => callMethod(value, target, args), true);
+			},
+		}) as Lix;
+	};
+
 	return {
 		/** Called by the route before repository opening or file lookup begins. */
 		ensureRoute(fileId: string): void {
@@ -180,67 +254,13 @@ export function createBrowserFileOpenTraceController(
 		run<T>(operation: () => T): T {
 			return active ? context.with(active.context, operation) : operation();
 		},
-		/** Scoped handle for document loaders and React effects, never the shell. */
+		/** Scoped handle for one document's loaders and React effects. */
 		scopeLix(filePath: string, fileId: string | undefined, lix: Lix): Lix {
-			const run = <T>(operation: () => T, track = false): T => {
-				const scope = active?.fileId === fileId ? active : undefined;
-				if (scope && scope.filePath === undefined) scope.filePath = filePath;
-				const result = scope
-					? context.with(scope.context, operation)
-					: operation();
-				if (
-					scope &&
-					track &&
-					result &&
-					typeof (result as unknown as PromiseLike<unknown>).then === "function"
-				) {
-					scope.pendingInitialReads++;
-					void Promise.resolve(result).then(
-						() => {
-							scope.pendingInitialReads--;
-							maybeFinishLoaded(scope);
-						},
-						() => {
-							scope.pendingInitialReads--;
-							maybeFinishLoaded(scope);
-						},
-					);
-				}
-				return result;
-			};
-			return new Proxy(lix, {
-				get(target, key) {
-					const value = Reflect.get(target, key, target) as unknown;
-					if (typeof value !== "function") return value;
-					if (key === "observe") {
-						return (...args: unknown[]) => {
-							let firstNext = true;
-							const iterable = run(() =>
-								callMethod(value, target, args),
-							) as object;
-							return new Proxy(iterable, {
-								get(source, iteratorKey, iteratorProxy: object) {
-									if (iteratorKey === Symbol.asyncIterator)
-										return () => iteratorProxy;
-									const method = Reflect.get(source, iteratorKey) as unknown;
-									return typeof method === "function"
-										? (...methodArgs: unknown[]) => {
-												const track = iteratorKey === "next" && firstNext;
-												if (track) firstNext = false;
-												return run(
-													() => callMethod(method, source, methodArgs),
-													track,
-												);
-											}
-										: method;
-								},
-							});
-						};
-					}
-					return (...args: unknown[]) =>
-						run(() => callMethod(value, target, args), true);
-				},
-			}) as Lix;
+			return scopeLix(filePath, fileId, lix, true);
+		},
+		/** Shell reads share the root but do not gate document readiness. */
+		scopeRepositoryLix(lix: Lix): Lix {
+			return scopeLix(undefined, null, lix, false);
 		},
 	};
 }
