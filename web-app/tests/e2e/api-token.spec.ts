@@ -127,7 +127,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 				)) as typeof import("@lix-js/sdk");
 				const connection = {
 					url: `${window.location.origin}/lix/${lixId}`,
-					headers: async () => ({ Authorization: `Bearer ${token}` }),
+					headers: { Authorization: `Bearer ${token}` },
 				};
 				const remote = await openLix({
 					server: connection,
