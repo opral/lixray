@@ -104,7 +104,7 @@ export function WhyRepositoryIllustration() {
 							<path
 								d="M80 14 C96 14 96 36 112 36 H144 C160 36 160 14 176 14"
 								fill="none"
-								stroke="#ea580c"
+								stroke="var(--atelier-link)"
 								strokeWidth="1.8"
 							/>
 							{[20, 50, 80, 212].map((x) => (
@@ -118,8 +118,8 @@ export function WhyRepositoryIllustration() {
 									strokeWidth="1.8"
 								/>
 							))}
-							<circle cx="128" cy="36" r="4.5" fill="#ea580c" />
-							<circle cx="176" cy="14" r="7" fill="#2f8f57" />
+							<circle cx="128" cy="36" r="4.5" fill="var(--atelier-link)" />
+							<circle cx="176" cy="14" r="7" fill="var(--atelier-success)" />
 							<path
 								d="M172.8 14 l2.3 2.3 l4.2 -4.6"
 								fill="none"
@@ -132,7 +132,7 @@ export function WhyRepositoryIllustration() {
 								x="128"
 								y="54"
 								fontSize="10"
-								fill="#57534e"
+								fill="var(--atelier-fg-muted)"
 								textAnchor="middle"
 							>
 								Proposed change
@@ -141,7 +141,7 @@ export function WhyRepositoryIllustration() {
 								x="176"
 								y="2"
 								fontSize="10"
-								fill="#2f8f57"
+								fill="var(--atelier-success)"
 								textAnchor="middle"
 							>
 								Reviewed
