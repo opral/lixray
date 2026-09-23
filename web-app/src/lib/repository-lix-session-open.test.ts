@@ -5,7 +5,10 @@ interface MockOpenOptions {
 	onProgress?: (progress: { phase: "migrating"; toFormat: number }) => void;
 	storage?: { options: { name: string } };
 	server: { mode: string; headers: () => Promise<Record<string, string>> };
+	telemetry?: { parentContext?: () => { traceparent: string } | undefined };
 }
+let activeTelemetryParent: { traceparent: string } | undefined;
+let observedOpeningParent: { traceparent: string } | undefined;
 const opens: MockOpenOptions[] = [];
 const routedNames: string[] = [];
 let replacementName: string | undefined;
@@ -28,6 +31,7 @@ mock.module("@lix-js/sdk", {
 	namedExports: {
 		openLix: async (options: MockOpenOptions) => {
 			opens.push(options);
+			observedOpeningParent = options.telemetry?.parentContext?.();
 			if (emitMigration)
 				options.onProgress?.({ phase: "migrating", toFormat: 81 });
 			const failure = failures.shift();
@@ -76,6 +80,15 @@ mock.module("@lix-js/sdk", {
 		networkFetch: globalThis.fetch.bind(globalThis),
 	},
 });
+mock.module("../browser-telemetry.ts", {
+	namedExports: {
+		lixTelemetryParentContext: () => activeTelemetryParent,
+		createLixTelemetryOptions: () => ({
+			onExport() {},
+			parentContext: () => activeTelemetryParent,
+		}),
+	},
+});
 mock.module("@lix-js/storage-opfs", {
 	namedExports: {
 		OpfsStorage: class {
@@ -117,6 +130,8 @@ mock.module("./repository-replica-replacement.ts", {
 const { openRepositoryLixSession } =
 	await import("./repository-lix-session.ts");
 beforeEach(() => {
+	activeTelemetryParent = undefined;
+	observedOpeningParent = undefined;
 	replacementName = undefined;
 	replacements = 0;
 	opens.length = 0;
@@ -136,6 +151,7 @@ beforeEach(() => {
 	createCalls = 0;
 	currentHandle = { closeCalls: 0 };
 });
+
 let sequence = 0;
 function options() {
 	return {
@@ -147,6 +163,23 @@ function options() {
 		getAccessToken: async () => "token",
 	};
 }
+
+await test("startup retains its parent across replica identity await, then releases it", async () => {
+	const parent = {
+		traceparent: "00-11111111111111111111111111111111-1111111111111111-01",
+	};
+	activeTelemetryParent = parent;
+	const opening = openRepositoryLixSession(options());
+	const unrelatedParent = {
+		traceparent: "00-22222222222222222222222222222222-2222222222222222-01",
+	};
+	activeTelemetryParent = unrelatedParent;
+	const session = await opening;
+	assert.deepEqual(observedOpeningParent, parent);
+	assert.deepEqual(opens[0]?.telemetry?.parentContext?.(), unrelatedParent);
+	activeTelemetryParent = undefined;
+	await session.close();
+});
 
 await test("browser opening explicitly selects partial replica and persistent per-user OPFS", async () => {
 	const input = options();

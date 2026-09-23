@@ -16,7 +16,10 @@ import {
 import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
 import { fetchLixWithTrace } from "../telemetry.ts";
-import { createLixTelemetryOptions } from "../browser-telemetry.ts";
+import {
+	createLixTelemetryOptions,
+	lixTelemetryParentContext,
+} from "../browser-telemetry.ts";
 import { acquireManagedRepositoryResource } from "./repository-session-manager.ts";
 import {
 	repositoryBrowserReplicaId,
@@ -83,7 +86,11 @@ export function openRepositoryRemoteLix(
 }
 
 type ResolvedOpenRepositoryLixSessionOptions =
-	OpenRepositoryLixSessionOptions & { replicaId: string; storageName?: string };
+	OpenRepositoryLixSessionOptions & {
+		replicaId: string;
+		storageName?: string;
+		openingTelemetryParent?: ReturnType<typeof lixTelemetryParentContext>;
+	};
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
 const MIGRATION_ERROR_CODE = "LIX_ERROR_MIGRATING";
@@ -115,6 +122,9 @@ export interface RepositoryMigrationState {
 export async function openRepositoryLixSession(
 	options: OpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
+	// Native async/await and Web Locks can resume outside the browser's active
+	// OpenTelemetry context. Carry the initiating parent through startup itself.
+	const openingTelemetryParent = lixTelemetryParentContext();
 	const sessionKey = repositorySessionKey(options);
 	const unsubscribe = options.onMigration
 		? subscribeToMigrationProgress(sessionKey, options.onMigration)
@@ -131,6 +141,7 @@ export async function openRepositoryLixSession(
 					return await openRepositoryLixSessionWithRetry({
 						...options,
 						replicaId,
+						openingTelemetryParent,
 						signal,
 					});
 				} finally {
@@ -234,15 +245,23 @@ async function openRepositoryLixSessionOnce(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 ): Promise<RepositoryLixSession> {
 	const requestFailureReporting = { enabled: false };
-	const telemetry: LixTelemetryOptions = createLixTelemetryOptions(
+	const browserTelemetry = createLixTelemetryOptions(
 		options.repositoryId,
 		options.getAccessToken,
 	);
+	let openingParent = options.openingTelemetryParent;
+	const telemetry: LixTelemetryOptions = {
+		...browserTelemetry,
+		parentContext: () => openingParent ?? browserTelemetry.parentContext?.(),
+	};
 	const lix = await openOpfsSyncSession(
 		options,
 		requestFailureReporting,
 		telemetry,
-	);
+	).catch((error: unknown) => {
+		openingParent = undefined;
+		throw error;
+	});
 	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
 
 	try {
@@ -311,6 +330,9 @@ async function openRepositoryLixSessionOnce(
 	} catch (error) {
 		await lix.close().catch(() => undefined);
 		throw error;
+	} finally {
+		// Background sync and later file operations must use their own parent.
+		openingParent = undefined;
 	}
 }
 
