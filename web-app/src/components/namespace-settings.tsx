@@ -54,12 +54,53 @@ interface NamespaceMember {
 export function NamespaceSettings({ handle }: { handle: string }) {
 	const { client, isLoaded: authLoaded, user } = useAuth();
 	const repositoryState = useRepository();
+	const [checkedHandle, setCheckedHandle] = useState<string | null>(null);
 	const organization =
 		repositoryState.organizations.find(
 			(candidate) => candidate.handle.toLowerCase() === handle.toLowerCase(),
 		) ?? demoProfileOrganization(handle);
 
-	if (!authLoaded || !repositoryState.isLoaded) {
+	useEffect(() => {
+		if (!client || !authLoaded || !repositoryState.isLoaded || organization)
+			return;
+		let disposed = false;
+		void (async () => {
+			try {
+				const { data, error } = await client.rpc(
+					"resolve_public_profile_by_handle",
+					{ p_handle: handle },
+				);
+				if (disposed || error || !data?.[0]) return;
+				const current = repositoryState.organizations.find(
+					(candidate) => candidate.id === data[0].namespace_id,
+				);
+				if (!current || current.handle === handle) return;
+				const url = new URL(window.location.href);
+				url.pathname = `/settings/@${current.handle}`;
+				window.location.replace(url.href);
+			} catch {
+				// The unavailable state below still handles a failed alias lookup.
+			} finally {
+				if (!disposed) setCheckedHandle(handle);
+			}
+		})();
+		return () => {
+			disposed = true;
+		};
+	}, [
+		authLoaded,
+		client,
+		handle,
+		organization,
+		repositoryState.isLoaded,
+		repositoryState.organizations,
+	]);
+
+	if (
+		!authLoaded ||
+		!repositoryState.isLoaded ||
+		(!organization && client && checkedHandle !== handle)
+	) {
 		return (
 			<SettingsShell>
 				<p className="text-fg-subtle">Loading settings…</p>
@@ -116,6 +157,9 @@ export function NamespaceSettings({ handle }: { handle: string }) {
 			</div>
 
 			<ProfilePanel organization={organization} />
+			{organization.isPersonal && organization.role === "owner" && client ? (
+				<UsernamePanel organization={organization} />
+			) : null}
 			{organization.isPersonal &&
 			organization.role === "owner" &&
 			organization.id !== DEMO_PROFILE_NAMESPACE_ID &&
@@ -497,6 +541,98 @@ function ProfileField({
 
 const profileInputClass =
 	"h-9 min-w-0 rounded-lg border border-border bg-panel px-[11px] text-[13px] font-normal text-fg outline-none placeholder:text-fg-faint focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 disabled:opacity-60";
+
+function UsernamePanel({ organization }: { organization: Organization }) {
+	const { client } = useAuth();
+	const [username, setUsername] = useState(organization.handle);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const normalized = username.trim().toLowerCase();
+	const valid =
+		normalized.length >= 3 &&
+		normalized.length <= 39 &&
+		/^[a-z0-9](?:-?[a-z0-9])*$/.test(normalized);
+
+	useEffect(() => {
+		setUsername(organization.handle);
+		setError(null);
+	}, [organization.handle]);
+
+	const submit = async (event: FormEvent) => {
+		event.preventDefault();
+		if (!client || !valid || normalized === organization.handle) return;
+		setBusy(true);
+		setError(null);
+		const { data, error: renameError } = await client.rpc(
+			"rename_personal_handle",
+			{ p_handle: normalized },
+		);
+		setBusy(false);
+		if (renameError) {
+			setError(formatCaughtError(renameError));
+			return;
+		}
+		window.location.assign(`/settings/@${data}`);
+	};
+
+	return (
+		<section className="mb-3.5 rounded-xl border border-border bg-panel px-[18px] py-4">
+			<h3 className="m-0 text-[13.5px] font-bold">Username</h3>
+			<p className="m-0 mt-0.5 text-[12px] text-fg-subtle">
+				Your public address is lixray.com/@{organization.handle}. You can change
+				the random username we gave you.
+			</p>
+			<form
+				className="mt-3 grid gap-2"
+				onSubmit={(event) => void submit(event)}
+			>
+				<label className="grid gap-1.5 text-[12px] font-semibold text-fg-muted">
+					New username
+					<div className="flex items-center gap-2">
+						<span className="text-[13px] text-fg-subtle">@</span>
+						<input
+							className={`${profileInputClass} flex-1`}
+							autoComplete="off"
+							maxLength={39}
+							value={username}
+							aria-invalid={Boolean(error) || (username.length > 0 && !valid)}
+							aria-describedby="username-help"
+							disabled={busy}
+							onChange={(event) => {
+								setUsername(event.target.value);
+								setError(null);
+							}}
+						/>
+					</div>
+				</label>
+				<p id="username-help" className="m-0 text-[12px] text-fg-subtle">
+					3–39 letters, numbers, or single hyphens. Old links will redirect to
+					your new address until someone else claims your former username. After
+					that, those links may point to their account.
+				</p>
+				{valid && normalized !== organization.handle ? (
+					<p className="m-0 text-[12px] text-fg-muted">
+						New address: lixray.com/@{normalized}
+					</p>
+				) : null}
+				{error ? (
+					<p role="alert" className="m-0 text-[12px] text-danger-border">
+						{error}
+					</p>
+				) : null}
+				<Button
+					type="submit"
+					variant="outline"
+					size="sm"
+					className="mt-1 w-fit"
+					disabled={busy || !valid || normalized === organization.handle}
+				>
+					{busy ? "Saving…" : "Change username"}
+				</Button>
+			</form>
+		</section>
+	);
+}
 
 function GeneralPanel({ organization }: { organization: Organization }) {
 	const { renameOrganization } = useRepository();

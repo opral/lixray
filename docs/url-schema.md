@@ -4,9 +4,9 @@ Status: **design reference** · Updated 2026-09-10
 
 Implementation note: the current hard-cut schema uses one `namespaces` model for
 personal and organization ownership, one global `handles` pool, and internal
-`lixes` records rendered as “repositories” in the UI. Handle and slug redirects,
-tombstones, renames, and transfer semantics described later in this document are
-future design material and are explicitly out of scope for the current release.
+`lixes` records rendered as “repositories” in the UI. Personal username renames
+now create reclaimable handle redirects. Other handle lifecycle and repository
+slug lifecycle semantics described later remain design material.
 
 File and directory routes now use the existing entity UUID encoded as 22-character
 unpadded Base64url, followed by an optional descriptive slug. This is a hard URL
@@ -251,14 +251,10 @@ it does not make the URL unresolvable.
 
 - Every namespace and repository has an immutable ID (UUIDv7/ULID) minted at creation. Storage,
   permissions, stars, mentions, containers, and agent state key on IDs, never on names.
-- Rename ⇒ old name becomes a permanent 301 (`redirect` state) on **every** surface (pages, file
-  URLs, future raw/sync/API). GitHub's partial coverage (profiles/gists don't redirect) is a
-  documented pain and phishing source.
-- A live redirect MUST never be silently shadowed by a new registration (root cause of
-  repo-jacking: >10k Go/Swift packages pointed at renamed GitHub owners; GitHub's retirement
-  countermeasure was bypassed 4× via restore/transfer/race). The check lives in **one**
-  uniqueness constraint hit by every name-materializing path (create, rename, transfer, restore,
-  import).
+- Personal username rename leaves a `redirect` handle. Browser profile and repository URLs
+  resolve to the current handle while that redirect exists. Another user may explicitly claim
+  the former username; that claim atomically replaces the redirect, and old URLs then resolve
+  to the new owner. Clients must make this ownership change clear before a rename.
 - Delete ⇒ tombstone: HTTP 410 page ("deleted on DATE"), name held (30–90d cooldown; permanent
   retirement above a popularity threshold measured in fetches/agent-syncs). Free self-serve
   deletion only within ~72h of creation (npm model).
@@ -421,19 +417,18 @@ create unique index ws_one_active_slug on repository_slugs (repository_id)
 
 **How the registry works.**
 
-- _Routing_ `/@{h}/{s}`: lower-case `h`, look up `handles` — `active` ⇒ serve; `redirect` ⇒ 301
-  to the namespace's active handle (partial unique index guarantees at most one; see deletion
-  rule below); `tombstone` ⇒ 410; `reserved`/missing ⇒ 404. Namespace profiles are public, so
-  this is safe at the handle tier. **Repository slugs resolve visibility-first** (invariant 9):
-  resolve `s` to its repository, apply the visibility/RLS check, and only then emit 301
-  (redirect) or 410 (tombstone) — an anonymous request touching a _private_ repository's current,
+- _Routing_ `/@{h}/{s}`: lower-case `h`, look up `handles` — `active` ⇒ serve;
+  `redirect` ⇒ resolve the current handle and replace the browser URL after access checks.
+  A permanent HTTP 301 would outlive a reclaim and send visitors to the former owner.
+  `reserved`/missing ⇒ 404. Namespace profiles are public, so this is safe at the handle tier.
+  **Repository slugs resolve visibility-first** (invariant 9): resolve `s` to its repository,
+  apply the visibility/RLS check, and only then redirect — an anonymous request touching a _private_ repository's current,
   former, or deleted slug gets the uniform 404. Emitting 301/410 before the visibility check
   leaks existence, rename targets, and deletion dates to anonymous crawlers whose caches you
   cannot purge.
-- _First claim_: a single `INSERT` — the PK blocks exact duplicates, `handles_squat` blocks
-  case/punctuation twins (`launch-plan` vs `launchplan`), and because redirect/reserved/tombstone
-  rows live in the same table, shadowing a live redirect or claiming a reserved/retired name
-  fails on the same constraint.
+- _First claim_: the PK blocks exact duplicates and `handles_squat` blocks case/punctuation
+  twins (`launch-plan` vs `launchplan`). An explicit personal username claim may replace a
+  redirect row in the same transaction; active, reserved, and retired names stay unavailable.
 - _Re-materialization_ (restore, post-cooldown reuse, rename-back): the PK row already exists, so
   these are **guarded state-transition UPDATEs**, the only other legal materializing primitive:
   `UPDATE handles SET state='active', namespace_id=$ns, deleted_at=null
@@ -441,11 +436,10 @@ create unique index ws_one_active_slug on repository_slugs (repository_id)
   — require rowcount = 1, else abort. INSERT-or-guarded-UPDATE both serialize on the same PK
   row, so the repo-jacking race (GitHub's retirement was bypassed 4× via restore/transfer/race)
   stays structurally closed across every materializing path.
-- _Rename_ (one transaction): `UPDATE handles SET state='redirect'
-WHERE handle=$old AND state='active' AND namespace_id=$ns` (rowcount MUST be 1 — an unguarded
-  update is a hijack primitive against other namespaces' live handles) + materialize `$new` as
-  `active`. Old URLs 301 forever; mentions and permissions are untouched (they hold
-  `namespace_id`).
+- _Rename_ (one transaction): change the current handle to `redirect` and materialize the
+  requested handle as `active`. If the requested handle is a redirect, remove it first while
+  holding its advisory lock. Former URLs resolve to the current handle only until reclaimed;
+  mentions and permissions still hold `namespace_id`.
 - _Delete_ (one transaction): the active handle → `tombstone` (set `deleted_at`) **and all of the
   entity's `redirect` rows → `tombstone`** — otherwise they would dangle, pointing at a namespace
   with no active handle to 301 to. Same rule for `repository_slugs` on repository deletion.
@@ -501,8 +495,8 @@ alone.
 2. Namespaces never nest; the verb set at segment 3 is closed and documented.
 3. `@` never appears in slug grammar; `/` never appears in changeset-id grammar.
 4. Names are mutable aliases over immutable IDs; nothing durable keys on a name.
-5. Renames 301 forever on every surface; live redirects are never shadowed; deletions tombstone
-   (410) with cooldown; popular names retire permanently.
+5. Personal username renames redirect in the browser while the old name is unclaimed. A later
+   explicit claim atomically replaces the redirect. Deletion cooldowns remain future design.
 6. A pinned `(repository identity, changeset, entity kind, entity UUID)` never resolves to different bytes.
 7. Namespaces are taggable: mention tokens = URL segments, stored as IDs, rendered as current
    handles; agent handles come from reserved space only.
