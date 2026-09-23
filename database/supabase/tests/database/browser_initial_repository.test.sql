@@ -3,8 +3,9 @@ create extension if not exists pgtap with schema extensions;
 select no_plan();
 
 -- Accounts present before this rollout do not have their deleted repos restored.
-select is((select count(*) from public.accounts where not initial_repository_provisioned),
-  0::bigint, 'existing accounts have completed onboarding');
+select is((select count(*) from public.accounts
+  where primary_namespace_id is not null and not initial_repository_provisioned),
+  0::bigint, 'existing personal namespaces have completed onboarding');
 
 insert into auth.users(id,email,raw_app_meta_data,raw_user_meta_data) values
   ('87000000-0000-4000-8000-000000000001','browser-new@example.com','{}','{}');
@@ -23,11 +24,17 @@ select set_config('test.personal_namespace',
 reset role;
 set local role service_role;
 set local request.jwt.claims='{"role":"service_role"}';
-select lives_ok($$select public.register_hosted_lix(
+select lives_ok($$select public.register_initial_hosted_lix(
   '87000000-0000-4000-8000-000000000011',
   '87000000-0000-4000-8000-000000000001',
   current_setting('test.personal_namespace')::uuid, 'repo')$$,
   'hosted lifecycle registers initial repository');
+select throws_ok($$select public.register_initial_hosted_lix(
+  '87000000-0000-4000-8000-000000000012',
+  '87000000-0000-4000-8000-000000000001',
+  current_setting('test.personal_namespace')::uuid, 'another')$$,
+  '23505', 'A personal repository already exists',
+  'late initial registration cannot create a second personal repo');
 reset role;
 
 set local role authenticated;

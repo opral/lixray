@@ -34,14 +34,16 @@ function exchangeCodeOnce(code: string) {
 }
 
 async function finishBrowserSignup(accessToken: string) {
-	const createdPath = await ensureInitialPersonalRepository(
+	const result = await ensureInitialPersonalRepository(
 		getBrowserSupabaseClient(),
 		accessToken,
 		window.location.origin,
 	);
 	const returnTo = takeAuthReturnTo();
 	window.location.replace(
-		returnTo === "/open" && createdPath ? createdPath : returnTo,
+		returnTo === "/open" && result.created && result.path
+			? result.path
+			: returnTo,
 	);
 }
 
@@ -135,6 +137,13 @@ function AuthCallbackPage() {
 					return;
 				}
 				try {
+					if (
+						new URL(peekAuthReturnTo(), window.location.origin).pathname ===
+						"/oauth/consent"
+					) {
+						window.location.replace(takeAuthReturnTo());
+						return;
+					}
 					await finishBrowserSignup(sessionData.session.access_token);
 				} catch (setupError) {
 					if (!disposed) {

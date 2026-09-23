@@ -5,6 +5,7 @@ import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import { repositoryPath } from "~/lib/repository-url";
 import { ensureInitialPersonalRepository } from "~/lib/initial-personal-repository";
+import { isDemoModeEnabled } from "~/lib/demo-client";
 
 export const Route = createFileRoute("/open")({
 	component: OpenAppPage,
@@ -14,10 +15,19 @@ function OpenAppPage() {
 	const { client, isLoaded: authLoaded, session, user } = useAuth();
 	const repositoryState = useRepository();
 	const [error, setError] = useState<string | null>(null);
-	const setup = useRef<Promise<string | null> | null>(null);
+	const setup = useRef<ReturnType<
+		typeof ensureInitialPersonalRepository
+	> | null>(null);
 
 	useEffect(() => {
 		if (!authLoaded || !repositoryState.isLoaded) return;
+		if (isDemoModeEnabled && repositoryState.activeRepository) {
+			const active = repositoryState.activeRepository;
+			window.location.replace(
+				repositoryPath(active.organization, active.repository),
+			);
+			return;
+		}
 
 		if (!user || !client || !session) {
 			window.location.replace("/sign-in?returnTo=%2Fopen");
@@ -30,14 +40,14 @@ function OpenAppPage() {
 			window.location.origin,
 		);
 		void setup.current.then(
-			(createdPath) => {
+			(result) => {
 				if (cancelled) return;
 				const active = repositoryState.activeRepository;
 				window.location.replace(
-					createdPath ??
+					(result.created ? result.path : null) ??
 						(active
 							? repositoryPath(active.organization, active.repository)
-							: "/home"),
+							: (result.path ?? "/home")),
 				);
 			},
 			(caught: unknown) => {

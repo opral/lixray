@@ -5,13 +5,18 @@ const INITIAL_REPOSITORY_NAME = "repo";
 // The hosted lifecycle scopes idempotency keys to the authenticated account.
 const INITIAL_REPOSITORY_KEY = "lixray:initial-personal-repository";
 
-/** Returns a path only when this call had to provision the initial repository. */
+export interface InitialRepositoryResult {
+	path: string | null;
+	created: boolean;
+}
+
+/** Ensures a browser account's first personal repo exists. */
 export async function ensureInitialPersonalRepository(
 	client: LixraySupabaseClient,
 	accessToken: string,
 	origin: string,
 	create: typeof createLix = createLix,
-): Promise<string | null> {
+): Promise<InitialRepositoryResult> {
 	const bootstrap = await client.rpc("bootstrap_personal_namespace");
 	if (bootstrap.error) throw bootstrap.error;
 	const namespaceId = bootstrap.data?.[0]?.namespace_id;
@@ -27,7 +32,12 @@ export async function ensureInitialPersonalRepository(
 		return state;
 	};
 	const initial = await readState();
-	if (!initial.needs_creation) return null;
+	const pathFor = (state: typeof initial) =>
+		state.repository_id && state.repository_slug
+			? `/@${state.namespace_handle}/${state.repository_slug}`
+			: null;
+	if (!initial.needs_creation)
+		return { path: pathFor(initial), created: false };
 
 	try {
 		await create({
@@ -37,6 +47,7 @@ export async function ensureInitialPersonalRepository(
 					authorization: `Bearer ${accessToken}`,
 					"x-lixray-namespace-id": namespaceId,
 					"x-lixray-repository-name": INITIAL_REPOSITORY_NAME,
+					"x-lixray-initial-repository": "1",
 				},
 			},
 			idempotencyKey: INITIAL_REPOSITORY_KEY,
@@ -45,12 +56,14 @@ export async function ensureInitialPersonalRepository(
 		// Another tab may have finished between the state check and the gateway's
 		// name check. In that case, use the repository that won the race.
 		const latest = await readState();
-		if (!latest.repository_id) throw error;
-		return `/@${latest.namespace_handle}/${latest.repository_slug}`;
+		const path = pathFor(latest);
+		if (!path) throw error;
+		return { path, created: false };
 	}
 	const latest = await readState();
-	if (!latest.repository_id || !latest.repository_slug) {
+	const path = pathFor(latest);
+	if (!path) {
 		throw new Error("The new repository is not available yet. Please retry.");
 	}
-	return `/@${latest.namespace_handle}/${latest.repository_slug}`;
+	return { path, created: true };
 }

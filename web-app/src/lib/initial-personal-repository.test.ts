@@ -59,34 +59,39 @@ void test("creates the first personal repo through the hosted lifecycle", async 
 		const headers = new Headers(options.server?.headers as HeadersInit);
 		assert.equal(headers.get("x-lixray-namespace-id"), namespaceId);
 		assert.equal(headers.get("x-lixray-repository-name"), "repo");
+		assert.equal(headers.get("x-lixray-initial-repository"), "1");
+		assert.equal(headers.get("authorization"), "Bearer token");
 		return { id: repositoryId };
 	}) as typeof createLix;
-	assert.equal(
+	assert.deepEqual(
 		await ensureInitialPersonalRepository(
 			client,
 			"token",
 			"https://lixray.test",
 			create,
 		),
-		"/@opral/repo",
+		{ path: "/@opral/repo", created: true },
 	);
 	assert.equal(calls, 1);
 });
 
 void test("existing and intentionally deleted repos never trigger creation", async () => {
-	for (const state of [present, { ...absent, needs_creation: false }]) {
+	for (const [state, path] of [
+		[present, "/@opral/repo"],
+		[{ ...absent, needs_creation: false }, null],
+	] as const) {
 		const { client } = clientFor([state]);
 		const create = (() => {
 			throw new Error("unexpected creation");
 		}) as typeof createLix;
-		assert.equal(
+		assert.deepEqual(
 			await ensureInitialPersonalRepository(
 				client,
 				"token",
 				"https://lixray.test",
 				create,
 			),
-			null,
+			{ path, created: false },
 		);
 	}
 });
@@ -96,13 +101,13 @@ void test("uses the repo created by another tab after a name conflict", async ()
 	const create = (() => {
 		throw new Error("name taken");
 	}) as typeof createLix;
-	assert.equal(
+	assert.deepEqual(
 		await ensureInitialPersonalRepository(
 			client,
 			"token",
 			"https://lixray.test",
 			create,
 		),
-		"/@opral/repo",
+		{ path: "/@opral/repo", created: false },
 	);
 });

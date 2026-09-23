@@ -112,9 +112,11 @@ export async function createHostedRepository(
 
 		// This RPC is service-role-only. A browser must never be able to claim an
 		// arbitrary existing server ID. It atomically records the receipt and owner.
+		const initialRepository =
+			request.headers.get("x-lixray-initial-repository") === "1";
 		const registration = await hostedRepositoryRpc(
 			env,
-			"register_hosted_lix",
+			initialRepository ? "register_initial_hosted_lix" : "register_hosted_lix",
 			{
 				p_lix_id: id,
 				p_account_id: account.userId,
