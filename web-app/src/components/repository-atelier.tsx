@@ -844,7 +844,11 @@ export function RepositoryAtelier({
 		const navigationQueue = createShellNavigationQueue();
 		eventHandlerRef.current = (event) => {
 			if (event.type === "document_open_attempted")
-				fileOpenTrace.documentAttempted(event.filePath, event.supported);
+				fileOpenTrace.documentAttempted(
+					event.filePath,
+					event.fileId,
+					event.supported,
+				);
 			else if (event.type === "document_loaded")
 				fileOpenTrace.documentLoaded(event.filePath);
 			atelierTelemetryHandlerRef.current?.(event);
@@ -1156,7 +1160,8 @@ export function RepositoryAtelier({
 						}).blob();
 					const atelierProps: AtelierProps = {
 						lix: session.lix,
-						scopeDocumentLix: (path, lix) => fileOpenTrace.scopeLix(path, lix),
+						scopeDocumentLix: (path, fileId, lix) =>
+							fileOpenTrace.scopeLix(path, fileId, lix),
 						onError: (error) =>
 							captureExceptionTelemetry(error, {
 								operation: "atelier_view_render",

@@ -98,6 +98,7 @@ export function fetchLixWithTrace(
 	lixId: string,
 	request: Request,
 	fetcher: (lixId: string, request: Request) => Promise<Response>,
+	openingParent?: { traceparent: string; tracestate?: string },
 ): Promise<Response> {
 	// Never include query strings, SQL, session identifiers, or credentials.
 	const route = new URL(request.url).pathname
@@ -106,8 +107,14 @@ export function fetchLixWithTrace(
 		.replace(/\/transactions\/[^/]+/, "/transactions/{transaction_id}");
 	// Browser SDK operations arrive from a worker. Their W3C headers are the
 	// request-specific parent; the main thread's active context is unrelated.
-	const parent = request.headers.has("traceparent")
-		? propagation.extract(ROOT_CONTEXT, request.headers, {
+	const parentCarrier = new Headers(request.headers);
+	if (!parentCarrier.has("traceparent") && openingParent) {
+		parentCarrier.set("traceparent", openingParent.traceparent);
+		if (openingParent.tracestate)
+			parentCarrier.set("tracestate", openingParent.tracestate);
+	}
+	const parent = parentCarrier.has("traceparent")
+		? propagation.extract(ROOT_CONTEXT, parentCarrier, {
 				get: (carrier, key) => carrier.get(key) ?? undefined,
 				keys: (carrier) => Array.from(carrier.keys()),
 			})

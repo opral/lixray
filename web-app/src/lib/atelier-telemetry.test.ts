@@ -17,6 +17,7 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 
 	handler({
 		type: "document_open_attempted",
+		fileId: "private-file-id",
 		filePath: "/customers/acme/private-plan.MD",
 		documentOrigin: "existing",
 		viewKind: "atelier_file",

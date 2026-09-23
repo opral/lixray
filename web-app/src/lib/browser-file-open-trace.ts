@@ -113,11 +113,18 @@ export function createBrowserFileOpenTraceController(
 			start(fileId);
 		},
 		/** Atelier also opens files without a fresh URL route. */
-		documentAttempted(filePath: string, supported: boolean): void {
+		documentAttempted(
+			filePath: string,
+			fileId: string | undefined,
+			supported: boolean,
+		): void {
 			// Route opens are identified by file ID. Restoration of a different tab
 			// must not steal that trace while the route resolves its canonical path.
-			if (active?.fileId && active.filePath !== filePath) return;
-			if (!active || (active.filePath && active.filePath !== filePath)) {
+			if (active?.fileId && active.fileId !== fileId) return;
+			if (
+				!active ||
+				(!active.fileId && active.filePath && active.filePath !== filePath)
+			) {
 				start(undefined, filePath);
 			} else {
 				active.filePath = filePath;
@@ -154,9 +161,16 @@ export function createBrowserFileOpenTraceController(
 			return active ? context.with(active.context, operation) : operation();
 		},
 		/** Scoped handle for document loaders and React effects, never the shell. */
-		scopeLix(filePath: string, lix: Lix): Lix {
+		scopeLix(filePath: string, fileId: string | undefined, lix: Lix): Lix {
 			const run = <T>(operation: () => T, track = false): T => {
-				const scope = active?.filePath === filePath ? active : undefined;
+				const scope = active?.fileId
+					? active.fileId === fileId
+						? active
+						: undefined
+					: active?.filePath === filePath
+						? active
+						: undefined;
+				if (scope && scope.filePath === undefined) scope.filePath = filePath;
 				const result = scope
 					? context.with(scope.context, operation)
 					: operation();
