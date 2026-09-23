@@ -6,7 +6,7 @@ import {
 } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
 	useMarkRepositoryRouteSynced,
 	useBeginRepositoryRouteNavigation,
@@ -41,6 +41,46 @@ function RepositoryFileRoute() {
 	const entityId = parseEntityUrlSplat(filePath)?.id;
 	const { branch } = Route.useSearch();
 	const activeBranchId = useRepositoryActiveBranchId();
+	const [resolvedEntity, setResolvedEntity] = useState<{
+		atelier: typeof atelier;
+		branchId: string | null;
+		id: string;
+		path: string;
+	} | null>(null);
+
+	// The URL path is descriptive. Rewriting it must not restart (and abort)
+	// the open command for the same stable file ID.
+	useEffect(() => {
+		if (
+			!resolvedEntity ||
+			resolvedEntity.atelier !== atelier ||
+			resolvedEntity.branchId !== activeBranchId ||
+			resolvedEntity.id !== entityId
+		)
+			return;
+		const canonical = canonicalEntitySplat(filePath, resolvedEntity);
+		if (!canonical) return;
+		void navigate({
+			to: "/@{$namespace}/$repository/file/$",
+			params: { namespace, repository, _splat: canonical },
+			search:
+				branch && defaultBranchId
+					? atelierBranchSearch(branch, defaultBranchId)
+					: {},
+			replace: true,
+		});
+	}, [
+		activeBranchId,
+		atelier,
+		branch,
+		defaultBranchId,
+		entityId,
+		filePath,
+		namespace,
+		navigate,
+		repository,
+		resolvedEntity,
+	]);
 
 	useEffect(() => {
 		if (!atelier || !entityId) return;
@@ -64,20 +104,6 @@ function RepositoryFileRoute() {
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
 				fileOpenTrace?.resolved(entityId, requestedPath);
-				// The id resolved; the path in the URL is decoration. Write the
-				// file's own path back over whatever the link claimed — a bare
-				// id, a stale name, a typo.
-				const canonical = canonicalEntitySplat(filePath, entity);
-				if (canonical)
-					void navigate({
-						to: "/@{$namespace}/$repository/file/$",
-						params: { namespace, repository, _splat: canonical },
-						search:
-							branch && defaultBranchId
-								? atelierBranchSearch(branch, defaultBranchId)
-								: {},
-						replace: true,
-					});
 				await (fileOpenTrace
 					? fileOpenTrace.run(() =>
 							atelier.documents.open(requestedPath, {
@@ -89,7 +115,15 @@ function RepositoryFileRoute() {
 							signal: controller.signal,
 							navigationCause: "route",
 						}));
-				if (!controller.signal.aborted) markRouteSynced();
+				if (!controller.signal.aborted) {
+					markRouteSynced();
+					setResolvedEntity({
+						atelier,
+						branchId: activeBranchId,
+						id: entityId,
+						path: requestedPath,
+					});
+				}
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
@@ -128,7 +162,6 @@ function RepositoryFileRoute() {
 		branch,
 		defaultBranchId,
 		entityId,
-		filePath,
 		fileOpenTrace,
 		consumeShellNavigation,
 		markRouteSynced,
