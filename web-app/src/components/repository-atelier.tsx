@@ -1218,6 +1218,7 @@ export function RepositoryAtelier({
 								? stableSettingsApiRef.current
 								: null,
 							repositoryVisibility,
+							(lix) => fileOpenTrace.scopeRepositoryLix(lix),
 						),
 						onReady: setInstance,
 						mainArea: {

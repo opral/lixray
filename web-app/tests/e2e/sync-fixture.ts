@@ -315,6 +315,8 @@ export async function createSyncFixture({
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
 		const syncFailures: string[] = [];
+		const syncFailureDetails: string[] = [];
+		const pendingSyncFailureDetails = new Set<Promise<void>>();
 		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
 		const recoveredMergeConflicts: string[] = [];
@@ -827,6 +829,20 @@ export async function createSyncFixture({
 					const failure = `${response.status()} ${url}`;
 					const failureRecorded = !pendingMergeReplay;
 					if (failureRecorded) syncFailures.push(failure);
+					if (failureRecorded && url.endsWith("/sync/push")) {
+						const detail = response
+							.text()
+							.then((body) => {
+								syncFailureDetails.push(`${failure}: ${body.slice(0, 2_000)}`);
+							})
+							.catch((error: unknown) => {
+								syncFailureDetails.push(
+									`${failure}: unreadable response: ${String(error)}`,
+								);
+							});
+						pendingSyncFailureDetails.add(detail);
+						void detail.finally(() => pendingSyncFailureDetails.delete(detail));
+					}
 					if (
 						response.status() === 409 &&
 						response.request().method() === "POST" &&
@@ -1992,6 +2008,7 @@ export async function createSyncFixture({
 		}
 		async function close(primaryFailure?: unknown) {
 			await Promise.all([...pendingMergeClassifications]);
+			await Promise.all([...pendingSyncFailureDetails]);
 			if (scenario === "editing" || scenario === "history") {
 				const diagnostics = await Promise.allSettled(
 					contexts
@@ -2016,6 +2033,7 @@ export async function createSyncFixture({
 						scenario,
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
+						syncFailureDetails,
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
 						replayedMergeConflicts: mergeReplay.recovered(),
