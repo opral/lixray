@@ -29,7 +29,7 @@
 		"pretest:e2e": "pnpm lix:build && pnpm ci:prepare:web",
 		"test:e2e": "playwright test",
 		"test:file-component": "playwright test --config playwright.file-component.config.ts",
-		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts",
+		"test:analytics": "node --test --experimental-strip-types src/lib/*telemetry*.test.ts src/browser-telemetry.test.ts",
 		"test:auth": "node --test --experimental-strip-types src/lib/auth-return-to.test.ts src/lib/auth-session-validation.test.ts src/lib/canonical-account.test.ts src/lib/google-oauth.test.ts src/lib/lix-connection-prompt.test.ts src/lib/oauth-consent.test.ts src/lib/public-repository.test.ts src/lib/team-invite.test.ts src/lib/repository-share-capability.test.ts src/lib/repository-cta.test.ts",
 		"test:docs": "node --test --experimental-strip-types src/lib/docs-legal.test.ts",
 		"test:profile": "node --test --experimental-strip-types src/lib/jscontact-profile.test.ts src/lib/profile-activity-aggregate.test.ts src/lib/profile-editor.test.ts",

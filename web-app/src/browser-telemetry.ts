@@ -87,13 +87,13 @@ export function createLixTelemetryOptions(
 	const pending: Uint8Array[] = [];
 	let pendingBytes = 0;
 	let timer: ReturnType<typeof setTimeout> | undefined;
-	let flushing: Promise<void> | undefined;
+	let flushing: Promise<boolean> | undefined;
 	let retryAttempt = 0;
 
 	const flush = async (): Promise<void> => {
 		if (flushing) {
-			await flushing;
-			if (pending.length > 0) await flush();
+			const delivered = await flushing;
+			if (delivered && pending.length > 0) await flush();
 			return;
 		}
 		if (timer !== undefined) clearTimeout(timer);
@@ -144,6 +144,7 @@ export function createLixTelemetryOptions(
 				pending.splice(0, requests.length);
 				pendingBytes = Math.max(0, pendingBytes - size);
 				retryAttempt = 0;
+				return true;
 			} catch (error) {
 				console.warn(
 					"Lix OTLP export failed; retaining spans for retry",
@@ -152,14 +153,14 @@ export function createLixTelemetryOptions(
 				const delay = Math.min(30_000, EXPORT_INTERVAL_MS * 2 ** retryAttempt);
 				retryAttempt += 1;
 				schedule(delay);
-				throw error;
+				return false;
 			} finally {
 				clearTimeout(timeout);
 				flushing = undefined;
 			}
 		})();
-		await flushing;
-		if (pending.length > 0) await flush();
+		const delivered = await flushing;
+		if (delivered && pending.length > 0) await flush();
 	};
 
 	const schedule = (delay = EXPORT_INTERVAL_MS) => {

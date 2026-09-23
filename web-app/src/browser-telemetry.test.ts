@@ -126,7 +126,7 @@ void test("Lix uploader retains a failed batch and clears it only after delivery
 			await telemetry.flush?.();
 		};
 		await Promise.resolve(telemetry.onExport(encodeRequest("SELECT")));
-		await assert.rejects(flush, /failed \(503\)/);
+		await flush();
 		assert.equal(attempts, 1);
 		await flush();
 		assert.equal(attempts, 2);
