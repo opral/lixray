@@ -228,6 +228,7 @@ async function openRepositoryLixSessionWithRetry(
 							refreshAccessToken: options.refreshAccessToken,
 							signal: options.signal,
 							shouldCaptureRequestFailures: () => false,
+							openingParent: () => options.openingTelemetryParent,
 						}),
 						signal: options.signal,
 					});

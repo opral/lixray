@@ -14,6 +14,7 @@ import type { Lix } from "@lix-js/sdk";
 interface FileOpenScope {
 	span: Span;
 	context: Context;
+	owner: "route" | "document";
 	fileId?: string;
 	filePath?: string;
 	timer: ReturnType<typeof setTimeout>;
@@ -54,7 +55,11 @@ export function createBrowserFileOpenTraceController(
 		completedFileId = outcome === "loaded" ? scope.fileId : undefined;
 	};
 
-	const start = (fileId?: string, filePath?: string): FileOpenScope => {
+	const start = (
+		owner: FileOpenScope["owner"],
+		fileId: string,
+		filePath?: string,
+	): FileOpenScope => {
 		if (active) finish(active, "superseded");
 		completedFileId = undefined;
 		const span = tracer.startSpan(
@@ -72,6 +77,7 @@ export function createBrowserFileOpenTraceController(
 		const scope: FileOpenScope = {
 			span,
 			context: trace.setSpan(ROOT_CONTEXT, span),
+			owner,
 			fileId,
 			filePath,
 			startedAtMs: performance.now(),
@@ -98,34 +104,32 @@ export function createBrowserFileOpenTraceController(
 	return {
 		/** Called by the route before repository opening or file lookup begins. */
 		ensureRoute(fileId: string): void {
-			if (active?.fileId === fileId) return;
-			if (active && active.fileId === undefined) {
-				active.fileId = fileId;
-				active.span.setAttribute("lix.file.id", fileId);
+			if (active?.fileId === fileId) {
+				active.owner = "route";
 				return;
 			}
 			if (!active && completedFileId === fileId) return;
-			start(fileId);
+			start("route", fileId);
 		},
 		/** A retry is a new open even when the route and file ID are unchanged. */
 		ensureRepositoryAttempt(fileId: string): void {
-			if (active?.fileId === fileId) return;
-			start(fileId);
+			if (active?.fileId === fileId) {
+				active.owner = "route";
+				return;
+			}
+			start("route", fileId);
 		},
 		/** Atelier also opens files without a fresh URL route. */
 		documentAttempted(
 			filePath: string,
-			fileId: string | undefined,
+			fileId: string,
 			supported: boolean,
 		): void {
 			// Route opens are identified by file ID. Restoration of a different tab
 			// must not steal that trace while the route resolves its canonical path.
-			if (active?.fileId && active.fileId !== fileId) return;
-			if (
-				!active ||
-				(!active.fileId && active.filePath && active.filePath !== filePath)
-			) {
-				start(undefined, filePath);
+			if (active?.owner === "route" && active.fileId !== fileId) return;
+			if (!active || active.fileId !== fileId) {
+				start("document", fileId, filePath);
 			} else {
 				active.filePath = filePath;
 			}
@@ -135,9 +139,15 @@ export function createBrowserFileOpenTraceController(
 			if (active?.fileId !== fileId) return;
 			if (active?.fileId === fileId) active.filePath = filePath;
 		},
-		documentLoaded(filePath: string): void {
+		documentLoaded(filePath: string, fileId: string | undefined): void {
 			const scope = active;
-			if (!scope || scope.filePath !== filePath || scope.rendered) return;
+			if (
+				!scope ||
+				scope.fileId !== fileId ||
+				scope.filePath !== filePath ||
+				scope.rendered
+			)
+				return;
 			scope.rendered = true;
 			scope.span.setAttribute(
 				"lixray.file.open.render_ms",

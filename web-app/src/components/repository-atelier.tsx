@@ -850,7 +850,7 @@ export function RepositoryAtelier({
 					event.supported,
 				);
 			else if (event.type === "document_loaded")
-				fileOpenTrace.documentLoaded(event.filePath);
+				fileOpenTrace.documentLoaded(event.filePath, event.fileId);
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type === "diff_session_changed") {
 				// Review focus: chrome outside the changes (the brand and

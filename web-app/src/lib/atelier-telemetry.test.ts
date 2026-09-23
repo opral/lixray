@@ -130,6 +130,7 @@ void test("document loaded records measured latency without document identity", 
 	);
 	handler({
 		type: "document_loaded",
+		fileId: "private-file-id",
 		filePath: "/private/posts.csv",
 		viewKind: "atelier_csv",
 		durationMs: 123.5,

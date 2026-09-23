@@ -208,7 +208,7 @@ void test("file-open root covers a document's first live observation", async () 
 		.scopeLix(filePath, fileId, fakeLix)
 		.observe("SELECT 1");
 	const firstFrame = observation.next();
-	controller.documentLoaded(filePath);
+	controller.documentLoaded(filePath, fileId);
 	await new Promise((resolve) => setTimeout(resolve, 550));
 	assert.equal(exporter.getFinishedSpans().length, 0);
 	releaseNext();
@@ -255,6 +255,69 @@ void test("restored document observation joins the route root before ID lookup f
 	const [root] = exporter.getFinishedSpans();
 	assert.equal(root?.name, "lixray.file.open");
 	assert.deepEqual(observedParents, [undefined, root.spanContext().spanId]);
+});
+
+void test("a different file cannot complete the route root even at the same path", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute("file-a");
+	controller.documentAttempted("/posts.csv", "file-a", true);
+	controller.documentLoaded("/posts.csv", "file-b");
+	controller.cancel();
+	const [root] = exporter.getFinishedSpans();
+	assert.equal(root?.attributes["lixray.file.open.outcome"], "cancelled");
+	assert.equal(root?.attributes["lix.file.id"], "file-a");
+});
+
+void test("a document root keeps its ID when a different deep link supersedes it", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.documentAttempted("/b.csv", "file-b", true);
+	controller.ensureRoute("file-a");
+	controller.cancel();
+	const roots = exporter.getFinishedSpans();
+	assert.deepEqual(
+		roots.map((root) => [
+			root.attributes["lix.file.id"],
+			root.attributes["lixray.file.open.outcome"],
+		]),
+		[
+			["file-b", "superseded"],
+			["file-a", "cancelled"],
+		],
+	);
+});
+
+void test("opening a second document supersedes an in-place document root", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.documentAttempted("/a.csv", "file-a", true);
+	controller.documentAttempted("/b.csv", "file-b", true);
+	controller.cancel();
+	assert.deepEqual(
+		exporter
+			.getFinishedSpans()
+			.map((root) => [
+				root.attributes["lix.file.id"],
+				root.attributes["lixray.file.open.outcome"],
+			]),
+		[
+			["file-a", "superseded"],
+			["file-b", "cancelled"],
+		],
+	);
 });
 
 void test("repository retry starts a new file-open root before SDK work", () => {
