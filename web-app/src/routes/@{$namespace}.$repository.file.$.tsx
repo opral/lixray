@@ -13,6 +13,7 @@ import {
 	useConsumeShellEntityNavigation,
 	useRepositoryActiveBranchId,
 	useRepositoryAtelierInstance,
+	useRepositoryFileOpenTrace,
 	useRepositoryDefaultBranchId,
 } from "~/components/repository-atelier";
 import {
@@ -30,6 +31,7 @@ export const Route = createFileRoute("/@{$namespace}/$repository/file/$")({
 
 function RepositoryFileRoute() {
 	const atelier = useRepositoryAtelierInstance();
+	const fileOpenTrace = useRepositoryFileOpenTrace();
 	const defaultBranchId = useRepositoryDefaultBranchId();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
 	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
@@ -48,14 +50,20 @@ function RepositoryFileRoute() {
 			return;
 		}
 		const controller = beginRouteNavigation();
+		fileOpenTrace?.ensureRoute(entityId);
 		let requestedPath = "";
 		void readRepositoryRoute(controller.signal, () =>
-			findLixEntity(atelier.lix, "file", { id: entityId }),
+			fileOpenTrace
+				? fileOpenTrace.run(() =>
+						findLixEntity(atelier.lix, "file", { id: entityId }),
+					)
+				: findLixEntity(atelier.lix, "file", { id: entityId }),
 		)
 			.then(async (entity) => {
 				if (controller.signal.aborted) return;
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
+				fileOpenTrace?.resolved(entityId, requestedPath);
 				// The id resolved; the path in the URL is decoration. Write the
 				// file's own path back over whatever the link claimed — a bare
 				// id, a stale name, a typo.
@@ -70,13 +78,20 @@ function RepositoryFileRoute() {
 								: {},
 						replace: true,
 					});
-				await atelier.documents.open(requestedPath, {
-					signal: controller.signal,
-				});
+				await (fileOpenTrace
+					? fileOpenTrace.run(() =>
+							atelier.documents.open(requestedPath, {
+								signal: controller.signal,
+							}),
+						)
+					: atelier.documents.open(requestedPath, {
+							signal: controller.signal,
+						}));
 				if (!controller.signal.aborted) markRouteSynced();
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
+				fileOpenTrace?.failed(entityId);
 				if (
 					!(error instanceof Error && error.message === "Entity not found") &&
 					!isAtelierFileNotFoundError(error, requestedPath)
@@ -112,6 +127,7 @@ function RepositoryFileRoute() {
 		defaultBranchId,
 		entityId,
 		filePath,
+		fileOpenTrace,
 		consumeShellNavigation,
 		markRouteSynced,
 		namespace,

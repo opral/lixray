@@ -8,6 +8,8 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { fetchLixWithTrace, traceResponse, withSpan } from "./telemetry.ts";
+import { createBrowserFileOpenTraceController } from "./lib/browser-file-open-trace.ts";
+import type { Lix } from "@lix-js/sdk";
 
 function deferred() {
 	let resolve!: () => void;
@@ -29,14 +31,18 @@ void test("concurrent RPCs propagate their own parent and include body consumpti
 	const headers: Headers[] = [];
 	const gates = [deferred(), deferred()];
 	const arrived = [deferred(), deferred()];
+	const remoteTraceIds = [
+		"11111111111111111111111111111111",
+		"22222222222222222222222222222222",
+	];
+	const remoteSpanIds = ["1111111111111111", "2222222222222222"];
 	const runs = gates.map((gate, index) =>
 		withSpan(`operation-${index}`, async (parent) => {
 			const response = await fetchLixWithTrace(
 				"repo",
 				new Request("https://lix.invalid/lix/v1/repo/execute?private=secret", {
 					headers: {
-						traceparent:
-							"00-11111111111111111111111111111111-1111111111111111-01",
+						traceparent: `00-${remoteTraceIds[index]}-${remoteSpanIds[index]}-01`,
 					},
 				}),
 				async (_id, request) => {
@@ -66,13 +72,12 @@ void test("concurrent RPCs propagate their own parent and include body consumpti
 	await runs[0];
 	const spans = exporter.getFinishedSpans();
 	for (let index = 0; index < 2; index++) {
-		const parent = spans.find((span) => span.name === `operation-${index}`)!;
 		const child = spans.find(
 			(span) =>
 				span.name === "lix.client.rpc" &&
-				span.parentSpanContext?.spanId === parent.spanContext().spanId,
+				span.parentSpanContext?.spanId === remoteSpanIds[index],
 		)!;
-		assert.equal(child.spanContext().traceId, parent.spanContext().traceId);
+		assert.equal(child.spanContext().traceId, remoteTraceIds[index]);
 		assert.equal(
 			headers[index]!.get("traceparent"),
 			`00-${child.spanContext().traceId}-${child.spanContext().spanId}-01`,
@@ -146,4 +151,45 @@ void test("withSpan preserves explicit tool errors and never records exception c
 	assert.ok(
 		exporter.getFinishedSpans().every((span) => span.events.length === 0),
 	);
+});
+
+void test("file-open root covers a document's first live observation", async () => {
+	exporter.reset();
+	const fileId = "file-id";
+	const filePath = "/posts.csv";
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute(fileId);
+	controller.resolved(fileId, filePath);
+	let releaseNext!: () => void;
+	let observedParent: string | undefined;
+	const fakeLix = {
+		observe: () => ({
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+			next: () => {
+				observedParent = trace.getSpan(context.active())?.spanContext().spanId;
+				return new Promise<IteratorResult<never>>((resolve) => {
+					releaseNext = () => resolve({ done: true, value: undefined });
+				});
+			},
+		}),
+	} as unknown as Lix;
+	const observation = controller
+		.scopeLix(filePath, fakeLix)
+		.observe("SELECT 1");
+	const firstFrame = observation.next();
+	controller.documentLoaded(filePath);
+	await new Promise((resolve) => setTimeout(resolve, 550));
+	assert.equal(exporter.getFinishedSpans().length, 0);
+	releaseNext();
+	await firstFrame;
+	const [root] = exporter.getFinishedSpans();
+	assert.equal(root?.name, "lixray.file.open");
+	assert.equal(observedParent, root?.spanContext().spanId);
+	assert.equal(root.attributes["lixray.file.open.outcome"], "loaded");
 });

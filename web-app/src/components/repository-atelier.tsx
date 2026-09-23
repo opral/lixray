@@ -32,6 +32,7 @@ import {
 	useContext,
 	useEffect,
 	useLayoutEffect,
+	useMemo,
 	useRef,
 	useState,
 	useSyncExternalStore,
@@ -73,6 +74,11 @@ import {
 	stripInviteFromUrl,
 } from "~/lib/repository-share-url";
 import { isRepositoryShareToken } from "~/lib/repository-share-capability";
+import { configureBrowserTelemetryRepository } from "~/browser-telemetry";
+import {
+	createBrowserFileOpenTraceController,
+	type BrowserFileOpenTraceController,
+} from "~/lib/browser-file-open-trace";
 import {
 	openRepositoryLixSession,
 	openRepositoryRemoteLix,
@@ -150,6 +156,8 @@ function RepositoryShellSkeleton({
 const RepositoryAtelierContext = createContext<RepositoryAtelierHandle | null>(
 	null,
 );
+const RepositoryFileOpenTraceContext =
+	createContext<BrowserFileOpenTraceController | null>(null);
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteLifecycleContext = createContext<
 	(() => AbortController) | null
@@ -215,6 +223,11 @@ export function RepositoryAtelier({
 							? "sql"
 							: null;
 	const routeFilePath = routeChildKind === "file" ? routeSplat : undefined;
+	const routeFileId = parseEntityUrlSplat(routeFilePath)?.id;
+	const fileOpenTrace = useMemo(
+		() => createBrowserFileOpenTraceController(repositoryId, "partial_replica"),
+		[repositoryId],
+	);
 	const documentName = activeDocumentName({
 		pathname,
 		routeFilePath,
@@ -830,6 +843,10 @@ export function RepositoryAtelier({
 		let navigationRevision = 0;
 		const navigationQueue = createShellNavigationQueue();
 		eventHandlerRef.current = (event) => {
+			if (event.type === "document_open_attempted")
+				fileOpenTrace.documentAttempted(event.filePath, event.supported);
+			else if (event.type === "document_loaded")
+				fileOpenTrace.documentLoaded(event.filePath);
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type === "diff_session_changed") {
 				// Review focus: chrome outside the changes (the brand and
@@ -1010,7 +1027,14 @@ export function RepositoryAtelier({
 		return () => {
 			navigationRevision++;
 		};
-	}, [namespace, navigate, repositorySlug]);
+	}, [fileOpenTrace, namespace, navigate, repositorySlug]);
+
+	useEffect(() => {
+		configureBrowserTelemetryRepository(repositoryId, getAccessToken);
+		if (routeFileId) fileOpenTrace.ensureRoute(routeFileId);
+		else fileOpenTrace.cancel();
+	}, [fileOpenTrace, getAccessToken, repositoryId, routeFileId]);
+	useEffect(() => () => fileOpenTrace.cancel(), [fileOpenTrace]);
 
 	useEffect(() => {
 		let disposed = false;
@@ -1033,203 +1057,212 @@ export function RepositoryAtelier({
 			return;
 		}
 		const openingBranchId = branchIdRef.current ?? null;
-		void openRepositoryLixSession({
-			namespace,
-			repositorySlug: repositorySlug,
-			repositoryId: repositoryId,
-			getAccessToken,
-			refreshAccessToken,
-			allowAnonymous: isReadOnly,
-			publicPath: isReadOnly ? publicPath : undefined,
-			initialBranchId: openingBranchId,
-			authIdentity: atelierAccountId,
-			signal: openController.signal,
-			onMigration: (state) => {
-				if (!disposed) setMigration(state);
-			},
-		})
-			.then(async (session) => {
-				if (disposed) {
-					await session.close();
-					return;
-				}
-				activeLix = session;
-				setMigration(null);
-				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
-				activeLixRef.current = session;
-				if (import.meta.env.DEV) {
-					// Dev-only escape hatch: lets the console (and agents driving
-					// the browser) run SQL against the open repository directly.
-					(window as { __lix?: unknown }).__lix = session.lix;
-					console.info(
-						"[lixray] window.__lix exposes this repository for debugging: " +
-							'await __lix.execute("SELECT …") — read row columns with ' +
-							'.get("col"). Prefer this over driving the SQL Explorer UI.',
-					);
-				}
-				setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
-
-				// Initialize telemetry handler with repository context
-				atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(
-					captureTelemetry,
-					{
-						context: {
-							lix: session.lix,
-							repositoryId,
-							organizationId: namespaceId,
-						},
-					},
-				);
-
-				const repositoryBranchSession = createRepositoryBranchSession({
-					session,
-					onSwitch: async (nextBranchId, context) => {
-						const routedBranchId = resolveAtelierRouteBranchId(
-							branchIdRef.current,
-							session.defaultBranchSnapshot(),
-						);
-						if (
-							suppressBranchNavigationRef.current ||
-							routedBranchId === nextBranchId ||
-							(context?.failedBranchId !== undefined &&
-								routedBranchId === context.failedBranchId)
-						) {
-							return;
-						}
-						await navigateToCurrentPathBranch(nextBranchId);
-					},
-				});
-				setBranchSession(repositoryBranchSession);
-				const getDebugRemoteLix = async () => {
-					debugRemoteLix ??= openRepositoryRemoteLix({
-						namespace,
-						repositorySlug,
-						repositoryId,
-						getAccessToken,
-						refreshAccessToken,
-						allowAnonymous: isReadOnly,
-						publicPath: isReadOnly ? publicPath : undefined,
-						authIdentity: atelierAccountId,
-					});
-					const remote = await debugRemoteLix;
-					const activeBranchId = session.activeBranchSnapshot();
-					if ((await remote.activeBranchId()) !== activeBranchId) {
-						await remote.switchBranch({ branchId: activeBranchId });
+		void fileOpenTrace.run(() =>
+			openRepositoryLixSession({
+				namespace,
+				repositorySlug: repositorySlug,
+				repositoryId: repositoryId,
+				getAccessToken,
+				refreshAccessToken,
+				allowAnonymous: isReadOnly,
+				publicPath: isReadOnly ? publicPath : undefined,
+				initialBranchId: openingBranchId,
+				authIdentity: atelierAccountId,
+				signal: openController.signal,
+				onMigration: (state) => {
+					if (!disposed) setMigration(state);
+				},
+			})
+				.then(async (session) => {
+					if (disposed) {
+						await session.close();
+						return;
 					}
-					return remote;
-				};
-				const getDebugRemoteSnapshot = async () =>
-					new Response((await getDebugRemoteLix()).exportSnapshot(), {
-						headers: {
-							"Content-Type": "application/vnd.lix.snapshot",
+					activeLix = session;
+					setMigration(null);
+					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
+					activeLixRef.current = session;
+					if (import.meta.env.DEV) {
+						// Dev-only escape hatch: lets the console (and agents driving
+						// the browser) run SQL against the open repository directly.
+						(window as { __lix?: unknown }).__lix = session.lix;
+						console.info(
+							"[lixray] window.__lix exposes this repository for debugging: " +
+								'await __lix.execute("SELECT …") — read row columns with ' +
+								'.get("col"). Prefer this over driving the SQL Explorer UI.',
+						);
+					}
+					setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+
+					// Initialize telemetry handler with repository context
+					atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(
+						captureTelemetry,
+						{
+							context: {
+								lix: session.lix,
+								repositoryId,
+								organizationId: namespaceId,
+							},
 						},
-					}).blob();
-				const atelierProps: AtelierProps = {
-					lix: session.lix,
-					onError: (error) =>
-						captureExceptionTelemetry(error, {
-							operation: "atelier_view_render",
+					);
+
+					const repositoryBranchSession = createRepositoryBranchSession({
+						session,
+						onSwitch: async (nextBranchId, context) => {
+							const routedBranchId = resolveAtelierRouteBranchId(
+								branchIdRef.current,
+								session.defaultBranchSnapshot(),
+							);
+							if (
+								suppressBranchNavigationRef.current ||
+								routedBranchId === nextBranchId ||
+								(context?.failedBranchId !== undefined &&
+									routedBranchId === context.failedBranchId)
+							) {
+								return;
+							}
+							await navigateToCurrentPathBranch(nextBranchId);
+						},
+					});
+					setBranchSession(repositoryBranchSession);
+					const getDebugRemoteLix = async () => {
+						debugRemoteLix ??= openRepositoryRemoteLix({
+							namespace,
+							repositorySlug,
+							repositoryId,
+							getAccessToken,
+							refreshAccessToken,
+							allowAnonymous: isReadOnly,
+							publicPath: isReadOnly ? publicPath : undefined,
+							authIdentity: atelierAccountId,
+						});
+						const remote = await debugRemoteLix;
+						const activeBranchId = session.activeBranchSnapshot();
+						if ((await remote.activeBranchId()) !== activeBranchId) {
+							await remote.switchBranch({ branchId: activeBranchId });
+						}
+						return remote;
+					};
+					const getDebugRemoteSnapshot = async () =>
+						new Response((await getDebugRemoteLix()).exportSnapshot(), {
+							headers: {
+								"Content-Type": "application/vnd.lix.snapshot",
+							},
+						}).blob();
+					const atelierProps: AtelierProps = {
+						lix: session.lix,
+						scopeDocumentLix: (path, lix) => fileOpenTrace.scopeLix(path, lix),
+						onError: (error) =>
+							captureExceptionTelemetry(error, {
+								operation: "atelier_view_render",
+								lix_id: repositoryId,
+								namespace_id: namespace,
+							}),
+						readOnly: isReadOnly,
+						// Links to this repository's own file URLs behave like
+						// relative links; mentions write the permanent form.
+						documentLinks: createAtelierDocumentLinks({
+							origin: window.location.origin,
+							namespace,
+							repository: repositorySlug,
+							activeBranchId: () => session.activeBranchSnapshot(),
+							defaultBranchId: () => session.defaultBranchSnapshot(),
+						}),
+						debug: {
+							remoteLix: getDebugRemoteLix,
+							remoteSnapshot: getDebugRemoteSnapshot,
+							snapshotName: `${namespace}-${repositorySlug}`,
+							createReproduction: ({ query, diffCsv }) =>
+								buildRepositoryReproduction({
+									localLix: session.lix,
+									selectedBranchIdAtSnapshotStart:
+										session.activeBranchSnapshot(),
+									remoteSnapshot: getDebugRemoteSnapshot,
+									query,
+									diffCsv,
+								}),
+						},
+						branchSession: repositoryBranchSession,
+						extensions: createLixrayRepositoryExtensions(
+							{
+								lixId: repositoryId,
+								namespace,
+								lixSlug: repositorySlug,
+								lixName: repositoryName,
+							},
+							async () => {
+								if (!client || !canEdit || !atelierAccountId) return false;
+								if (!(await getAccessToken())) return false;
+								const { data, error } = await client
+									.from("mcp_lix_connections")
+									.select("last_seen_at")
+									.eq("lix_id", repositoryId)
+									.order("last_seen_at", { ascending: false })
+									.limit(1);
+								if (error) throw error;
+								return data.length > 0;
+							},
+							canEdit ? stableTeamApiRef.current : null,
+							canEdit && !isDemoModeEnabled && client
+								? stableSettingsApiRef.current
+								: null,
+							repositoryVisibility,
+						),
+						onReady: setInstance,
+						mainArea: {
+							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
+						},
+						sessionStateStore: createRepositorySessionStateStore({
+							accountId: atelierAccountId,
+							repositoryId,
+						}),
+						preferencesStore: createRepositoryPreferencesStore({
+							accountId: atelierAccountId,
+							repositoryId,
+						}),
+						reviewStatusStore: createRepositoryReviewStatusStore({
+							accountId: atelierAccountId,
+							repositoryId,
+						}),
+						onEvent: (event) => eventHandlerRef.current(event),
+					};
+					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
+					setShellProps(atelierProps);
+					const actualBranchId = session.activeBranchSnapshot();
+					if (
+						shouldNormalizeInitialBranch({
+							openingBranchId,
+							currentBranchId: branchIdRef.current ?? null,
+							actualBranchId,
+							defaultBranchId: session.defaultBranchSnapshot(),
+						})
+					) {
+						await navigateToCurrentPathBranch(actualBranchId, true);
+					}
+				})
+				.catch((caught: unknown) => {
+					if (!disposed) {
+						const failedFileId =
+							routeChildRef.current.kind === "file"
+								? parseEntityUrlSplat(routeChildRef.current.splat)?.id
+								: undefined;
+						if (failedFileId) fileOpenTrace.failed(failedFileId);
+						setMigration(null);
+						captureExceptionTelemetry(caught, {
+							operation: "repository_open",
 							lix_id: repositoryId,
 							namespace_id: namespace,
-						}),
-					readOnly: isReadOnly,
-					// Links to this repository's own file URLs behave like
-					// relative links; mentions write the permanent form.
-					documentLinks: createAtelierDocumentLinks({
-						origin: window.location.origin,
-						namespace,
-						repository: repositorySlug,
-						activeBranchId: () => session.activeBranchSnapshot(),
-						defaultBranchId: () => session.defaultBranchSnapshot(),
-					}),
-					debug: {
-						remoteLix: getDebugRemoteLix,
-						remoteSnapshot: getDebugRemoteSnapshot,
-						snapshotName: `${namespace}-${repositorySlug}`,
-						createReproduction: ({ query, diffCsv }) =>
-							buildRepositoryReproduction({
-								localLix: session.lix,
-								selectedBranchIdAtSnapshotStart: session.activeBranchSnapshot(),
-								remoteSnapshot: getDebugRemoteSnapshot,
-								query,
-								diffCsv,
-							}),
-					},
-					branchSession: repositoryBranchSession,
-					extensions: createLixrayRepositoryExtensions(
-						{
-							lixId: repositoryId,
-							namespace,
-							lixSlug: repositorySlug,
-							lixName: repositoryName,
-						},
-						async () => {
-							if (!client || !canEdit || !atelierAccountId) return false;
-							if (!(await getAccessToken())) return false;
-							const { data, error } = await client
-								.from("mcp_lix_connections")
-								.select("last_seen_at")
-								.eq("lix_id", repositoryId)
-								.order("last_seen_at", { ascending: false })
-								.limit(1);
-							if (error) throw error;
-							return data.length > 0;
-						},
-						canEdit ? stableTeamApiRef.current : null,
-						canEdit && !isDemoModeEnabled && client
-							? stableSettingsApiRef.current
-							: null,
-						repositoryVisibility,
-					),
-					onReady: setInstance,
-					mainArea: {
-						home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
-					},
-					sessionStateStore: createRepositorySessionStateStore({
-						accountId: atelierAccountId,
-						repositoryId,
-					}),
-					preferencesStore: createRepositoryPreferencesStore({
-						accountId: atelierAccountId,
-						repositoryId,
-					}),
-					reviewStatusStore: createRepositoryReviewStatusStore({
-						accountId: atelierAccountId,
-						repositoryId,
-					}),
-					onEvent: (event) => eventHandlerRef.current(event),
-				};
-				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
-				setShellProps(atelierProps);
-				const actualBranchId = session.activeBranchSnapshot();
-				if (
-					shouldNormalizeInitialBranch({
-						openingBranchId,
-						currentBranchId: branchIdRef.current ?? null,
-						actualBranchId,
-						defaultBranchId: session.defaultBranchSnapshot(),
-					})
-				) {
-					await navigateToCurrentPathBranch(actualBranchId, true);
-				}
-			})
-			.catch((caught: unknown) => {
-				if (!disposed) {
-					setMigration(null);
-					captureExceptionTelemetry(caught, {
-						operation: "repository_open",
-						lix_id: repositoryId,
-						namespace_id: namespace,
-					});
-					setStorageBusy(isRepositoryStorageInUse(caught));
-					void reportRepositoryOpenFailure(caught, {
-						repositoryId,
-						release: import.meta.env.VITE_LIXRAY_RELEASE_ID ?? "unknown",
-						getAccessToken,
-					});
-					setError(formatRepositoryOpenError(caught));
-				}
-			});
+						});
+						setStorageBusy(isRepositoryStorageInUse(caught));
+						void reportRepositoryOpenFailure(caught, {
+							repositoryId,
+							release: import.meta.env.VITE_LIXRAY_RELEASE_ID ?? "unknown",
+							getAccessToken,
+						});
+						setError(formatRepositoryOpenError(caught));
+					}
+				}),
+		);
 
 		return () => {
 			disposed = true;
@@ -1249,6 +1282,7 @@ export function RepositoryAtelier({
 		canEdit,
 		isReadOnly,
 		getAccessToken,
+		fileOpenTrace,
 		refreshAccessToken,
 		publicPath,
 		navigateToCurrentPathBranch,
@@ -1384,18 +1418,22 @@ export function RepositoryAtelier({
 									value={consumeShellNavigation}
 								>
 									<RepositoryAtelierContext.Provider value={instance}>
-										<Atelier
-											{...shellProps}
-											topBarProps={REPOSITORY_TOP_BAR_PROPS}
-											slots={{
-												navbarBrand,
-												navbarEnd: headerActions,
-											}}
-										/>
-										<Outlet />
-										{shellProps.lix ? (
-											<ReplicaRecovery lix={shellProps.lix} />
-										) : null}
+										<RepositoryFileOpenTraceContext.Provider
+											value={fileOpenTrace}
+										>
+											<Atelier
+												{...shellProps}
+												topBarProps={REPOSITORY_TOP_BAR_PROPS}
+												slots={{
+													navbarBrand,
+													navbarEnd: headerActions,
+												}}
+											/>
+											<Outlet />
+											{shellProps.lix ? (
+												<ReplicaRecovery lix={shellProps.lix} />
+											) : null}
+										</RepositoryFileOpenTraceContext.Provider>
 									</RepositoryAtelierContext.Provider>
 								</RepositoryShellNavigationContext.Provider>
 							</RepositoryRouteSyncContext.Provider>
@@ -1431,6 +1469,10 @@ export function RepositoryAtelier({
 
 export function useRepositoryAtelierInstance(): RepositoryAtelierHandle | null {
 	return useContext(RepositoryAtelierContext);
+}
+
+export function useRepositoryFileOpenTrace(): BrowserFileOpenTraceController | null {
+	return useContext(RepositoryFileOpenTraceContext);
 }
 
 export function useRepositoryDefaultBranchId(): string | null {

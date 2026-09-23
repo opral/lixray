@@ -23,6 +23,15 @@ type AccessTokenProvider = () => Promise<string | null>;
 
 let accessTokenProvider: AccessTokenProvider = () => Promise.resolve(null);
 let repositoryIdProvider: () => string | null = () => null;
+
+/** Configure gateway auth before the first browser span can be exported. */
+export function configureBrowserTelemetryRepository(
+	repositoryId: string,
+	getAccessToken: AccessTokenProvider,
+): void {
+	accessTokenProvider = getAccessToken;
+	repositoryIdProvider = () => repositoryId;
+}
 let providerInstalled = false;
 const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(
 	"opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest",
@@ -82,8 +91,7 @@ export function createLixTelemetryOptions(
 			},
 		};
 	}
-	accessTokenProvider = getAccessToken;
-	repositoryIdProvider = () => repositoryId;
+	configureBrowserTelemetryRepository(repositoryId, getAccessToken);
 	const pending: Uint8Array[] = [];
 	let pendingBytes = 0;
 	let timer: ReturnType<typeof setTimeout> | undefined;
