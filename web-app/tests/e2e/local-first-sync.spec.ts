@@ -219,17 +219,28 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		);
 		const savedDirectoryUrl = links.entities[0]!.url;
 		const savedFileUrl = links.entities[1]!.url;
+		const displayDirectoryUrl = links.entities[0]!.display_url;
+		const displayFileUrl = links.entities[1]!.display_url;
 		expect(links.entities[0]!.id).toBe(directoryId);
 		expect(links.entities[1]!.id).toBe(fileId);
 		expect(links.entities[2]!.url).toBe(openedContext.url);
 		expect(openedContext.files.find((file) => file.id === fileId)?.url).toBe(
 			savedFileUrl,
 		);
-		// A link carries the entity's own path: its folder and its name.
+		expect(
+			openedContext.files.find((file) => file.id === fileId)?.display_url,
+		).toBe(displayFileUrl);
+		// Stored links stop at the ID; display links include the current path.
 		expect(new URL(savedDirectoryUrl).pathname).toBe(
-			`${repository.path}/folder/${compactId(directoryId)}/${source}`,
+			`${repository.path}/folder/${compactId(directoryId)}`,
 		);
 		expect(new URL(savedFileUrl).pathname).toBe(
+			`${repository.path}/file/${compactId(fileId)}`,
+		);
+		expect(new URL(displayDirectoryUrl).pathname).toBe(
+			`${repository.path}/folder/${compactId(directoryId)}/${source}`,
+		);
+		expect(new URL(displayFileUrl).pathname).toBe(
 			`${repository.path}/file/${compactId(fileId)}/${source}/note.txt`,
 		);
 		for (const entity of links.entities) {
@@ -309,17 +320,16 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await renameInput.fill(renamedSource);
 		await renameInput.press("Enter");
 		await expect(row(renamedSource)).toBeVisible();
-		// These links still contain the original location's name. Neither moving
-		// nor renaming the directory may invalidate it or its descendant file,
-		// and each URL is rewritten to where the entity lives now.
-		await page.goto(savedDirectoryUrl);
+		// Readable links retain the old path after a move, but resolve by ID and
+		// rewrite to the current path. Stored links remain unchanged.
+		await page.goto(displayDirectoryUrl);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
 		await expect(page).toHaveURL(
 			new RegExp(
 				`/folder/${compactId(directoryId)}/${target}/${renamedSource}(?:\\?.*)?$`,
 			),
 		);
-		await page.goto(savedFileUrl);
+		await page.goto(displayFileUrl);
 		await expect(
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
 		).toBeVisible({ timeout: 30_000 });
@@ -412,6 +422,14 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			fileId,
 		]);
 		expect(renamedLinks.entities[0]!.path).toBe(`/${target}/${renamedSource}`);
+		expect(renamedLinks.entities[0]!.url).toBe(savedDirectoryUrl);
+		expect(renamedLinks.entities[1]!.url).toBe(savedFileUrl);
+		expect(new URL(renamedLinks.entities[0]!.display_url).pathname).toBe(
+			`${repository.path}/folder/${compactId(directoryId)}/${target}/${renamedSource}`,
+		);
+		expect(new URL(renamedLinks.entities[1]!.display_url).pathname).toBe(
+			`${repository.path}/file/${compactId(fileId)}/${target}/${renamedSource}/note.txt`,
+		);
 		await page.goto(renamedLinks.entities[0]!.url);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
 		await page.goto(renamedLinks.entities[1]!.url);

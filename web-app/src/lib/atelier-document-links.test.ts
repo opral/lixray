@@ -50,11 +50,8 @@ void test("recognizes this repository's file URLs on the branch being viewed", (
 void test("a link with a path resolves by id, whatever the path says", () => {
 	const file = { id: FILE_ID, path: "/docs/100% plan.md" };
 	const href = links().href(file);
-	// The path is for the reader: a plain, lowercase, hyphenated slug.
-	assert.equal(
-		href,
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/100-plan.md`,
-	);
+	// Stored document links keep the ID, while pasted readable links still resolve.
+	assert.equal(href, `https://lixray.test/@acme/company/file/${TOKEN}`);
 	assert.deepEqual(links().resolve(href), { id: FILE_ID });
 	// A stale or wrong path still opens the file the id names.
 	assert.deepEqual(
@@ -67,14 +64,14 @@ void test("a link with a path resolves by id, whatever the path says", () => {
 
 void test("writes the permanent URL, with a branch only off the default", () => {
 	const file = { id: FILE_ID, path: "/docs/Hello World.md" };
-	// The link reads as the file it opens: its id, then its own path.
+	// Moving the file does not change the stored link.
 	assert.equal(
 		links().href(file),
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/hello-world.md`,
+		`https://lixray.test/@acme/company/file/${TOKEN}`,
 	);
 	assert.equal(
 		links("feature").href(file),
-		`https://lixray.test/@acme/company/file/${TOKEN}/docs/hello-world.md?branch=feature`,
+		`https://lixray.test/@acme/company/file/${TOKEN}?branch=feature`,
 	);
 	// What it writes, it recognizes.
 	assert.deepEqual(links("feature").resolve(links("feature").href(file)), {

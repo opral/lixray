@@ -1732,7 +1732,12 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			context: string;
 			file_count: number;
 			directory_count: number;
-			files: Array<{ id: string; path: string; url: string }>;
+			files: Array<{
+				id: string;
+				path: string;
+				url: string;
+				display_url: string;
+			}>;
 			file_paths: Array<string>;
 			file_paths_complete: boolean;
 			file_paths_sql?: string;
@@ -1752,7 +1757,9 @@ void test("open_lix text reports a populated inventory without calling the lix e
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
+				url: "https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg",
+				display_url:
+					"https://lixray.test/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 			},
 		]);
 		assert.equal(content.empty, false);
@@ -2356,10 +2363,14 @@ void test("MCP returns canonical links through modern and text-only tool results
 		});
 		assert.equal(links.isError, undefined, JSON.stringify(links));
 		const content = links.structuredContent as {
-			entities: Array<{ url: string; id: string | null }>;
+			entities: Array<{ url: string; display_url: string; id: string | null }>;
 		};
 		assert.equal(
 			content.entities[0].url,
+			"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg?branch=draft",
+		);
+		assert.equal(
+			content.entities[0].display_url,
 			"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md?branch=draft",
 		);
 		assert.equal(
@@ -2367,6 +2378,7 @@ void test("MCP returns canonical links through modern and text-only tool results
 			"https://dev.lixray.com/@acme/company?branch=draft",
 		);
 		assert.equal(content.entities[1].id, null);
+		assert.equal(content.entities[1].display_url, content.entities[1].url);
 		assert.deepEqual(
 			assertStructuredTextFallback(links, context).entities,
 			content.entities,
@@ -2448,21 +2460,21 @@ void test("MCP returns canonical links through modern and text-only tool results
 	}
 });
 
-void test("every MCP guidance surface tells clients to use returned canonical URLs", async () => {
+void test("every MCP guidance surface distinguishes stored and display URLs", async () => {
 	for (const text of [
 		MCP_SERVER_INSTRUCTIONS,
 		MCP_DOCS,
 		await mcpDocumentationResponse().text(),
 	]) {
 		assert.match(text, /get_entity_urls/);
-		assert.match(text, /canonical/i);
+		assert.match(text, /display_url/);
 		assert.match(text, /branch/);
 	}
 	assert.match(GET_ENTITY_URLS_TOOL_DESCRIPTION, /Read-only/);
 	// The link rule is stated once, in the URL guide; execute_sql stays short.
 	assert.match(MCP_URL_GUIDE, /get_entity_urls/);
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
-	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /canonical url/);
+	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /display_url/);
 });
 
 void test("file read tools list and read files; writes go through execute_sql", async () => {
@@ -2500,7 +2512,12 @@ void test("file read tools list and read files; writes go through execute_sql", 
 		assert.equal(listed.isError, undefined, JSON.stringify(listed));
 		const listing = listed.structuredContent as {
 			commit_id: string;
-			files: Array<{ id: string; path: string; url: string }>;
+			files: Array<{
+				id: string;
+				path: string;
+				url: string;
+				display_url: string;
+			}>;
 			truncated: boolean;
 		};
 		assert.equal(listing.commit_id, "commit-1");
@@ -2508,7 +2525,9 @@ void test("file read tools list and read files; writes go through execute_sql", 
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg",
+				display_url:
+					"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 			},
 		]);
 		assert.equal(listing.truncated, false);
@@ -2528,7 +2547,9 @@ void test("file read tools list and read files; writes go through execute_sql", 
 			{
 				id: "22222222-2222-4222-8222-222222222222",
 				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
+				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg",
+				display_url:
+					"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
 				size: 8,
 				content: "# Hello\n",
 				lixcol_metadata: null,
@@ -2724,7 +2745,12 @@ void test("diff compares two points and sends the same card a write does", async
 			assert.equal(file.before_commit_id, "checkpoint-0");
 			assert.equal(file.after_commit_id, "commit-1");
 			assert.equal(typeof file.url, "string");
+			assert.equal(typeof file.display_url, "string");
 		}
+		assert.match(String(result.files[0]?.url), /\/file\/[A-Za-z0-9_-]{22}$/);
+		assert.match(String(result.files[0]?.display_url), /\/gtm\/leads\.csv$/);
+		assert.equal(result.files[1]?.url, result.url);
+		assert.equal(result.files[1]?.display_url, result.url);
 		assert.match(
 			toolText(diffed),
 			/^3 files changed between latest checkpoint checkpoint-0 and working \(commit commit-1\): gtm\/leads\.csv, gtm\/old\.md, gtm\/plan\.md\./,
@@ -2745,6 +2771,7 @@ void test("diff compares two points and sends the same card a write does", async
 			["modified · +1 ~1 rows", "removed · 1 line", "added · 1 line"],
 		);
 		assert.match(card.files[0]!.html ?? "", /qualified/);
+		assert.equal(card.files[0]!.url, result.files[0]?.display_url);
 		assert.equal(card.files[1]!.url, result.url);
 
 		// An explicit span narrowed to one path.

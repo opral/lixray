@@ -62,7 +62,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.",
+		"description": "Open exact @handle/slug or UUID without calling list_lixes first; mint context on the active branch or branch_id. Returns counts, SQL file_paths, and files with id, path, ID-only url and pathful display_url. Branchless URLs follow the current default; ?branch pins its branch ID. Use file_paths if file_paths_complete.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -136,9 +136,12 @@
 							},
 							"url": {
 								"type": "string"
+							},
+							"display_url": {
+								"type": "string"
 							}
 						},
-						"required": ["id", "path", "url"],
+						"required": ["id", "path", "url", "display_url"],
 						"additionalProperties": false
 					}
 				},
@@ -191,8 +194,8 @@
 	},
 	{
 		"name": "get_entity_urls",
-		"title": "LixRay: Get canonical item URLs",
-		"description": "Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.",
+		"title": "LixRay: Get item links",
+		"description": "Resolve up to 50 files/folders by id or absolute path in the context branch. Returns ID-only url for stored links and pathful display_url for users. Branchless URLs follow the current default; ?branch pins its branch ID. Root folder returns the repository URL. Read-only.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -279,9 +282,12 @@
 							},
 							"url": {
 								"type": "string"
+							},
+							"display_url": {
+								"type": "string"
 							}
 						},
-						"required": ["kind", "id", "path", "url"],
+						"required": ["kind", "id", "path", "url", "display_url"],
 						"additionalProperties": false
 					}
 				}
@@ -305,7 +311,7 @@
 	{
 		"name": "list_files",
 		"title": "LixRay: List files",
-		"description": "List the files of the Lix and branch in context with id, path, and canonical url, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.",
+		"description": "List the files of the Lix and branch in context with id, path, stable url for documents, and readable display_url for users, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -352,9 +358,12 @@
 							},
 							"url": {
 								"type": "string"
+							},
+							"display_url": {
+								"type": "string"
 							}
 						},
-						"required": ["id", "path", "url"],
+						"required": ["id", "path", "url", "display_url"],
 						"additionalProperties": false
 					}
 				},
@@ -381,7 +390,7 @@
 	{
 		"name": "read_files",
 		"title": "LixRay: Read files",
-		"description": "Prefer this tool for ordinary reads; batch absolute paths together. Each returns id, canonical url, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to execute_sql as last_seen_commit_id.",
+		"description": "Prefer this tool for ordinary reads; batch absolute paths together. Each returns id, stable url for documents, readable display_url for users, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to execute_sql as last_seen_commit_id.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -430,6 +439,9 @@
 							"url": {
 								"type": "string"
 							},
+							"display_url": {
+								"type": "string"
+							},
 							"size": {
 								"type": "integer",
 								"minimum": -9007199254740991,
@@ -457,7 +469,14 @@
 								]
 							}
 						},
-						"required": ["id", "path", "url", "size", "lixcol_metadata"],
+						"required": [
+							"id",
+							"path",
+							"url",
+							"display_url",
+							"size",
+							"lixcol_metadata"
+						],
 						"additionalProperties": false
 					}
 				},
@@ -638,6 +657,9 @@
 							},
 							"url": {
 								"type": "string"
+							},
+							"display_url": {
+								"type": "string"
 							}
 						},
 						"required": [
@@ -645,7 +667,8 @@
 							"status",
 							"before_commit_id",
 							"after_commit_id",
-							"url"
+							"url",
+							"display_url"
 						],
 						"additionalProperties": false
 					}

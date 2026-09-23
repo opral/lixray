@@ -84,8 +84,6 @@ void test("SSR guidance resolves UUIDs with parameterized branch-context queries
 		for (const [verb, table] of [
 			["file", "lix_file"],
 			["folder", "lix_directory"],
-			// Folder links written before /folder still resolve.
-			["dir", "lix_directory"],
 		]) {
 			const html = renderToStaticMarkup(
 				createElement(RepositoryMcpGuidance, {

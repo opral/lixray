@@ -1,16 +1,16 @@
 import type { AtelierDocumentLinks } from "@opral/atelier";
 import { atelierBranchSearch } from "./atelier-navigation.ts";
-import { entityRoutePath, parseEntityUrlSplat } from "./entity-url.ts";
+import { entityRouteBase, parseEntityUrlSplat } from "./entity-url.ts";
 
 /** The origins whose file URLs name files of this deployment. */
 const CANONICAL_ORIGIN = "https://lixray.com";
 
 /**
- * LixRay's file URLs for Atelier: `https://lixray.com/@ns/slug/file/<id>/<name>`
+ * LixRay's stored file URLs for Atelier: `https://lixray.com/@ns/slug/file/<id>`
  * (a `branch` parameter only off the default branch). A document may carry
  * one pasted from the browser or written by an agent; Atelier treats it like
  * a relative link when it names a file of the open repository on the branch
- * being viewed. Mentions insert this form, which survives renames.
+ * being viewed. Mentions insert the ID-only form, which survives renames.
  */
 export function createAtelierDocumentLinks({
 	origin,
@@ -61,7 +61,7 @@ export function createAtelierDocumentLinks({
 		},
 		href(file) {
 			const url = new URL(
-				entityRoutePath(namespace, repository, "file", file.id, file.path),
+				entityRouteBase(namespace, repository, "file", file.id),
 				origin,
 			);
 			const { branch } = atelierBranchSearch(
