@@ -73,6 +73,10 @@ test("renders repository guidance but leaves unrelated and malformed routes alon
 		/To check access and read this repository/,
 	);
 	assert.match(
+		render("/@opral/monorepo/folder/ERERERERQRGBEREREREREQ/notes"),
+		/SELECT id, path FROM lix_directory/,
+	);
+	assert.doesNotMatch(
 		render("/@opral/monorepo/dir/ERERERERQRGBEREREREREQ/notes"),
 		/SELECT id, path FROM lix_directory/,
 	);
