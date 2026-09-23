@@ -438,7 +438,9 @@ path in the browser. Store `url` in Markdown and other machine-readable content;
 use `display_url` for human-facing links. Copy these values exactly as returned
 rather than building one from `file_paths`, which are SQL paths. A URL carries a
 `branch` parameter only when its branch is not the Lix's default branch, the
-same rule the app applies to its own links.
+same rule the app applies to its own links. A URL without `branch` follows the
+repository's current default branch; a URL with `branch` stays pinned to that
+branch ID.
 Do not manually encode IDs or guess URLs. The server uses the same URL builder
 as app navigation and sharing.
 

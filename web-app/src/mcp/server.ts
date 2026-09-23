@@ -85,10 +85,10 @@ export const SQL_GUIDE_URI = "lixray://docs/sql";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 export const MCP_URL_GUIDE =
-	"Stored links: use the exact server-generated url from open_lix.files or get_entity_urls in Markdown and other machine-readable content. It contains the file or folder id without the current path. display_url includes the current readable path for user-facing links and may change after a move; path is a SQL path, not a browser URL. Never build a URL by hand. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves links; it is not persistence verification. A URL carries a branch parameter only when it is not the Lix's default branch; keep it exactly as returned. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
+	"Stored links: use the exact server-generated url from open_lix.files or get_entity_urls in Markdown and other machine-readable content. It contains the file or folder id without the current path. display_url includes the current readable path for user-facing links and may change after a move; path is a SQL path, not a browser URL. Never build a URL by hand. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves links; it is not persistence verification. A URL without branch follows the repository's current default branch; a URL with branch stays pinned to that branch id. Keep the URL exactly as returned. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
 
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
-	"Return stable url and readable display_url for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use url in documents and display_url for human-facing links. Read-only; directory path / is the repository URL.";
+	"Return stable url and readable display_url for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use url in documents and display_url for human-facing links. A URL without branch follows the current default branch; a URL with branch pins that branch id. Read-only; directory path / is the repository URL.";
 
 export const UNDO_TOOL_DESCRIPTION =
 	"Undo the latest undoable change on the context branch through SELECT commit_id FROM lix_undo(). Returns the inverse commit_id, or null when there is nothing to undo. Inspect history first if later edits may exist.";
@@ -120,7 +120,7 @@ export const LIST_LIXES_TOOL_DESCRIPTION =
 	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, stable url and readable display_url; when file_paths_complete is true, do not list files again.";
+	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, stable url and readable display_url. A URL without branch follows the current default branch; a URL with branch pins that branch id. When file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
