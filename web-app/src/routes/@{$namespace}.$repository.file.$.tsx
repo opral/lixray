@@ -127,6 +127,16 @@ function RepositoryFileRoute() {
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
+				// Atelier clears onReady when its workspace unmounts and supplies a
+				// new handle when it remounts. This handle has been disposed, so a
+				// retry on it would fail again. Leave the route pending; the new
+				// handle reruns this effect and opens the deep link.
+				if (
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Atelier workspace unmounted"
+				)
+					return;
 				fileOpenTrace?.failed(entityId);
 				if (
 					!(error instanceof Error && error.message === "Entity not found") &&
