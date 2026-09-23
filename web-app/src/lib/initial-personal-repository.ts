@@ -10,6 +10,17 @@ export interface InitialRepositoryResult {
 	created: boolean;
 }
 
+export function browserSignupDestination(
+	returnTo: string,
+	result: InitialRepositoryResult,
+): string {
+	return result.created &&
+		result.path &&
+		(returnTo === "/open" || returnTo === "/home")
+		? result.path
+		: returnTo;
+}
+
 /** Ensures a browser account's first personal repo exists. */
 export async function ensureInitialPersonalRepository(
 	client: LixraySupabaseClient,

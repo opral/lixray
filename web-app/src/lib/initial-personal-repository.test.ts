@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { createLix } from "@lix-js/sdk";
-import { ensureInitialPersonalRepository } from "./initial-personal-repository.ts";
+import {
+	browserSignupDestination,
+	ensureInitialPersonalRepository,
+} from "./initial-personal-repository.ts";
 import type { LixraySupabaseClient } from "./supabase.ts";
 
 const namespaceId = "87000000-0000-4000-8000-000000000010";
@@ -109,5 +112,19 @@ void test("uses the repo created by another tab after a name conflict", async ()
 			create,
 		),
 		{ path: "/@opral/repo", created: false },
+	);
+});
+
+void test("new browser accounts open their repo while deep links are preserved", () => {
+	const created = { path: "/@opral/repo", created: true };
+	assert.equal(browserSignupDestination("/open", created), "/@opral/repo");
+	assert.equal(browserSignupDestination("/home", created), "/@opral/repo");
+	assert.equal(
+		browserSignupDestination("/@team/shared/file?path=x", created),
+		"/@team/shared/file?path=x",
+	);
+	assert.equal(
+		browserSignupDestination("/open", { ...created, created: false }),
+		"/open",
 	);
 });

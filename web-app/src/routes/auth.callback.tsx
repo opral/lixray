@@ -3,7 +3,10 @@ import { useEffect, useState } from "react";
 import { peekAuthReturnTo, takeAuthReturnTo } from "~/components/auth-provider";
 import { Button } from "~/components/ui/button";
 import { getBrowserSupabaseClient } from "~/lib/supabase";
-import { ensureInitialPersonalRepository } from "~/lib/initial-personal-repository";
+import {
+	browserSignupDestination,
+	ensureInitialPersonalRepository,
+} from "~/lib/initial-personal-repository";
 import {
 	markRepositoryShareJoined,
 	peekRepositoryShareCapability,
@@ -40,11 +43,7 @@ async function finishBrowserSignup(accessToken: string) {
 		window.location.origin,
 	);
 	const returnTo = takeAuthReturnTo();
-	window.location.replace(
-		returnTo === "/open" && result.created && result.path
-			? result.path
-			: returnTo,
-	);
+	window.location.replace(browserSignupDestination(returnTo, result));
 }
 
 export const Route = createFileRoute("/auth/callback")({
