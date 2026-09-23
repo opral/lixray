@@ -47,6 +47,19 @@ void test("tells the user how to recover from an outdated repository owner", () 
 	);
 });
 
+void test("tells an older tab to reload after a sync protocol upgrade", () => {
+	for (const code of [
+		"LIX_ADMISSION_EPOCH",
+		"LIX_SYNC_PROTOCOL_MISMATCH",
+		"LIX_PROTOCOL_VERSION_MISMATCH",
+	]) {
+		assert.equal(
+			formatRepositoryOpenError({ code, message: "protocol mismatch" }),
+			"LixRay has been updated. Save any unsaved edits, then reload this tab to continue syncing.",
+		);
+	}
+});
+
 void test("explains a terminal automatic migration failure", () => {
 	for (const code of [
 		"LIX_ERROR_MIGRATION_FAILED",

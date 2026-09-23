@@ -17,6 +17,14 @@ export function formatRepositoryOpenError(caught: unknown): string {
 		return "Another tab is running a different Lix version. Save any unsaved edits, close all other lixray.com tabs and app windows, then retry. Your saved repository data remains in this browser.";
 	}
 
+	if (
+		code === "LIX_ADMISSION_EPOCH" ||
+		code === "LIX_SYNC_PROTOCOL_MISMATCH" ||
+		code === "LIX_PROTOCOL_VERSION_MISMATCH"
+	) {
+		return "LixRay has been updated. Save any unsaved edits, then reload this tab to continue syncing.";
+	}
+
 	return message;
 }
 
