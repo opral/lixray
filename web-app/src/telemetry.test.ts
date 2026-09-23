@@ -193,3 +193,30 @@ void test("file-open root covers a document's first live observation", async () 
 	assert.equal(observedParent, root?.spanContext().spanId);
 	assert.equal(root.attributes["lixray.file.open.outcome"], "loaded");
 });
+
+void test("repository retry starts a new file-open root before SDK work", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute("file-id");
+	const initial = controller.run(() => trace.getSpan(context.active()));
+	controller.ensureRepositoryAttempt("file-id");
+	assert.equal(
+		controller.run(() => trace.getSpan(context.active())),
+		initial,
+	);
+	controller.failed("file-id");
+
+	controller.ensureRepositoryAttempt("file-id");
+	const retry = controller.run(() => trace.getSpan(context.active()));
+	assert.ok(retry);
+	assert.notEqual(retry?.spanContext().spanId, initial?.spanContext().spanId);
+	controller.cancel();
+	assert.deepEqual(
+		exporter.getFinishedSpans().map((span) => span.name),
+		["lixray.file.open", "lixray.file.open"],
+	);
+});
