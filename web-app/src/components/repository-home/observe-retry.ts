@@ -38,13 +38,13 @@ export async function consumeObservedRowsWithRetry<T>({
 	wait?: (attempt: number, signal: AbortSignal) => Promise<void>;
 }): Promise<void> {
 	let retryAttempt = 0;
+	let lastTransportFailureAt = 0;
 	while (!signal.aborted) {
 		let events: AsyncIterableIterator<T> | undefined;
 		try {
 			events = observe();
 			for await (const frame of events) {
 				if (signal.aborted) return;
-				retryAttempt = 0;
 				onFrame(frame);
 			}
 			return;
@@ -54,6 +54,12 @@ export async function consumeObservedRowsWithRetry<T>({
 				onError(error);
 				return;
 			}
+			// A partial replica may yield a cached local frame before every failed
+			// remote attempt. Only a sustained interval without transport errors
+			// begins a new retry sequence.
+			const now = Date.now();
+			if (now - lastTransportFailureAt > 30_000) retryAttempt = 0;
+			lastTransportFailureAt = now;
 		} finally {
 			try {
 				await events?.return?.();

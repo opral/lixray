@@ -36,6 +36,27 @@ void test("reopens a failed observation and publishes its recovered frame", asyn
 	assert.deepEqual(errors, []);
 });
 
+void test("cached frames on repeated failed attempts do not reset backoff", async () => {
+	const controller = new AbortController();
+	const retries: number[] = [];
+	let opens = 0;
+	await consumeObservedRowsWithRetry({
+		observe: () => {
+			opens += 1;
+			return failedAfterFrame();
+		},
+		onFrame: () => {},
+		onError: () => assert.fail("transient error surfaced"),
+		signal: controller.signal,
+		wait: async (attempt) => {
+			retries.push(attempt);
+			if (retries.length === 3) controller.abort();
+		},
+	});
+	assert.equal(opens, 3);
+	assert.deepEqual(retries, [0, 1, 2]);
+});
+
 void test("retries a network failure delivered after connectivity returns", async () => {
 	// Retry depends on the typed error, not navigator.onLine at delivery time.
 	assert.equal(
