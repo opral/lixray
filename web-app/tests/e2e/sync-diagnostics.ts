@@ -223,16 +223,20 @@ export async function collectSyncDiagnostics(page: Page) {
 					const props = node?.memoizedProps;
 					if (!props || !("sourceFile" in props)) continue;
 					const file = props.sourceFile as
-						| { content?: Uint8Array; path?: string }
+						| { content?: unknown; path?: string }
 						| undefined;
+					const content = file?.content;
 					sources.push({
 						depth,
 						alternate: node !== fiber,
 						activeFileId: props.activeFileId,
 						path: file?.path,
-						content: file?.content
-							? new TextDecoder().decode(file.content)
-							: null,
+						content:
+							typeof content === "string"
+								? content
+								: content instanceof Uint8Array
+									? new TextDecoder().decode(content)
+									: null,
 					});
 				}
 			}
