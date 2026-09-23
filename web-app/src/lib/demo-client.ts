@@ -5,4 +5,6 @@ const runtimeDemoMode =
 		?.getAttribute("content") === "1";
 
 export const isDemoModeEnabled =
-	import.meta.env.VITE_LIXRAY_DEMO === "1" || runtimeDemoMode;
+	(typeof import.meta.env === "object" &&
+		import.meta.env.VITE_LIXRAY_DEMO === "1") ||
+	runtimeDemoMode;

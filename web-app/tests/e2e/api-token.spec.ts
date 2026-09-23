@@ -91,14 +91,20 @@ test("Account tokens have generated names, creation dates and independent deleti
 				.getAttribute("datetime"),
 		).toBeTruthy();
 		expect(first).toMatch(/^lixray_pat_[0-9a-f]{64}$/);
-		const otherRepo = await request.get(`/lix/v1/${otherId}/`, {
-			headers: {
-				Authorization: `Bearer ${first}`,
-				"Lix-Server-Protocol-Version": String(
-					compatibility.serverProtocolVersion,
-				),
-			},
-		});
+		const openWithToken = (repositoryId: string) =>
+			request.get(`/lix/v1/${repositoryId}/`, {
+				headers: {
+					Authorization: `Bearer ${first}`,
+					"Lix-Server-Protocol-Version": String(
+						compatibility.serverProtocolVersion,
+					),
+				},
+			});
+		// Each freshly created Lix is lazy on the server. Establish the SDK
+		// target's first authenticated handshake before exercising openLix().
+		const targetRepo = await openWithToken(lixId);
+		expect(targetRepo.status()).toBe(200);
+		const otherRepo = await openWithToken(otherId);
 		expect(otherRepo.status()).toBe(200);
 		await page.getByRole("button", { name: "Copy token", exact: true }).click();
 		expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
@@ -121,7 +127,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 				)) as typeof import("@lix-js/sdk");
 				const connection = {
 					url: `${window.location.origin}/lix/${lixId}`,
-					headers: async () => ({ Authorization: `Bearer ${token}` }),
+					headers: { Authorization: `Bearer ${token}` },
 				};
 				const remote = await openLix({
 					server: connection,
