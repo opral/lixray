@@ -6,6 +6,7 @@ import {
 } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
+import { AtelierDocumentCommandNotCompletedError } from "@opral/atelier";
 import { useEffect, useState } from "react";
 import {
 	useMarkRepositoryRouteSynced,
@@ -104,17 +105,31 @@ function RepositoryFileRoute() {
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
 				fileOpenTrace?.resolved(entityId, requestedPath);
-				await (fileOpenTrace
-					? fileOpenTrace.run(() =>
-							atelier.documents.open(requestedPath, {
-								signal: controller.signal,
-								navigationCause: "route",
-							}),
+				const open = async (retriesLeft: number): Promise<void> => {
+					controller.signal.throwIfAborted();
+					try {
+						await (fileOpenTrace
+							? fileOpenTrace.run(() =>
+									atelier.documents.open(requestedPath, {
+										signal: controller.signal,
+										navigationCause: "route",
+									}),
+								)
+							: atelier.documents.open(requestedPath, {
+									signal: controller.signal,
+									navigationCause: "route",
+								}));
+					} catch (error) {
+						if (
+							!(error instanceof AtelierDocumentCommandNotCompletedError) ||
+							retriesLeft === 0
 						)
-					: atelier.documents.open(requestedPath, {
-							signal: controller.signal,
-							navigationCause: "route",
-						}));
+							throw error;
+						await new Promise((resolve) => setTimeout(resolve, 150));
+						await open(retriesLeft - 1);
+					}
+				};
+				await open(3);
 				if (!controller.signal.aborted) {
 					markRouteSynced();
 					setResolvedEntity({
