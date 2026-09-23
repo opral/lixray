@@ -124,12 +124,22 @@ export function createBrowserFileOpenTraceController(
 			filePath: string,
 			fileId: string,
 			supported: boolean,
+			navigationCause: "foreground" | "route" | "restoration",
 		): void {
-			// Route opens are identified by file ID. Restoration of a different tab
-			// must not steal that trace while the route resolves its canonical path.
-			if (active?.owner === "route" && active.fileId !== fileId) return;
+			// Restored tabs must not steal an ongoing user-visible open. A foreground
+			// open can precede the URL change, so begin its root at this event.
+			if (
+				active &&
+				active.fileId !== fileId &&
+				navigationCause === "restoration"
+			)
+				return;
 			if (!active || active.fileId !== fileId) {
-				start("document", fileId, filePath);
+				start(
+					navigationCause === "route" ? "route" : "document",
+					fileId,
+					filePath,
+				);
 			} else {
 				active.filePath = filePath;
 			}

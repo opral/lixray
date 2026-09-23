@@ -227,8 +227,13 @@ void test("restored document observation joins the route root before ID lookup f
 		tracer,
 	);
 	controller.ensureRoute("file-id");
-	controller.documentAttempted("/different.csv", "different-file", true);
-	controller.documentAttempted("/posts.csv", "file-id", true);
+	controller.documentAttempted(
+		"/different.csv",
+		"different-file",
+		true,
+		"restoration",
+	);
+	controller.documentAttempted("/posts.csv", "file-id", true, "route");
 	const observedParents: Array<string | undefined> = [];
 	const lix = {
 		observe: () => ({
@@ -265,7 +270,7 @@ void test("a different file cannot complete the route root even at the same path
 		tracer,
 	);
 	controller.ensureRoute("file-a");
-	controller.documentAttempted("/posts.csv", "file-a", true);
+	controller.documentAttempted("/posts.csv", "file-a", true, "route");
 	controller.documentLoaded("/posts.csv", "file-b");
 	controller.cancel();
 	const [root] = exporter.getFinishedSpans();
@@ -280,7 +285,7 @@ void test("a document root keeps its ID when a different deep link supersedes it
 		"partial_replica",
 		tracer,
 	);
-	controller.documentAttempted("/b.csv", "file-b", true);
+	controller.documentAttempted("/b.csv", "file-b", true, "foreground");
 	controller.ensureRoute("file-a");
 	controller.cancel();
 	const roots = exporter.getFinishedSpans();
@@ -303,8 +308,63 @@ void test("opening a second document supersedes an in-place document root", () =
 		"partial_replica",
 		tracer,
 	);
-	controller.documentAttempted("/a.csv", "file-a", true);
-	controller.documentAttempted("/b.csv", "file-b", true);
+	controller.documentAttempted("/a.csv", "file-a", true, "foreground");
+	controller.documentAttempted("/b.csv", "file-b", true, "foreground");
+	controller.cancel();
+	assert.deepEqual(
+		exporter
+			.getFinishedSpans()
+			.map((root) => [
+				root.attributes["lix.file.id"],
+				root.attributes["lixray.file.open.outcome"],
+			]),
+		[
+			["file-a", "superseded"],
+			["file-b", "cancelled"],
+		],
+	);
+});
+
+void test("foreground B joins its own root before route A navigates away", async () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute("file-a");
+	controller.documentAttempted("/b.csv", "file-b", true, "foreground");
+	let observedParent: string | undefined;
+	const lix = {
+		observe: () => ({
+			[Symbol.asyncIterator]() {
+				return this;
+			},
+			next: async () => {
+				observedParent = trace.getSpan(context.active())?.spanContext().spanId;
+				return { done: true as const, value: undefined };
+			},
+		}),
+	} as unknown as Lix;
+	await controller.scopeLix("/b.csv", "file-b", lix).observe("SELECT 1").next();
+	controller.ensureRoute("file-b");
+	controller.cancel();
+	const [routeA, openB] = exporter.getFinishedSpans();
+	assert.equal(routeA?.attributes["lix.file.id"], "file-a");
+	assert.equal(routeA?.attributes["lixray.file.open.outcome"], "superseded");
+	assert.equal(openB?.attributes["lix.file.id"], "file-b");
+	assert.equal(observedParent, openB?.spanContext().spanId);
+});
+
+void test("route B can supersede route A before Atelier emits its open event", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute("file-a");
+	controller.documentAttempted("/b.csv", "file-b", true, "route");
 	controller.cancel();
 	assert.deepEqual(
 		exporter

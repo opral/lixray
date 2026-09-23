@@ -82,10 +82,12 @@ function RepositoryFileRoute() {
 					? fileOpenTrace.run(() =>
 							atelier.documents.open(requestedPath, {
 								signal: controller.signal,
+								navigationCause: "route",
 							}),
 						)
 					: atelier.documents.open(requestedPath, {
 							signal: controller.signal,
+							navigationCause: "route",
 						}));
 				if (!controller.signal.aborted) markRouteSynced();
 			})

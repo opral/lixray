@@ -848,6 +848,7 @@ export function RepositoryAtelier({
 					event.filePath,
 					event.fileId,
 					event.supported,
+					event.navigationCause,
 				);
 			else if (event.type === "document_loaded")
 				fileOpenTrace.documentLoaded(event.filePath, event.fileId);
