@@ -62,7 +62,7 @@
 	{
 		"name": "open_lix",
 		"title": "LixRay: Open a Lix",
-		"description": "Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, stable url and readable display_url. A URL without branch follows the current default branch; a URL with branch pins that branch id. When file_paths_complete is true, do not list files again.",
+		"description": "Open exact @handle/slug or UUID without calling list_lixes first; mint context on the active branch or branch_id. Returns counts, SQL file_paths, and files with id, path, ID-only url and pathful display_url. Branchless URLs follow the current default; ?branch pins its branch ID. Use file_paths if file_paths_complete.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -195,7 +195,7 @@
 	{
 		"name": "get_entity_urls",
 		"title": "LixRay: Get item links",
-		"description": "Return stable url and readable display_url for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use url in documents and display_url for human-facing links. A URL without branch follows the current default branch; a URL with branch pins that branch id. Read-only; directory path / is the repository URL.",
+		"description": "Resolve up to 50 files/folders by id or absolute path in the context branch. Returns ID-only url for stored links and pathful display_url for users. Branchless URLs follow the current default; ?branch pins its branch ID. Root folder returns the repository URL. Read-only.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
