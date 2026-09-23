@@ -15,7 +15,7 @@ interface FileOpenScope {
 	span: Span;
 	context: Context;
 	owner: "route" | "document";
-	fileId?: string;
+	fileId: string;
 	filePath?: string;
 	timer: ReturnType<typeof setTimeout>;
 	settleTimer?: ReturnType<typeof setTimeout>;
@@ -69,7 +69,7 @@ export function createBrowserFileOpenTraceController(
 				attributes: {
 					"lix.id": repositoryId,
 					"lix.replica.mode": replicaMode,
-					...(fileId ? { "lix.file.id": fileId } : {}),
+					"lix.file.id": fileId,
 				},
 			},
 			ROOT_CONTEXT,
@@ -173,13 +173,7 @@ export function createBrowserFileOpenTraceController(
 		/** Scoped handle for document loaders and React effects, never the shell. */
 		scopeLix(filePath: string, fileId: string | undefined, lix: Lix): Lix {
 			const run = <T>(operation: () => T, track = false): T => {
-				const scope = active?.fileId
-					? active.fileId === fileId
-						? active
-						: undefined
-					: active?.filePath === filePath
-						? active
-						: undefined;
+				const scope = active?.fileId === fileId ? active : undefined;
 				if (scope && scope.filePath === undefined) scope.filePath = filePath;
 				const result = scope
 					? context.with(scope.context, operation)
