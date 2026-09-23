@@ -228,6 +228,7 @@ async function openRepositoryLixSessionWithRetry(
 							refreshAccessToken: options.refreshAccessToken,
 							signal: options.signal,
 							shouldCaptureRequestFailures: () => false,
+							openingParent: () => options.openingTelemetryParent,
 						}),
 						signal: options.signal,
 					});
@@ -258,6 +259,7 @@ async function openRepositoryLixSessionOnce(
 		options,
 		requestFailureReporting,
 		telemetry,
+		() => openingParent,
 	).catch((error: unknown) => {
 		openingParent = undefined;
 		throw error;
@@ -340,6 +342,7 @@ async function openOpfsSyncSession(
 	options: ResolvedOpenRepositoryLixSessionOptions,
 	requestFailureReporting: { enabled: boolean },
 	telemetry: LixTelemetryOptions,
+	openingParent: () => ResolvedOpenRepositoryLixSessionOptions["openingTelemetryParent"],
 ): Promise<Lix> {
 	options.signal?.throwIfAborted();
 	const fetcher = createTelemetryFetch(options.fetch ?? networkFetch, {
@@ -347,6 +350,7 @@ async function openOpfsSyncSession(
 		refreshAccessToken: options.refreshAccessToken,
 		signal: options.signal,
 		shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
+		openingParent,
 	});
 	const commonServer = {
 		url: repositoryUrl(options),
@@ -433,6 +437,7 @@ export function createTelemetryFetch(
 		refreshAccessToken?: TokenProvider;
 		signal?: AbortSignal;
 		shouldCaptureRequestFailures?: () => boolean;
+		openingParent?: () => ResolvedOpenRepositoryLixSessionOptions["openingTelemetryParent"];
 	},
 	dependencies: {
 		captureException?: typeof captureExceptionTelemetry;
@@ -460,6 +465,7 @@ export function createTelemetryFetch(
 				context.repositoryId,
 				request,
 				(_repositoryId, tracedRequest) => fetcher(tracedRequest),
+				context.openingParent?.(),
 			);
 		} catch (error) {
 			if (
@@ -500,6 +506,7 @@ export function createTelemetryFetch(
 						context.repositoryId,
 						retryRequest,
 						(_repositoryId, tracedRequest) => fetcher(tracedRequest),
+						context.openingParent?.(),
 					);
 				}
 			} catch {

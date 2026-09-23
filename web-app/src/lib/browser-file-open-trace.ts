@@ -14,7 +14,8 @@ import type { Lix } from "@lix-js/sdk";
 interface FileOpenScope {
 	span: Span;
 	context: Context;
-	fileId?: string;
+	owner: "route" | "document";
+	fileId: string;
 	filePath?: string;
 	timer: ReturnType<typeof setTimeout>;
 	settleTimer?: ReturnType<typeof setTimeout>;
@@ -54,7 +55,11 @@ export function createBrowserFileOpenTraceController(
 		completedFileId = outcome === "loaded" ? scope.fileId : undefined;
 	};
 
-	const start = (fileId?: string, filePath?: string): FileOpenScope => {
+	const start = (
+		owner: FileOpenScope["owner"],
+		fileId: string,
+		filePath?: string,
+	): FileOpenScope => {
 		if (active) finish(active, "superseded");
 		completedFileId = undefined;
 		const span = tracer.startSpan(
@@ -64,7 +69,7 @@ export function createBrowserFileOpenTraceController(
 				attributes: {
 					"lix.id": repositoryId,
 					"lix.replica.mode": replicaMode,
-					...(fileId ? { "lix.file.id": fileId } : {}),
+					"lix.file.id": fileId,
 				},
 			},
 			ROOT_CONTEXT,
@@ -72,6 +77,7 @@ export function createBrowserFileOpenTraceController(
 		const scope: FileOpenScope = {
 			span,
 			context: trace.setSpan(ROOT_CONTEXT, span),
+			owner,
 			fileId,
 			filePath,
 			startedAtMs: performance.now(),
@@ -98,27 +104,42 @@ export function createBrowserFileOpenTraceController(
 	return {
 		/** Called by the route before repository opening or file lookup begins. */
 		ensureRoute(fileId: string): void {
-			if (active?.fileId === fileId) return;
-			if (active && active.fileId === undefined) {
-				active.fileId = fileId;
-				active.span.setAttribute("lix.file.id", fileId);
+			if (active?.fileId === fileId) {
+				active.owner = "route";
 				return;
 			}
 			if (!active && completedFileId === fileId) return;
-			start(fileId);
+			start("route", fileId);
 		},
 		/** A retry is a new open even when the route and file ID are unchanged. */
 		ensureRepositoryAttempt(fileId: string): void {
-			if (active?.fileId === fileId) return;
-			start(fileId);
+			if (active?.fileId === fileId) {
+				active.owner = "route";
+				return;
+			}
+			start("route", fileId);
 		},
 		/** Atelier also opens files without a fresh URL route. */
-		documentAttempted(filePath: string, supported: boolean): void {
-			// Route opens are identified by file ID. Restoration of a different tab
-			// must not steal that trace while the route resolves its canonical path.
-			if (active?.fileId && active.filePath !== filePath) return;
-			if (!active || (active.filePath && active.filePath !== filePath)) {
-				start(undefined, filePath);
+		documentAttempted(
+			filePath: string,
+			fileId: string,
+			supported: boolean,
+			navigationCause: "foreground" | "route" | "restoration",
+		): void {
+			// Restored tabs must not steal an ongoing user-visible open. A foreground
+			// open can precede the URL change, so begin its root at this event.
+			if (
+				active &&
+				active.fileId !== fileId &&
+				navigationCause === "restoration"
+			)
+				return;
+			if (!active || active.fileId !== fileId) {
+				start(
+					navigationCause === "route" ? "route" : "document",
+					fileId,
+					filePath,
+				);
 			} else {
 				active.filePath = filePath;
 			}
@@ -128,9 +149,15 @@ export function createBrowserFileOpenTraceController(
 			if (active?.fileId !== fileId) return;
 			if (active?.fileId === fileId) active.filePath = filePath;
 		},
-		documentLoaded(filePath: string): void {
+		documentLoaded(filePath: string, fileId: string | undefined): void {
 			const scope = active;
-			if (!scope || scope.filePath !== filePath || scope.rendered) return;
+			if (
+				!scope ||
+				scope.fileId !== fileId ||
+				scope.filePath !== filePath ||
+				scope.rendered
+			)
+				return;
 			scope.rendered = true;
 			scope.span.setAttribute(
 				"lixray.file.open.render_ms",
@@ -154,9 +181,10 @@ export function createBrowserFileOpenTraceController(
 			return active ? context.with(active.context, operation) : operation();
 		},
 		/** Scoped handle for document loaders and React effects, never the shell. */
-		scopeLix(filePath: string, lix: Lix): Lix {
+		scopeLix(filePath: string, fileId: string | undefined, lix: Lix): Lix {
 			const run = <T>(operation: () => T, track = false): T => {
-				const scope = active?.filePath === filePath ? active : undefined;
+				const scope = active?.fileId === fileId ? active : undefined;
+				if (scope && scope.filePath === undefined) scope.filePath = filePath;
 				const result = scope
 					? context.with(scope.context, operation)
 					: operation();

@@ -6,7 +6,8 @@ import {
 } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { AtelierDocumentCommandNotCompletedError } from "@opral/atelier";
+import { useEffect, useState } from "react";
 import {
 	useMarkRepositoryRouteSynced,
 	useBeginRepositoryRouteNavigation,
@@ -41,6 +42,46 @@ function RepositoryFileRoute() {
 	const entityId = parseEntityUrlSplat(filePath)?.id;
 	const { branch } = Route.useSearch();
 	const activeBranchId = useRepositoryActiveBranchId();
+	const [resolvedEntity, setResolvedEntity] = useState<{
+		atelier: typeof atelier;
+		branchId: string | null;
+		id: string;
+		path: string;
+	} | null>(null);
+
+	// The URL path is descriptive. Rewriting it must not restart (and abort)
+	// the open command for the same stable file ID.
+	useEffect(() => {
+		if (
+			!resolvedEntity ||
+			resolvedEntity.atelier !== atelier ||
+			resolvedEntity.branchId !== activeBranchId ||
+			resolvedEntity.id !== entityId
+		)
+			return;
+		const canonical = canonicalEntitySplat(filePath, resolvedEntity);
+		if (!canonical) return;
+		void navigate({
+			to: "/@{$namespace}/$repository/file/$",
+			params: { namespace, repository, _splat: canonical },
+			search:
+				branch && defaultBranchId
+					? atelierBranchSearch(branch, defaultBranchId)
+					: {},
+			replace: true,
+		});
+	}, [
+		activeBranchId,
+		atelier,
+		branch,
+		defaultBranchId,
+		entityId,
+		filePath,
+		namespace,
+		navigate,
+		repository,
+		resolvedEntity,
+	]);
 
 	useEffect(() => {
 		if (!atelier || !entityId) return;
@@ -64,33 +105,53 @@ function RepositoryFileRoute() {
 				if (!entity) throw new Error("Entity not found");
 				requestedPath = entity.path;
 				fileOpenTrace?.resolved(entityId, requestedPath);
-				// The id resolved; the path in the URL is decoration. Write the
-				// file's own path back over whatever the link claimed — a bare
-				// id, a stale name, a typo.
-				const canonical = canonicalEntitySplat(filePath, entity);
-				if (canonical)
-					void navigate({
-						to: "/@{$namespace}/$repository/file/$",
-						params: { namespace, repository, _splat: canonical },
-						search:
-							branch && defaultBranchId
-								? atelierBranchSearch(branch, defaultBranchId)
-								: {},
-						replace: true,
-					});
-				await (fileOpenTrace
-					? fileOpenTrace.run(() =>
-							atelier.documents.open(requestedPath, {
-								signal: controller.signal,
-							}),
+				const open = async (retriesLeft: number): Promise<void> => {
+					controller.signal.throwIfAborted();
+					try {
+						await (fileOpenTrace
+							? fileOpenTrace.run(() =>
+									atelier.documents.open(requestedPath, {
+										signal: controller.signal,
+										navigationCause: "route",
+									}),
+								)
+							: atelier.documents.open(requestedPath, {
+									signal: controller.signal,
+									navigationCause: "route",
+								}));
+					} catch (error) {
+						if (
+							!(error instanceof AtelierDocumentCommandNotCompletedError) ||
+							retriesLeft === 0
 						)
-					: atelier.documents.open(requestedPath, {
-							signal: controller.signal,
-						}));
-				if (!controller.signal.aborted) markRouteSynced();
+							throw error;
+						await new Promise((resolve) => setTimeout(resolve, 150));
+						await open(retriesLeft - 1);
+					}
+				};
+				await open(3);
+				if (!controller.signal.aborted) {
+					markRouteSynced();
+					setResolvedEntity({
+						atelier,
+						branchId: activeBranchId,
+						id: entityId,
+						path: requestedPath,
+					});
+				}
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
+				// Atelier clears onReady when its workspace unmounts and supplies a
+				// new handle when it remounts. This handle has been disposed, so a
+				// retry on it would fail again. Leave the route pending; the new
+				// handle reruns this effect and opens the deep link.
+				if (
+					error instanceof Error &&
+					error.name === "AbortError" &&
+					error.message === "Atelier workspace unmounted"
+				)
+					return;
 				fileOpenTrace?.failed(entityId);
 				if (
 					!(error instanceof Error && error.message === "Entity not found") &&
@@ -126,7 +187,6 @@ function RepositoryFileRoute() {
 		branch,
 		defaultBranchId,
 		entityId,
-		filePath,
 		fileOpenTrace,
 		consumeShellNavigation,
 		markRouteSynced,

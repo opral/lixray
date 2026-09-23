@@ -1,6 +1,7 @@
 import type { Lix } from "@lix-js/sdk";
 import { useEffect, useMemo, useState } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
+import { consumeObservedRowsWithRetry } from "./observe-retry.ts";
 
 export function dirNameFromPath(dirPath: string): string {
 	return dirPath.split("/").filter(Boolean).at(-1) ?? "";
@@ -67,40 +68,37 @@ function useObservedRows(
 			setState({ rows: null, error: null });
 			return;
 		}
-		let disposed = false;
+		const controller = new AbortController();
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
 		if (typeof performance !== "undefined") {
 			performance.mark("lixray:query:observe");
 		}
-		const events = lix.observe(sql, JSON.parse(paramsKey) as string[]);
 		setState({ rows: null, error: null });
-		void (async () => {
-			try {
-				for await (const event of events) {
-					if (!disposed) {
-						setState({ rows: event.result.rows, error: null });
-					}
-				}
-				// Repository close can end the iterator before React cleans up this effect.
-			} catch (error) {
-				if (!disposed) {
-					const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
-					if (!unavailable)
-						console.error("repository-home: lix observe failed", error);
-					const failure =
-						error instanceof Error ? error : new Error(String(error));
-					setState((current) =>
-						unavailable
-							? { rows: null, error: failure }
-							: preserveObservedRowsAfterError(current, failure),
-					);
-				}
-			}
-		})();
+		void consumeObservedRowsWithRetry({
+			observe: () =>
+				lix.observe(sql, JSON.parse(paramsKey) as string[], {
+					signal: controller.signal,
+				}),
+			onFrame: (event) => {
+				setState({ rows: event.result.rows, error: null });
+			},
+			onError: (error) => {
+				const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
+				if (!unavailable)
+					console.error("repository-home: lix observe failed", error);
+				const failure =
+					error instanceof Error ? error : new Error(String(error));
+				setState((current) =>
+					unavailable
+						? { rows: null, error: failure }
+						: preserveObservedRowsAfterError(current, failure),
+				);
+			},
+			signal: controller.signal,
+		});
 		return () => {
-			disposed = true;
-			void events.return?.();
+			controller.abort();
 		};
 	}, [enabled, lix, sql, paramsKey, retryAttempt]);
 	return state;

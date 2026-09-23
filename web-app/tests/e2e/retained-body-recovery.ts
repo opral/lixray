@@ -108,3 +108,69 @@ export function isRetryableMergeConflict(
 		error.code === "LIX_TRANSACTION_CONFLICT"
 	);
 }
+
+/** A merge 409 is recovered when the same request later succeeds. */
+export function createMergeReplayTracker() {
+	const pending = new Map<string, { url: string; count: number }>();
+	const rejectedFailures: string[] = [];
+	let recoveredAttempts = 0;
+	const requestKey = (response: ObservedResponse): string | null => {
+		if (response.method !== "POST" || !response.body?.byteLength) return null;
+		let url: URL;
+		try {
+			url = new URL(response.url);
+		} catch {
+			return null;
+		}
+		if (
+			!/^\/lix\/v1\/[^/]+\/sync\/merge$/.test(url.pathname) ||
+			url.search ||
+			url.hash ||
+			!["http:", "https:"].includes(url.protocol)
+		)
+			return null;
+		return JSON.stringify([
+			response.url,
+			Buffer.from(response.body).toString("base64"),
+		]);
+	};
+	return {
+		/** True when this 409 is tracked until an exact replay succeeds. */
+		observe(response: ObservedResponse): boolean {
+			if (![200, 409].includes(response.status)) return false;
+			const key = requestKey(response);
+			if (!key) return false;
+			if (response.status === 409) {
+				pending.set(key, {
+					url: response.url,
+					count: (pending.get(key)?.count ?? 0) + 1,
+				});
+				return true;
+			}
+			const recovered = pending.get(key)?.count ?? 0;
+			pending.delete(key);
+			recoveredAttempts += recovered;
+			return false;
+		},
+		/** A readable response cannot become acceptable through a later replay. */
+		classifyConflict(response: ObservedResponse, retryable: boolean): boolean {
+			if (response.status !== 409) return false;
+			const key = requestKey(response);
+			if (!key) return false;
+			const entry = pending.get(key);
+			if (entry) {
+				if (entry.count <= 1) pending.delete(key);
+				else pending.set(key, { ...entry, count: entry.count - 1 });
+			}
+			if (!retryable) rejectedFailures.push(`409 ${response.url}`);
+			return Boolean(entry);
+		},
+		failures: () => [
+			...rejectedFailures,
+			...[...pending.values()].flatMap(({ url, count }) =>
+				Array.from({ length: count }, () => `409 ${url}`),
+			),
+		],
+		recovered: () => recoveredAttempts,
+	};
+}

@@ -17,7 +17,9 @@ void test("Atelier events expose extensions and outcomes without file paths", ()
 
 	handler({
 		type: "document_open_attempted",
+		fileId: "private-file-id",
 		filePath: "/customers/acme/private-plan.MD",
+		navigationCause: "foreground",
 		documentOrigin: "existing",
 		viewKind: "atelier_file",
 		supported: true,
@@ -129,6 +131,7 @@ void test("document loaded records measured latency without document identity", 
 	);
 	handler({
 		type: "document_loaded",
+		fileId: "private-file-id",
 		filePath: "/private/posts.csv",
 		viewKind: "atelier_csv",
 		durationMs: 123.5,

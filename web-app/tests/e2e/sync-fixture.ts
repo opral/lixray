@@ -13,6 +13,7 @@ import {
 import { provisionRepositories } from "../../scripts/provision-repositories.mjs";
 
 import {
+	createMergeReplayTracker,
 	createRetainedBodyRecoveryTracker,
 	isRetainedBodyUpload,
 	isRetryableMergeConflict,
@@ -314,6 +315,7 @@ export async function createSyncFixture({
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
 		const syncFailures: string[] = [];
+		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
@@ -809,6 +811,12 @@ export async function createSyncFixture({
 						status: response.status(),
 						body: response.request().postDataBuffer(),
 					});
+				const pendingMergeReplay = mergeReplay.observe({
+					method: response.request().method(),
+					url,
+					status: response.status(),
+					body: response.request().postDataBuffer(),
+				});
 				// Push has no idempotency key, so its only 409 mapping is the expected
 				// ref-CAS race. Convergence below proves that reconciliation completed.
 				if (
@@ -817,7 +825,8 @@ export async function createSyncFixture({
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
 					const failure = `${response.status()} ${url}`;
-					syncFailures.push(failure);
+					const failureRecorded = !pendingMergeReplay;
+					if (failureRecorded) syncFailures.push(failure);
 					if (
 						response.status() === 409 &&
 						response.request().method() === "POST" &&
@@ -826,17 +835,26 @@ export async function createSyncFixture({
 						const classification = response
 							.json()
 							.then((body: unknown) => {
-								if (
-									!isRetryableMergeConflict(
-										response.request().method(),
+								const retryable = isRetryableMergeConflict(
+									response.request().method(),
+									url,
+									response.status(),
+									body,
+								);
+								mergeReplay.classifyConflict(
+									{
+										method: response.request().method(),
 										url,
-										response.status(),
-										body,
-									)
-								)
-									return;
-								const index = syncFailures.indexOf(failure);
-								if (index >= 0) syncFailures.splice(index, 1);
+										status: response.status(),
+										body: response.request().postDataBuffer(),
+									},
+									retryable,
+								);
+								if (!retryable) return;
+								if (failureRecorded) {
+									const index = syncFailures.indexOf(failure);
+									if (index >= 0) syncFailures.splice(index, 1);
+								}
 								recoveredMergeConflicts.push(failure);
 							})
 							.catch(() => undefined);
@@ -1989,6 +2007,7 @@ export async function createSyncFixture({
 			}
 			const unresolvedSyncFailures = [
 				...syncFailures,
+				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
 			];
 			await test.info().attach("sync-diagnostics.json", {
@@ -1999,6 +2018,7 @@ export async function createSyncFixture({
 						syncFailures: unresolvedSyncFailures,
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
+						replayedMergeConflicts: mergeReplay.recovered(),
 						runtimeFailures,
 						analyticsStubFailures,
 					},
@@ -2009,9 +2029,7 @@ export async function createSyncFixture({
 			});
 			try {
 				expect(analyticsStubFailures).toEqual([]);
-				expect([...syncFailures, ...retainedBodyRecovery.failures()]).toEqual(
-					[],
-				);
+				expect(unresolvedSyncFailures).toEqual([]);
 				expect(runtimeFailures).toEqual([]);
 			} catch (error) {
 				if (primaryFailure === undefined) throw error;

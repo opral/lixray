@@ -844,9 +844,14 @@ export function RepositoryAtelier({
 		const navigationQueue = createShellNavigationQueue();
 		eventHandlerRef.current = (event) => {
 			if (event.type === "document_open_attempted")
-				fileOpenTrace.documentAttempted(event.filePath, event.supported);
+				fileOpenTrace.documentAttempted(
+					event.filePath,
+					event.fileId,
+					event.supported,
+					event.navigationCause,
+				);
 			else if (event.type === "document_loaded")
-				fileOpenTrace.documentLoaded(event.filePath);
+				fileOpenTrace.documentLoaded(event.filePath, event.fileId);
 			atelierTelemetryHandlerRef.current?.(event);
 			if (event.type === "diff_session_changed") {
 				// Review focus: chrome outside the changes (the brand and
@@ -1156,7 +1161,8 @@ export function RepositoryAtelier({
 						}).blob();
 					const atelierProps: AtelierProps = {
 						lix: session.lix,
-						scopeDocumentLix: (path, lix) => fileOpenTrace.scopeLix(path, lix),
+						scopeDocumentLix: (path, fileId, lix) =>
+							fileOpenTrace.scopeLix(path, fileId, lix),
 						onError: (error) =>
 							captureExceptionTelemetry(error, {
 								operation: "atelier_view_render",

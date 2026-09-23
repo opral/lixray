@@ -6,7 +6,7 @@ import {
 } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
 	useConsumeShellEntityNavigation,
 	useMarkRepositoryRouteSynced,
@@ -44,6 +44,42 @@ function RepositoryFolderRoute() {
 	const navigate = useNavigate();
 	const { branch } = Route.useSearch();
 	const activeBranchId = useRepositoryActiveBranchId();
+	const [resolvedEntity, setResolvedEntity] = useState<{
+		atelier: typeof atelier;
+		branchId: string | null;
+		id: string;
+		path: string;
+	} | null>(null);
+
+	// A descriptive path replacement is still the same folder navigation.
+	// Keep it separate from the effect that owns the pending view command.
+	useEffect(() => {
+		if (
+			!resolvedEntity ||
+			resolvedEntity.atelier !== atelier ||
+			resolvedEntity.branchId !== activeBranchId ||
+			resolvedEntity.id !== entityId
+		)
+			return;
+		const canonical = canonicalEntitySplat(dirSplat, resolvedEntity);
+		if (!canonical) return;
+		void navigate({
+			to: "/@{$namespace}/$repository/folder/$",
+			params: { namespace, repository, _splat: canonical },
+			search: branch ? { branch } : {},
+			replace: true,
+		});
+	}, [
+		activeBranchId,
+		atelier,
+		branch,
+		dirSplat,
+		entityId,
+		namespace,
+		navigate,
+		repository,
+		resolvedEntity,
+	]);
 
 	useEffect(() => {
 		if (!atelier || !entityId) return;
@@ -71,16 +107,6 @@ function RepositoryFolderRoute() {
 				// lixrayHomeDirState canonicalizes a trailing slash supplied by the URL
 				// to lix_directory's persisted path contract.
 				const dirPath = entity.path;
-				// The id resolved; the path in the URL is decoration. Write the
-				// folder's own path back over whatever the link claimed.
-				const canonical = canonicalEntitySplat(dirSplat, entity);
-				if (canonical)
-					void navigate({
-						to: "/@{$namespace}/$repository/folder/$",
-						params: { namespace, repository, _splat: canonical },
-						search: branch ? { branch } : {},
-						replace: true,
-					});
 				// A URL written by the shell itself (a folder tab activated or drilled)
 				// already has the right surface active — hydrating Home here would
 				// steal focus from it.
@@ -106,7 +132,15 @@ function RepositoryFolderRoute() {
 						.then(() => {
 							settled = true;
 							clearTimeout(timer);
-							if (!controller.signal.aborted) markRouteSynced();
+							if (!controller.signal.aborted) {
+								markRouteSynced();
+								setResolvedEntity({
+									atelier,
+									branchId: activeBranchId,
+									id: entityId,
+									path: dirPath,
+								});
+							}
 						})
 						.catch((error: unknown) => {
 							settled = true;
@@ -147,7 +181,6 @@ function RepositoryFolderRoute() {
 		atelier,
 		branch,
 		consumeShellNavigation,
-		dirSplat,
 		entityId,
 		defaultBranchId,
 		namespace,
