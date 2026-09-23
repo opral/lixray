@@ -4,7 +4,7 @@ export function createOfflineConsoleRequestTracker<
 >() {
 	const requestsByUrl = new Map<string, Set<TRequest>>();
 	return {
-		started(request: TRequest) {
+		failed(request: TRequest) {
 			const requests = requestsByUrl.get(request.url()) ?? new Set<TRequest>();
 			requests.add(request);
 			requestsByUrl.set(request.url(), requests);

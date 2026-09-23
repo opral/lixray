@@ -318,7 +318,7 @@ export async function createSyncFixture({
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
-		let intentionallyOffline = false;
+		const offlineContexts = new WeakSet<BrowserContext>();
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
 		const pendingColdReads = new Map<Page, Set<Request>>();
@@ -547,7 +547,7 @@ export async function createSyncFixture({
 			await expect(checkpointButton).toBeVisible({ timeout: 30_000 });
 			await expect(checkpointButton).toBeEnabled({ timeout: 30_000 });
 			sharedContext.on("request", captureCheckpoint);
-			intentionallyOffline = true;
+			offlineContexts.add(sharedContext);
 			await sharedContext.setOffline(true);
 			try {
 				const checkpointDeadline = Date.now() + 5_000;
@@ -574,7 +574,7 @@ export async function createSyncFixture({
 				}
 			} finally {
 				await sharedContext.setOffline(false);
-				intentionallyOffline = false;
+				offlineContexts.delete(sharedContext);
 			}
 			try {
 				await expect
@@ -642,8 +642,8 @@ export async function createSyncFixture({
 		};
 		const observePage = (page: Page, label: string) => {
 			// Chromium can report a failed resource to the console after the
-			// context has come back online. Keep the originating requests until
-			// their console messages arrive instead of sampling the current phase.
+			// context has come back online. Correlate the console message with
+			// a confirmed offline failure instead of sampling the current phase.
 			const offlineConsoleRequests =
 				createOfflineConsoleRequestTracker<Request>();
 			const pageColdReads: string[] = [];
@@ -661,9 +661,8 @@ export async function createSyncFixture({
 			const pageBlobLanePayloadSizes: number[] = [];
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
-				if (intentionallyOffline) {
+				if (offlineContexts.has(page.context())) {
 					offlineRequests.add(request);
-					offlineConsoleRequests.started(request);
 				}
 				if (
 					(request.method() === "GET" &&
@@ -722,7 +721,7 @@ export async function createSyncFixture({
 				const expectedOfflineNoise =
 					/ERR_INTERNET_DISCONNECTED/.test(message.text()) &&
 					(offlineConsoleRequests.consume(message.location().url) ||
-						intentionallyOffline);
+						offlineContexts.has(page.context()));
 				if (
 					message.type() === "error" &&
 					!expectedCasNoise &&
@@ -734,13 +733,14 @@ export async function createSyncFixture({
 			page.on("requestfailed", (request) => {
 				pendingBlobLaneRequests.delete(request);
 				const errorText = request.failure()?.errorText ?? "unknown";
-				if (!/ERR_INTERNET_DISCONNECTED/.test(errorText))
-					offlineConsoleRequests.finished(request);
 				if (
-					(intentionallyOffline || offlineRequests.has(request)) &&
+					(offlineContexts.has(page.context()) ||
+						offlineRequests.has(request)) &&
 					/ERR_INTERNET_DISCONNECTED/.test(errorText)
-				)
+				) {
+					offlineConsoleRequests.failed(request);
 					return;
+				}
 				if (/abort|cancel/i.test(errorText)) {
 					unreadableBlobLaneResponses.delete(request);
 				}
@@ -1396,7 +1396,7 @@ export async function createSyncFixture({
 					const markers = [0, 1].map(
 						(index) => `independent-${first}-${index}-${randomUUID()}`,
 					);
-					intentionallyOffline = true;
+					for (const { context } of replicas) offlineContexts.add(context);
 					await Promise.all(
 						replicas.map(({ context }) => context.setOffline(true)),
 					);
@@ -1418,6 +1418,7 @@ export async function createSyncFixture({
 						);
 					}
 					await replicas[first]!.context.setOffline(false);
+					offlineContexts.delete(replicas[first]!.context);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[first]!);
@@ -1425,7 +1426,7 @@ export async function createSyncFixture({
 						markers[last]!,
 					);
 					await replicas[last]!.context.setOffline(false);
-					intentionallyOffline = false;
+					offlineContexts.delete(replicas[last]!.context);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[last]!);
@@ -1447,7 +1448,7 @@ export async function createSyncFixture({
 						{ headers },
 					),
 				]);
-				intentionallyOffline = false;
+				for (const { context } of replicas) offlineContexts.delete(context);
 				for (const result of cleanup) {
 					if (result.status !== "rejected") continue;
 					if (!primaryFailure) cleanupFailure ??= result;
