@@ -4,6 +4,7 @@ import {
 	trace,
 	SpanKind,
 	SpanStatusCode,
+	ROOT_CONTEXT,
 	type Attributes,
 	type Context,
 	type Span,
@@ -103,6 +104,14 @@ export function fetchLixWithTrace(
 		.replace(/\/lix\/v1\/[^/]+/, "/lix/v1/{lix_id}")
 		.replace(/\/sessions\/[^/]+/, "/sessions/{session_id}")
 		.replace(/\/transactions\/[^/]+/, "/transactions/{transaction_id}");
+	// Browser SDK operations arrive from a worker. Their W3C headers are the
+	// request-specific parent; the main thread's active context is unrelated.
+	const parent = request.headers.has("traceparent")
+		? propagation.extract(ROOT_CONTEXT, request.headers, {
+				get: (carrier, key) => carrier.get(key) ?? undefined,
+				keys: (carrier) => Array.from(carrier.keys()),
+			})
+		: context.active();
 	return tracer.startActiveSpan(
 		"lix.client.rpc",
 		{
@@ -113,6 +122,7 @@ export function fetchLixWithTrace(
 				"http.route": route,
 			},
 		},
+		parent,
 		async (span) => {
 			try {
 				const headers = new Headers(request.headers);

@@ -465,7 +465,10 @@ export function createTelemetryFetch(
 			try {
 				const token = await context.refreshAccessToken();
 				if (token) {
-					const headers = new Headers(requestInit?.headers);
+					const headers = new Headers(
+						requestInit?.headers ??
+							(input instanceof Request ? input.headers : undefined),
+					);
 					headers.set("Authorization", `Bearer ${token}`);
 					const retryRequest = new Request(input, {
 						...requestInit,
