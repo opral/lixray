@@ -159,7 +159,7 @@ aliases. There are no compatibility redirects. Generated links always use UUID t
 ### D4 — Version pin: `{slug}@{changeset-id}`, reserved now, shipped later
 
 **Decision.** v1 URLs mean "current state". The future immutable permalink attaches the pin to
-the repository segment: `/@{ns}/{ws}@{cs}/file/{entity-token}/{label?}`. `@` is outside slug grammar, so parsing is
+the repository segment: `/@{ns}/{ws}@{cs}/file/{entity-token}/{display-path?}`. `@` is outside slug grammar, so parsing is
 unambiguous by string inspection alone, forever. Unpinned = latest.
 
 **Why.** (a) A repository-level revision keeps branch and version selection separate
@@ -183,7 +183,7 @@ embedded references safe (PyPI/npm/Go-proxy guarantee).
 ### D5 — Raw bytes: deferred, slot reserved, domain decided
 
 **Decision.** No raw serving in v1; the viewer never echoes user bytes verbatim (sanitized
-rendering only). When raw ships: sibling verb `/raw/{entity-token}/{label?}` as a mechanical `/file/`→`/raw/`
+rendering only). When raw ships: sibling verb `/raw/{entity-token}/{display-path?}` as a mechanical `/file/`→`/raw/`
 segment swap, where lixray.com does authz and 302s to a **separate registrable domain**
 (lixrayusercontent.com-class), never a subdomain.
 
@@ -210,7 +210,7 @@ nothing to reserve beyond convention.
 
 **Decision.** `invite` is reserved in the published query grammar. A Share action mints one
 opaque, reusable token and appends it to the otherwise byte-identical canonical URL:
-`/@{ns}/{ws}/file/{entity-token}/{label?}?invite={token}`. The token maps only to its sharer, this repository, and
+`/@{ns}/{ws}/file/{entity-token}/{display-path?}?invite={token}`. The token maps only to its sharer, this repository, and
 an edit grant. It never identifies a person, grants organization membership, or changes the
 resource identity in the path.
 
@@ -302,7 +302,7 @@ this" (activity feed actor) into one registry, which agents can also resolve mec
   references use this immutable ID-based URI; `@handle` remains a mutable human-facing alias.
 - `/@{ns}/{ws}/llms.txt`: auto-generated per-repository index (spec-legal at subpaths; Cloudflare
   ships per-product llms.txt). Root `lixray.com/llms.txt` documents the grammar itself.
-- Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{entity-token}/{label}`) — a
+- Publish the grammar as RFC 6570 templates (`https://lixray.com/@{ns}/{ws}/file/{entity-token}/{display-path}`) — a
   documented parsing contract (Figma's openapi.yaml precedent). Anonymous, SSR'd LixRay URLs are
   MCP-spec-sanctioned resource URIs as-is.
 - Public pages MUST be server-rendered with content in initial HTML (no major AI crawler except
