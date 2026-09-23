@@ -56,6 +56,7 @@ import {
 	takeTeamInvite,
 } from "~/lib/team-invite";
 import { canonicalPathFromLocation } from "~/lib/repository-share-url";
+import { canonicalNamespaceHref } from "~/lib/namespace-redirect";
 import { findRepositoryByRoute, normalizeDirPath } from "~/lib/repository-url";
 
 interface RepositorySearch {
@@ -200,13 +201,19 @@ function RepositoryRoutePage() {
 				: peekRepositoryShareCapability()?.token;
 		const resolution = repositoryCapabilityToken
 			? resolveRepositoryShareToken(authClient, repositoryCapabilityToken).then(
-					(candidate) => {
-						if (
-							!candidate ||
-							candidate.organizationHandle !== namespace ||
-							candidate.repositorySlug !== repositorySlug
-						) {
+					async (candidate) => {
+						if (!candidate || candidate.repositorySlug !== repositorySlug) {
 							return null;
+						}
+						if (candidate.organizationHandle !== namespace) {
+							const { data, error } = await authClient.rpc(
+								"resolve_public_profile_by_handle",
+								{ p_handle: namespace },
+							);
+							if (error) throw error;
+							if (data?.[0]?.namespace_id !== candidate.organizationId) {
+								return null;
+							}
 						}
 						return {
 							organizationId: candidate.organizationId,
@@ -264,7 +271,19 @@ function RepositoryRoutePage() {
 
 		void resolution
 			.then((nextResolved) => {
-				if (!disposed) setResolved(nextResolved);
+				if (disposed) return;
+				if (nextResolved) {
+					const canonicalHref = canonicalNamespaceHref(
+						window.location.href,
+						namespace,
+						nextResolved.organizationHandle,
+					);
+					if (canonicalHref) {
+						window.location.replace(canonicalHref);
+						return;
+					}
+				}
+				setResolved(nextResolved);
 			})
 			.catch((caught: unknown) => {
 				if (disposed) return;

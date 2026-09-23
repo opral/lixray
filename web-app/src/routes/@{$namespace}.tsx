@@ -17,6 +17,7 @@ import {
 	type PublicProfileActivity,
 } from "~/lib/profile-activity-aggregate";
 import { formatRelativeTime } from "~/lib/format";
+import { canonicalNamespaceHref } from "~/lib/namespace-redirect";
 import { resolvePublicProfileActivity } from "~/lib/public-profile-activity";
 import {
 	resolvePublicProfileByHandle,
@@ -60,6 +61,17 @@ function PublicProfilePage() {
 			try {
 				const nextProfile = await resolvePublicProfileByHandle(namespace);
 				if (disposed) return;
+				if (nextProfile) {
+					const canonicalHref = canonicalNamespaceHref(
+						window.location.href,
+						namespace,
+						nextProfile.handle,
+					);
+					if (canonicalHref) {
+						window.location.replace(canonicalHref);
+						return;
+					}
+				}
 				setProfile(nextProfile);
 				if (!nextProfile) return;
 				try {

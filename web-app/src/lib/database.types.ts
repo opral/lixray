@@ -584,6 +584,7 @@ export type Database = {
 				}[];
 			};
 			create_namespace: { Args: { p_name: string }; Returns: string };
+			rename_personal_handle: { Args: { p_handle: string }; Returns: string };
 			current_account: {
 				Args: never;
 				Returns: {
