@@ -22,12 +22,15 @@ insert into auth.users (
 set local role authenticated;
 set local request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
 
-select results_eq(
-  $$select namespace_handle, lix_name, lix_slug, created
-    from public.bootstrap_personal_namespace()$$,
-  $$values ('samuel'::text, null::text, null::text, true)$$,
-  'first bootstrap derives the handle without creating a repository'
-);
+select ok((select created from public.bootstrap_personal_namespace()),
+  'first bootstrap creates a personal namespace without a repository');
+select set_config('test.personal_handle', (
+  select handle.handle from public.handles handle
+  join public.accounts account on account.primary_namespace_id = handle.namespace_id
+  where account.id = '10000000-0000-0000-0000-000000000001' and handle.state = 'active'
+), true);
+select matches(current_setting('test.personal_handle'), '^[a-z]+-[a-z]+-[0-9]{6}$',
+  'first bootstrap assigns a random readable username');
 
 -- The primary-namespace pointer is not client-readable; assert as superuser,
 -- scoped to the test user so pre-existing local data cannot skew the count.
@@ -47,19 +50,17 @@ select is(
     from public.namespace_profiles profile
     where profile.namespace_id = (
       select resolved.namespace_id
-      from public.resolve_public_profile_by_handle('samuel') resolved
+      from public.resolve_public_profile_by_handle(current_setting('test.personal_handle')) resolved
     )
   ),
   'https://lh3.googleusercontent.com/samuel',
   'personal bootstrap seeds the public JSContact avatar from Google metadata'
 );
 
-select results_eq(
-  $$select namespace_handle
-    from public.resolve_public_profile_by_handle('samuel')$$,
-  $$values ('samuel'::text)$$,
-  'a public handle resolves to its canonical profile identity'
-);
+select is((select namespace_handle
+  from public.resolve_public_profile_by_handle(current_setting('test.personal_handle'))),
+  current_setting('test.personal_handle'),
+  'a public handle resolves to its canonical profile identity');
 
 select is(
   to_regclass('public.profiles')::text,
@@ -80,7 +81,7 @@ select is(
     from public.namespace_profiles profile
     where profile.namespace_id = (
       select resolved.namespace_id
-      from public.resolve_public_profile_by_handle('samuel') resolved
+      from public.resolve_public_profile_by_handle(current_setting('test.personal_handle')) resolved
     )
   ),
   'https://lh3.googleusercontent.com/samuel',
@@ -96,7 +97,7 @@ select lives_ok(
 
 select results_eq(
   $$select handle from public.handles order by handle$$,
-  $$values ('android'::text), ('samuel'::text)$$,
+  $$select handle from (values ('android'::text), (current_setting('test.personal_handle'))) names(handle) order by handle$$,
   'personal and organization handles share one pool'
 );
 
