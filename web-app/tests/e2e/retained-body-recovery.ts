@@ -112,6 +112,7 @@ export function isRetryableMergeConflict(
 /** A merge 409 is recovered when the same request later succeeds. */
 export function createMergeReplayTracker() {
 	const pending = new Map<string, { url: string; count: number }>();
+	const rejectedFailures: string[] = [];
 	let recoveredAttempts = 0;
 	const requestKey = (response: ObservedResponse): string | null => {
 		if (response.method !== "POST" || !response.body?.byteLength) return null;
@@ -151,20 +152,25 @@ export function createMergeReplayTracker() {
 			recoveredAttempts += recovered;
 			return false;
 		},
-		/** A parsed typed conflict was already classified as expected. */
-		forgetTypedConflict(response: ObservedResponse): boolean {
+		/** A readable response cannot become acceptable through a later replay. */
+		classifyConflict(response: ObservedResponse, retryable: boolean): boolean {
+			if (response.status !== 409) return false;
 			const key = requestKey(response);
 			if (!key) return false;
 			const entry = pending.get(key);
-			if (!entry) return false;
-			if (entry.count <= 1) pending.delete(key);
-			else pending.set(key, { ...entry, count: entry.count - 1 });
-			return true;
+			if (entry) {
+				if (entry.count <= 1) pending.delete(key);
+				else pending.set(key, { ...entry, count: entry.count - 1 });
+			}
+			if (!retryable) rejectedFailures.push(`409 ${response.url}`);
+			return Boolean(entry);
 		},
-		failures: () =>
-			[...pending.values()].flatMap(({ url, count }) =>
+		failures: () => [
+			...rejectedFailures,
+			...[...pending.values()].flatMap(({ url, count }) =>
 				Array.from({ length: count }, () => `409 ${url}`),
 			),
+		],
 		recovered: () => recoveredAttempts,
 	};
 }

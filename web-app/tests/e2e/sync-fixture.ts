@@ -825,7 +825,8 @@ export async function createSyncFixture({
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
 					const failure = `${response.status()} ${url}`;
-					if (!pendingMergeReplay) syncFailures.push(failure);
+					const failureRecorded = !pendingMergeReplay;
+					if (failureRecorded) syncFailures.push(failure);
 					if (
 						response.status() === 409 &&
 						response.request().method() === "POST" &&
@@ -834,22 +835,23 @@ export async function createSyncFixture({
 						const classification = response
 							.json()
 							.then((body: unknown) => {
-								if (
-									!isRetryableMergeConflict(
-										response.request().method(),
-										url,
-										response.status(),
-										body,
-									)
-								)
-									return;
-								const wasTracked = mergeReplay.forgetTypedConflict({
-									method: response.request().method(),
+								const retryable = isRetryableMergeConflict(
+									response.request().method(),
 									url,
-									status: response.status(),
-									body: response.request().postDataBuffer(),
-								});
-								if (!wasTracked) {
+									response.status(),
+									body,
+								);
+								mergeReplay.classifyConflict(
+									{
+										method: response.request().method(),
+										url,
+										status: response.status(),
+										body: response.request().postDataBuffer(),
+									},
+									retryable,
+								);
+								if (!retryable) return;
+								if (failureRecorded) {
 									const index = syncFailures.indexOf(failure);
 									if (index >= 0) syncFailures.splice(index, 1);
 								}

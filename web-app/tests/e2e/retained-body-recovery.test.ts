@@ -119,12 +119,22 @@ void test("a typed merge conflict cannot clear another request on replay", () =>
 	const unmatched = { ...typed, body: Buffer.from("different attempt") };
 	tracker.observe(typed);
 	tracker.observe(unmatched);
-	assert.equal(tracker.forgetTypedConflict(typed), true);
+	assert.equal(tracker.classifyConflict(typed, true), true);
 	assert.equal(tracker.observe({ ...typed, status: 200 }), false);
 	assert.deepEqual(tracker.failures(), [`409 ${mergeUrl}`]);
 	assert.equal(tracker.observe({ ...unmatched, status: 200 }), false);
 	assert.deepEqual(tracker.failures(), []);
 	assert.equal(tracker.recovered(), 1);
+});
+
+void test("a readable nonretryable merge 409 remains a failure after exact replay", () => {
+	const tracker = createMergeReplayTracker();
+	const mergeUrl = "https://example.test/lix/v1/repository/sync/merge";
+	const request = { method: "POST", url: mergeUrl, body, status: 409 };
+	assert.equal(tracker.observe(request), true);
+	assert.equal(tracker.classifyConflict(request, false), true);
+	tracker.observe({ ...request, status: 200 });
+	assert.deepEqual(tracker.failures(), [`409 ${mergeUrl}`]);
 });
 
 void test("unmatched conflicts survive another wave's successful recovery", () => {
