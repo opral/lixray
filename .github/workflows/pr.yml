@@ -78,7 +78,9 @@ jobs:
 
   server-image:
     name: Lix server image
-    if: needs.changes.outputs.e2e == 'true' || contains(github.event.pull_request.labels.*.name, 'preview')
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.changes.outputs.e2e == 'true' || contains(github.event.pull_request.labels.*.name, 'preview'))
     needs:
       - changes
     permissions:
@@ -90,7 +92,9 @@ jobs:
   web-image:
     name: Web image
     needs: [changes, sdk]
-    if: needs.changes.outputs.e2e == 'true' || contains(github.event.pull_request.labels.*.name, 'preview')
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (needs.changes.outputs.e2e == 'true' || contains(github.event.pull_request.labels.*.name, 'preview'))
     permissions:
       contents: read
       packages: write
@@ -318,6 +322,7 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
           PREVIEW_REQUESTED: ${{ contains(github.event.pull_request.labels.*.name, 'preview') }}
+          FORK_PULL_REQUEST: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: node .github/scripts/check-ci-results.mjs
 
   deploy-preview:
@@ -328,6 +333,7 @@ jobs:
     if: >-
       !cancelled() &&
       github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
       contains(github.event.pull_request.labels.*.name, 'preview') &&
       needs.ci.result == 'success' &&
       needs.server-image.result == 'success' &&

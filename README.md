@@ -278,6 +278,10 @@ SDK and build the server, but do not replace Lix's full release validation.
 
 Preview deployment is opt-in: add the `preview` label to the PR. While the label
 is present, subsequent pushes refresh its preview after selected checks pass.
+Image publishing and previews are limited to branches in this repository. Fork
+PRs can run read-only checks, but changes that need image/browser integration
+remain blocked by `CI` until a maintainer reviews the changes and runs full CI
+on a repository branch. A `preview` label does not grant a fork credentials.
 Unlabeled PRs never create Railway environments. Closing or merging the PR
 removes its preview. Cleanup shares the deployment lock and rechecks GitHub state;
 closing a PR does not cancel an in-flight Railway creation. A final deployment

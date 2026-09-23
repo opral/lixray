@@ -1,7 +1,5 @@
 # Telemetry catalog
 
-Audit date: 2026-08-26. Source revision: `origin/main` at `0e23f37`.
-Production evidence: PostHog project 512495, trailing 180 days.
 
 ## Taxonomy rules
 
@@ -82,52 +80,50 @@ transition before it is used for billing or exact-once automation.
 | Lix native spans          | `lix.repository.opened`, `lix.protocol.request`, `lix.sql.query`, `lix.sql.batch`, `lix.sql.coherent_read_batch` | Vendor-neutral OTLP pipeline; do not duplicate as product events |
 | PostHog-derived/system    | `$ai_trace_summary`, `$recording_observed` and other configured `$*` events                                      | Platform-owned; not application emitters                         |
 
-## Production custom-event cleanup
+## Legacy event migration
 
-The production project contained the following custom event names in the
-trailing 180-day audit. Counts explain priority, not correctness. The release
-must update the Slack signup destination and all saved queries to the canonical
-column before these aliases are hidden or deleted from PostHog data management.
+Use this mapping when updating existing event definitions, destinations, and
+saved queries to the canonical taxonomy. Production usage counts and internal
+analytics identifiers are omitted.
 
-| Observed event                   |   Count | Hard-cut treatment                                             |
-| -------------------------------- | ------: | -------------------------------------------------------------- |
-| `lix_request_failed`             | 468,649 | Stop; use `$exception`, Logs, and `lix.*` spans                |
-| `document_open_attempted`        |   2,119 | Canonical                                                      |
-| `document_viewed`                |   2,098 | Canonical                                                      |
-| `repository_opened`              |     427 | Stop; use repository-open `$ai_span`                           |
-| `workspace_opened`               |     418 | Stop; use repository-open `$ai_span`                           |
-| `extension_opened`               |     117 | Canonical                                                      |
-| `document_modified`              |      85 | Canonical                                                      |
-| `mcp_tool_called`                |      58 | Stop; use `$mcp_tool_call`                                     |
-| `diff_opened`                    |      40 | Canonical                                                      |
-| `webapp_request_failed`          |      31 | Stop; use `$exception` and Logs                                |
-| `lixray_user_signed_up`          |      23 | Rename to `user_signed_up`                                     |
-| `webapp_document_open_attempted` |      21 | Rename to `document_open_attempted`                            |
-| `webapp_document_viewed`         |      21 | Rename to `document_viewed`                                    |
-| `workspace_created`              |      19 | Rename to `repository_created`                                 |
-| `webapp_extension_opened`        |      13 | Rename to `extension_opened`                                   |
-| `lixray_oauth_consent_resolved`  |      11 | Rename to `oauth_consent_resolved`                             |
-| `diff_resolved`                  |       8 | Canonical                                                      |
-| `webapp_user_signed_up`          |       8 | Rename to `user_signed_up`                                     |
-| `lixray_first_file_added`        |       7 | Rename to `first_file_added`                                   |
-| `lixray_file_written`            |       6 | Rename to `file_written`                                       |
-| `workspace_deleted`              |       5 | Rename to `repository_deleted`                                 |
-| `share_link_created`             |       5 | Stop; use `resource_published` for the successful state change |
-| `lixray_import_completed`        |       5 | Rename to `import_completed`                                   |
-| `webapp_oauth_consent_resolved`  |       5 | Rename to `oauth_consent_resolved`                             |
-| `repository_created`             |       4 | Canonical                                                      |
-| `organization_created`           |       3 | Canonical                                                      |
-| `share_link_copied`              |       1 | Canonical                                                      |
-| `lixray_telemetry_probe`         |       1 | Delete test event                                              |
-| `repository_deleted`             |       1 | Canonical                                                      |
-| `repository_list_failed`         |       1 | Stop; use `$exception` and Logs                                |
-| `webapp_organization_created`    |       1 | Rename to `organization_created`                               |
-| `telemetry_smoke_test`           |       1 | Delete test event                                              |
-| `webapp_repository_created`      |       1 | Rename to `repository_created`                                 |
-| `auth_session_validation_failed` |       1 | Stop; use `$exception` and Logs                                |
+| Observed event                   | Hard-cut treatment                                             |
+| -------------------------------- | -------------------------------------------------------------- |
+| `lix_request_failed`             | Stop; use `$exception`, Logs, and `lix.*` spans                |
+| `document_open_attempted`        | Canonical                                                      |
+| `document_viewed`                | Canonical                                                      |
+| `repository_opened`              | Stop; use repository-open `$ai_span`                           |
+| `workspace_opened`               | Stop; use repository-open `$ai_span`                           |
+| `extension_opened`               | Canonical                                                      |
+| `document_modified`              | Canonical                                                      |
+| `mcp_tool_called`                | Stop; use `$mcp_tool_call`                                     |
+| `diff_opened`                    | Canonical                                                      |
+| `webapp_request_failed`          | Stop; use `$exception` and Logs                                |
+| `lixray_user_signed_up`          | Rename to `user_signed_up`                                     |
+| `webapp_document_open_attempted` | Rename to `document_open_attempted`                            |
+| `webapp_document_viewed`         | Rename to `document_viewed`                                    |
+| `workspace_created`              | Rename to `repository_created`                                 |
+| `webapp_extension_opened`        | Rename to `extension_opened`                                   |
+| `lixray_oauth_consent_resolved`  | Rename to `oauth_consent_resolved`                             |
+| `diff_resolved`                  | Canonical                                                      |
+| `webapp_user_signed_up`          | Rename to `user_signed_up`                                     |
+| `lixray_first_file_added`        | Rename to `first_file_added`                                   |
+| `lixray_file_written`            | Rename to `file_written`                                       |
+| `workspace_deleted`              | Rename to `repository_deleted`                                 |
+| `share_link_created`             | Stop; use `resource_published` for the successful state change |
+| `lixray_import_completed`        | Rename to `import_completed`                                   |
+| `webapp_oauth_consent_resolved`  | Rename to `oauth_consent_resolved`                             |
+| `repository_created`             | Canonical                                                      |
+| `organization_created`           | Canonical                                                      |
+| `share_link_copied`              | Canonical                                                      |
+| `lixray_telemetry_probe`         | Delete test event                                              |
+| `repository_deleted`             | Canonical                                                      |
+| `repository_list_failed`         | Stop; use `$exception` and Logs                                |
+| `webapp_organization_created`    | Rename to `organization_created`                               |
+| `telemetry_smoke_test`           | Delete test event                                              |
+| `webapp_repository_created`      | Rename to `repository_created`                                 |
+| `auth_session_validation_failed` | Stop; use `$exception` and Logs                                |
 
-Names declared in source but not yet observed during the live window follow the
-same strip-prefix rule: `webapp_first_file_added`, `webapp_file_written`,
+Other legacy names follow the same strip-prefix rule: `webapp_first_file_added`, `webapp_file_written`,
 `webapp_import_completed`, `webapp_document_modified`, `webapp_diff_opened`,
 `webapp_diff_resolved`, `webapp_organization_renamed`,
 `webapp_repository_renamed`, `webapp_repository_deleted`,
@@ -140,7 +136,7 @@ same strip-prefix rule: `webapp_first_file_added`, `webapp_file_written`,
 2. In the same cutover, change the Slack destination from
    `lixray_user_signed_up` to `user_signed_up` and render `email`, `name`,
    `surface`, `auth_provider`, and `signup_source`.
-3. Change PostHog action 345596 and signup insights to only
+3. Change the signup action and insights to only
    `user_signed_up`. Do not leave an OR action as the long-term definition.
 4. Update the remaining actions/dashboards using the mapping above.
 5. Verify one new web-origin and one new MCP-origin account, then hide legacy

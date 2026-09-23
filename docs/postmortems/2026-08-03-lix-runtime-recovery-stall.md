@@ -1,11 +1,10 @@
 # Lix runtime recovery stall
 
 - **Date:** 2026-08-03 PDT / 2026-08-04 UTC
-- **Affected workspace:** `@samuel/2hello-world`
-- **Affected lix ID:** `2b1a8a68-14b6-48e5-8ea0-1cca99ab7ba9`
+- **Affected workspace:** One production workspace (identifier omitted)
 - **Severity:** User-visible outage for one workspace
 - **Status:** Resolved by restarting the production `lix-server` replica
-- **PostHog issue:** [LixError 019fcadd-9f89-75a2-8b01-17014a97cd88](https://us.posthog.com/project/512495/error_tracking/019fcadd-9f89-75a2-8b01-17014a97cd88)
+- **Incident tracking:** Internal telemetry reference omitted from the public report
 
 ## Summary
 

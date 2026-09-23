@@ -41,6 +41,16 @@ test("only an explicitly labeled PR can deploy a preview", () => {
 	assert.match(job("deploy-preview"), /needs.ci.result == 'success'/);
 	assert.match(job("deploy-preview"), /\/lix\/v1\/00000000-0000-4000-8000-000000000002\/sync\/pull/);
 });
+test("fork PRs cannot enter jobs that publish images or request deployment credentials", () => {
+	for (const name of ["server-image", "web-image", "deploy-preview"]) {
+		assert.match(job(name), /if: >-\s+[\s\S]*?github.event.pull_request.head.repo.full_name == github.repository/);
+	}
+	assert.match(job("ci"), /FORK_PULL_REQUEST: \$\{\{ github.event.pull_request.head.repo.full_name != github.repository \}\}/);
+	const cleanup = read(".github/workflows/railway-preview-cleanup.yml");
+	assert.match(cleanup, /discover:[\s\S]*?if: github.event_name != 'pull_request' \|\| github.event.pull_request.head.repo.full_name == github.repository/);
+	assert.match(cleanup, /cleanup-github:\s+if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository/);
+	assert.match(cleanup, /cleanup-github:[\s\S]*?uses: actions\/checkout@v4\s+with:\s+ref: main/);
+});
 test("built-image correctness uses local services without Supabase or Railway", () => {
 	assert.match(integration, /PLAYWRIGHT_SYNC_LOCAL: "1"/);
 	assert.match(integration, /LIXRAY_WEB_IMAGE: \$\{\{ inputs.web-image \}\}/);
