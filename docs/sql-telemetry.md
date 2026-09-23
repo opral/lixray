@@ -97,14 +97,17 @@ migration, recovery, cancellation, and missing-chunk probes are not errors.
 
 ## Span model
 
-- `lix.sql.query` is one completed SQL statement. It covers normal execution,
-  explicit transactions, observer reevaluations, atomic batches, and coherent
-  read batches.
-- `lix.sql.batch` measures an atomic batch, including transaction and commit
-  overhead. Its `lix.sql.query` children measure the individual statements.
-- `lix.sql.coherent_read_batch` is the equivalent parent for internal coherent
-  reads.
-- `lix.protocol.request` stays active through the response body and connects
+- One database client span covers each completed SQL statement, including
+  normal execution, explicit transactions, observer reevaluations, atomic
+  batches, and coherent read batches. The internal Lix descriptor is
+  `lix.sql.query`; the exported OpenTelemetry span name follows
+  `db.query.summary` (for example, `SELECT`).
+- An atomic batch has a parent database client span that includes transaction
+  and commit overhead. Its internal descriptor is `lix.sql.batch`; its exported
+  name follows the batch query summary (for example, `BATCH SELECT`). Its child
+  spans measure the individual statements.
+- A coherent read batch has the equivalent parent for internal coherent reads.
+- The protocol request span stays active through the response body and connects
   protocol calls, including observer reevaluations, to a repository. SQL analysis
   should aggregate the statement spans, not request or batch spans.
 
@@ -180,8 +183,11 @@ disable OpenTelemetry spans.
 
 ## Daily sweeper query
 
-This HogQL query is validated against the LixRay PostHog project. It groups
-the last day by sanitized statement shape and ranks the slowest p95 first.
+This HogQL query is validated against the LixRay PostHog project. It selects
+individual SQL statements by their database attributes rather than by span
+name, since OpenTelemetry names them by query summary. The batch-size condition
+excludes parent batch spans, which also carry a SQL fingerprint. It groups the
+last day by sanitized statement shape and ranks the slowest p95 first.
 
 ```sql
 SELECT
@@ -197,7 +203,9 @@ SELECT
     countIf(status_code = 2) AS errors
 FROM posthog.trace_spans
 WHERE service_name = 'lix-server'
-  AND name = 'lix.sql.query'
+  AND attributes['db.system.name'] = 'lix'
+  AND attributes['lix.sql.fingerprint'] IS NOT NULL
+  AND attributes['db.operation.batch.size'] IS NULL
   AND timestamp >= now() - INTERVAL 1 DAY
 GROUP BY fingerprint
 ORDER BY p95_ms DESC
