@@ -16,8 +16,7 @@ export function RepositoryMcpGuidance({
 	let entity: { id: string; kind: "file" | "directory" } | undefined;
 	try {
 		repository = `@${decodeURIComponent(match[1]!)}/${decodeURIComponent(match[2]!)}`;
-		// "dir" is the verb folders carried before /folder.
-		const route = /^(file|folder|dir)\/(.*)$/.exec(match[3] ?? "");
+		const route = /^(file|folder)\/(.*)$/.exec(match[3] ?? "");
 		if (route) {
 			const parsed = parseEntityUrlSplat(route[2]);
 			if (!parsed) return null;

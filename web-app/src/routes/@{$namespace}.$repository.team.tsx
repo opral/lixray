@@ -16,7 +16,7 @@ export const Route = createFileRoute("/@{$namespace}/$repository/team")({
 
 /**
  * The People tab opened as a central content tab (3c). The URL names the
- * active tab, exactly like /file/ and /dir/; the tab itself is branch-
+ * active tab, exactly like /file/ and /folder/; the tab itself is branch-
  * independent, so no branch gate is needed here.
  */
 function RepositoryTeamRoute() {

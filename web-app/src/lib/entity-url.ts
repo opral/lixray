@@ -60,10 +60,9 @@ export function decodeEntityId(token: string): string {
 }
 
 /**
- * An entity URL is its id followed by the entity's path, slugified, so a link
- * reads as the file or folder it opens: `/file/<id>/gtm/gtm-playbook.md`. The
- * id is what resolves; the path is for the reader, and a missing or stale one
- * is rewritten when the URL is opened (see canonicalEntitySplat).
+ * Entity URLs resolve by id. A readable browser URL may append a slugified
+ * path, such as `/file/<id>/gtm/gtm-playbook.md`; the stored URL stops at the
+ * id. A missing or stale display path is rewritten on open.
  */
 export function parseEntityUrlSplat(splat: string | undefined): {
 	id: string;
@@ -156,6 +155,15 @@ export function canonicalEntitySplat(
 		: canonical;
 }
 
+export function entityRouteBase(
+	namespace: string,
+	repository: string,
+	kind: EntityKind,
+	id: string,
+): string {
+	return `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/${entityUrlVerb(kind)}/${encodeEntityId(id)}`;
+}
+
 export function entityRoutePath(
 	namespace: string,
 	repository: string,
@@ -163,11 +171,12 @@ export function entityRoutePath(
 	id: string,
 	path: string,
 ): string {
-	const splat = entityUrlSplat(id, path)
+	const suffix = entityUrlSplat(id, path)
 		.split("/")
+		.slice(1)
 		.map(encodeURIComponent)
 		.join("/");
-	return `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/${entityUrlVerb(kind)}/${splat}`;
+	return `${entityRouteBase(namespace, repository, kind, id)}${suffix ? `/${suffix}` : ""}`;
 }
 
 export function entityFromRoute(
@@ -176,8 +185,7 @@ export function entityFromRoute(
 	repository: string,
 ): { id: string; kind: EntityKind } | null {
 	const root = `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}`;
-	// "dir" is the verb folders used to carry; links written then still open.
-	for (const verb of ["file", "folder", "dir"] as const) {
+	for (const verb of ["file", "folder"] as const) {
 		const prefix = `${root}/${verb}/`;
 		if (!pathname.startsWith(prefix)) continue;
 		const entity = parseEntityUrlSplat(pathname.slice(prefix.length));

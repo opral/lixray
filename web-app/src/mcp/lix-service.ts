@@ -1,5 +1,5 @@
 import { withSpan } from "../telemetry.ts";
-import { entityRoutePath } from "../lib/entity-url.ts";
+import { entityRouteBase, entityRoutePath } from "../lib/entity-url.ts";
 import {
 	FILE_CHANGES_SQL,
 	READ_FILES_SQL,
@@ -94,7 +94,7 @@ export interface OpenedLixContext {
 	lixRef: string;
 	name: string;
 	url: string;
-	files: Array<{ id: string; path: string; url: string }>;
+	files: Array<{ id: string; path: string; url: string; display_url: string }>;
 	branchId: string;
 	commitId: string;
 	fileCount: number;
@@ -364,6 +364,10 @@ export class LixService {
 					kind: "file",
 					...file,
 				}),
+				display_url: displayEntityUrl(repository, branch, origin, {
+					kind: "file",
+					...file,
+				}),
 			})),
 			branchId: selectedBranchId,
 			commitId,
@@ -386,6 +390,7 @@ export class LixService {
 			id: string | null;
 			path: string;
 			url: string;
+			display_url: string;
 		}>;
 	}> {
 		const context = await this.readContext(contextToken);
@@ -465,6 +470,7 @@ export class LixService {
 						id: null,
 						path: "/",
 						url: canonicalEntityUrl(repository, branch, origin),
+						display_url: canonicalEntityUrl(repository, branch, origin),
 					};
 				const entity = found
 					.get(selector.kind)
@@ -487,6 +493,10 @@ export class LixService {
 							: entity.id,
 					kind: selector.kind,
 					url: canonicalEntityUrl(repository, branch, origin, {
+						...entity,
+						kind: selector.kind,
+					}),
+					display_url: displayEntityUrl(repository, branch, origin, {
 						...entity,
 						kind: selector.kind,
 					}),
@@ -713,7 +723,7 @@ export class LixService {
 		};
 	}
 
-	/** Files by path prefix and name, with ids and canonical URLs. */
+	/** Files by path prefix and name, with IDs and both URL forms. */
 	async listFiles(
 		contextToken: string,
 		filter: { directory?: string; name?: string },
@@ -721,7 +731,12 @@ export class LixService {
 	): Promise<{
 		context: string;
 		commitId: string;
-		files: Array<{ id: string; path: string; url: string }>;
+		files: Array<{
+			id: string;
+			path: string;
+			url: string;
+			display_url: string;
+		}>;
 		truncated: boolean;
 	}> {
 		const context = await this.readContext(contextToken);
@@ -759,7 +774,7 @@ export class LixService {
 			commitId,
 			files: rows
 				.slice(0, LIST_FILES_LIMIT)
-				.map((file) => ({ ...file, url: url("file", file) })),
+				.map((file) => ({ ...file, ...url("file", file) })),
 			truncated: rows.length > LIST_FILES_LIMIT,
 		};
 	}
@@ -784,7 +799,7 @@ export class LixService {
 		return {
 			context: contextToken,
 			commitId,
-			files: files.map((file) => ({ ...file, url: url("file", file) })),
+			files: files.map((file) => ({ ...file, ...url("file", file) })),
 			missing: normalized.filter((path) => !found.has(path)),
 		};
 	}
@@ -924,7 +939,7 @@ export class LixService {
 		contextToken: string,
 		changes: readonly FileChange[],
 		origin = "https://lixray.com",
-	): Promise<{ repository: string; files: string[] }> {
+	): Promise<{ repository: string; files: string[]; displayFiles: string[] }> {
 		const context = await this.readContext(contextToken);
 		const [summary, defaultId] = await Promise.all([
 			this.resolveLixSummary(context.lixId),
@@ -938,6 +953,15 @@ export class LixService {
 				change.kind === "removed"
 					? repository
 					: canonicalEntityUrl(summary, branch, origin, {
+							kind: "file",
+							id: change.id,
+							path: change.path,
+						}),
+			),
+			displayFiles: changes.map((change) =>
+				change.kind === "removed"
+					? repository
+					: displayEntityUrl(summary, branch, origin, {
 							kind: "file",
 							id: change.id,
 							path: change.path,
@@ -1117,15 +1141,23 @@ export class LixService {
 		context: LixContext,
 		origin: string,
 	): Promise<
-		(kind: "file" | "directory", entity: { id: string; path: string }) => string
+		(
+			kind: "file" | "directory",
+			entity: { id: string; path: string },
+		) => { url: string; display_url: string }
 	> {
 		const [repository, defaultId] = await Promise.all([
 			this.resolveLixSummary(context.lixId),
 			this.client.defaultBranchId(context.lixId),
 		]);
 		const branch = { id: context.branchId, defaultId };
-		return (kind, entity) =>
-			canonicalEntityUrl(repository, branch, origin, { kind, ...entity });
+		return (kind, entity) => ({
+			url: canonicalEntityUrl(repository, branch, origin, { kind, ...entity }),
+			display_url: displayEntityUrl(repository, branch, origin, {
+				kind,
+				...entity,
+			}),
+		});
 	}
 
 	async createCheckpoint(contextToken: string) {
@@ -1618,7 +1650,7 @@ export type ReadFile = {
 export type ReadFilesResult = {
 	context: string;
 	commitId: string;
-	files: Array<ReadFile & { url: string }>;
+	files: Array<ReadFile & { url: string; display_url: string }>;
 	missing: string[];
 };
 
@@ -1717,15 +1749,33 @@ function canonicalEntityUrl(
 ): string {
 	const path =
 		entity && !(entity.kind === "directory" && entity.path === "/")
-			? entityRoutePath(
+			? entityRouteBase(
 					repository.namespace.handle,
 					repository.slug,
 					entity.kind,
 					entity.id,
-					entity.path,
 				)
 			: `/@${encodeURIComponent(repository.namespace.handle)}/${encodeURIComponent(repository.slug)}`;
 	const url = new URL(path, origin);
 	if (branch.id !== branch.defaultId) url.searchParams.set("branch", branch.id);
+	return url.href;
+}
+
+function displayEntityUrl(
+	repository: LixSummary,
+	branch: { id: string; defaultId: string },
+	origin: string,
+	entity: { kind: "file" | "directory"; id: string; path: string },
+): string {
+	if (entity.kind === "directory" && entity.path === "/")
+		return canonicalEntityUrl(repository, branch, origin);
+	const url = new URL(canonicalEntityUrl(repository, branch, origin, entity));
+	url.pathname = entityRoutePath(
+		repository.namespace.handle,
+		repository.slug,
+		entity.kind,
+		entity.id,
+		entity.path,
+	);
 	return url.href;
 }

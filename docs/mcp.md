@@ -47,7 +47,7 @@ diagnostic timestamps or identifiers.
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
 - `list_files`, `read_files`: preferred for ordinary file reads. `read_files`
-  returns `content` as text, `lixcol_metadata`, size, id, canonical `url`,
+  returns `content` as text, `lixcol_metadata`, size, id, stable `url`, and readable `display_url`,
   and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
   or that is over a megabyte, comes back with no `content` and an
   `encoding` of `binary` or `too-large` saying which — base64 of an image
@@ -57,7 +57,7 @@ diagnostic timestamps or identifiers.
 - `query_sql`, `execute_sql`: everything else. Files and directories are
   tables (`lix_file`, `lix_directory`), and `execute_sql` is the one write
   path: see [Writing files](#writing-files).
-- `get_entity_urls`: canonical browser links for files and directories.
+- `get_entity_urls`: stable document links and readable display links for files and directories.
 - `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
   branch head.
 - `active_branch_id`, `create_branch`, `switch_branch`, `merge_branch_preview`,
@@ -94,7 +94,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
    full `structuredContent` JSON. `open_lix` reports file and directory
-   counts plus a bounded `file_paths` manifest and `files` containing `id`, `path`, and canonical `url`. Use `files[].url` exactly when linking existing files. When `file_paths_complete` is
+   counts plus a bounded `file_paths` manifest and `files` containing `id`, `path`, stable `url`, and readable `display_url`. Use `files[].url` exactly in documents and machine-readable content. When `file_paths_complete` is
    true, do not run another query just to list files; when it is false, the
    result carries `file_paths_sql`, the one `query_sql` statement that lists
    every path.
@@ -132,7 +132,7 @@ zero or more `resource_link` content blocks, and the full `structuredContent`
 as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same canonical URL `get_entity_urls` would return. File read tools return canonical file URLs in their results, and a failed call has the summary and the JSON text only. The summary names the
+the same readable `display_url` that `get_entity_urls` would return. File read tools return both URL forms in their results, and a failed call has the summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
@@ -197,10 +197,11 @@ whoever is talking to the server.
 as it stands), or `"latest_checkpoint"` (the nearest checkpoint behind it),
 with optional `paths` to narrow. It returns `files` (`path`, `status` of
 added/modified/removed/moved, `before_path` for a move, the two commit ids,
-`url`), the resolved `before` and `after`, `commit_id` (the after end), the
+stable `url` and readable `display_url`), the resolved `before` and `after`, `commit_id` (the after end), the
 repository `url`, a one-line summary ("3 files changed between latest
 checkpoint … and working: …"), file links, and the same card. A ref that names
-nothing is refused with a hint before Lix is asked to compare.
+nothing is refused with a hint before Lix is asked to compare. Removed files
+have no current entity to open, so both URL fields point to the repository.
 
 `read_files` returns its text and `commit_id` from one snapshot.
 
@@ -428,15 +429,14 @@ emit synthetic marker changes; old retained records remain historical facts.
 
 ## Canonical browser URLs
 
-A browser URL is `/file/<id>/<path>` for a file and `/folder/<id>/<path>` for a
-folder: the entity's UUID encoded as unpadded Base64url, then its path as a
-slug, so `/gtm/GTM playbook.md` reads as `/gtm/gtm-playbook.md`. The slug is
-for the reader; the id is what resolves. The app rewrites the path from the id
-on arrival, so a link that names no path, or one the entity has since outgrown,
-still opens the right item and corrects itself. Folders carried `/dir/` before;
-those links redirect. Clients should copy the server-generated `url` from
-`open_lix.files` or `get_entity_urls` exactly as returned rather than building
-one from `file_paths`, which are SQL paths. A URL carries a
+Each entity has two browser URLs. The stable `url` is `/file/<id>` for a file or
+`/folder/<id>` for a folder. The readable `display_url` adds the current path
+as a slug, such as `/file/<id>/gtm/gtm-playbook.md`. The id is the entity's UUID
+encoded as unpadded Base64url and is the only part used to resolve the entity.
+The app expands a short link or refreshes a stale slug to the current readable
+path in the browser. Store `url` in Markdown and other machine-readable content;
+use `display_url` for human-facing links. Copy these values exactly as returned
+rather than building one from `file_paths`, which are SQL paths. A URL carries a
 `branch` parameter only when its branch is not the Lix's default branch, the
 same rule the app applies to its own links.
 Do not manually encode IDs or guess URLs. The server uses the same URL builder
@@ -454,7 +454,7 @@ For example, after writing `/gtm/social/posts.csv`, call:
 }
 ```
 
-`get_entity_urls` returns `entities` with `kind`, `id`, `path`, and `url` in the
+`get_entity_urls` returns `entities` with `kind`, `id`, `path`, `url`, and `display_url` in the
 requested order. Each selector requires exactly one UUID `id` or absolute
 `path`; batches contain 1–50 selectors. UUID selectors follow renames and moves.
 A root-directory selector (`kind: directory`, `path: /`) returns the repository

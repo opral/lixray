@@ -34,9 +34,9 @@ path         = "/@" handle                          ; namespace profile
              | "/" product-route                    ; app-owned, unlimited, forever
 
 sub          = ""                                   ; repository overview
-             | "/file/" entity-token [ "/" label ]    ; file viewer         (v1)
-             | "/dir/" entity-token [ "/" label ]     ; directory listing   (v1; root = repository overview)
-             | "/raw/" entity-token [ "/" label ]     ; raw bytes           (RESERVED)
+             | "/file/" entity-token [ "/" display-path ]   ; file viewer         (v1)
+             | "/folder/" entity-token [ "/" display-path ] ; directory listing   (v1; root = repository overview)
+             | "/raw/" entity-token [ "/" display-path ]    ; raw bytes           (RESERVED)
              | "/llms.txt"                          ; machine index       (RESERVED)
              | "/" verb …                           ; future closed-set verbs (RESERVED)
 
@@ -56,11 +56,12 @@ namespace-id = canonical UUID for the immutable public namespace identity
 changeset-id = ^[a-z0-9][a-z0-9._-]{0,63}$          ; MUST NOT contain "/"; "latest","main" reserved
 entity-token = 22-character unpadded Base64url encoding of the existing UUID's 16 bytes
                ; alphabet [A-Za-z0-9_-], case-sensitive, canonical encoding required
-label        = optional descriptive filename/directory slug, one URL segment
-               ; never used to resolve or authorize the entity
-verb (v1)    = "file" | "dir" | "team" | "settings" | "sql"
+display-path = display-segment *( "/" display-segment )
+               ; slugged current path for readability; never used to resolve or authorize
+display-segment = nonempty percent-encoded URL segment
+verb (v1)    = "file" | "folder" | "team" | "settings" | "sql"
 verb (rsvd)  = raw diff change changes history blame edit new embed
-               archive zip releases agents threads blob tree folder files sync
+               archive zip releases agents threads blob tree files sync
 ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped —
                namespace administration lives in product space, see D2)
 ```
@@ -120,15 +121,15 @@ Implementations MUST NOT allocate namespace-level pages at bare segment 2.
 
 ### D3 — Fixed verbs and stable entity identity
 
-**Decision.** Files mount at `/file/{entity-token}/{label?}`, directories at
-`/dir/{entity-token}/{label?}`. The repository overview represents the root directory.
+**Decision.** Files mount at `/file/{entity-token}/{display-path?}`, directories at
+`/folder/{entity-token}/{display-path?}`. The repository overview represents the root directory.
 The token is the existing entity UUID encoded as 16 bytes of unpadded Base64url
 (22 characters). Encode the UUID bytes in their displayed hexadecimal order; do not
 encode its 36-character textual representation. Require canonical encoding, including
 zero unused bits in the final Base64 character, so one UUID has one token.
 
-The optional label supplies readable context. Resolve exclusively by the decoded
-UUID within the requested repository and entity kind; stale or missing labels still
+The optional display path supplies readable context. Resolve exclusively by the decoded
+UUID within the requested repository and entity kind; stale or missing display paths still
 open the same entity. File and directory UUIDs are scoped by the repository and kind,
 so changing the URL's repository or verb must never bypass that scope.
 
@@ -145,12 +146,12 @@ resolved to its current path and checked against current publication permissions
 before exposing its content; identity URLs do not turn a path publication into a
 repository-wide grant.
 
-**Canonical links.** File and directory canonical metadata uses the token-only route;
-optional labels are readable aliases of that same identity. Preserve `?branch=` when
-selecting a branch, and exclude invite capabilities and unrelated view state from
+**Canonical links.** File and directory canonical metadata and stored document links use the
+token-only route; readable browser URLs add the current path. The MCP returns both `url`
+(token-only, for storage) and `display_url` (readable, for users). Preserve `?branch=` when
+selecting a non-default branch, and exclude invite capabilities and unrelated view state from
 canonical metadata. A branchless browser URL opens the active branch from the fresh
-repository session, retained as that session's default. Links generated for an explicit
-MCP context include its selected branch so another session opens the same state.
+repository session, retained as that session's default.
 
 **Migration.** This is a hard cut. Existing path-based file and directory URLs are not
 aliases. There are no compatibility redirects. Generated links always use UUID tokens.
@@ -163,7 +164,7 @@ unambiguous by string inspection alone, forever. Unpinned = latest.
 
 **Why.** (a) A repository-level revision keeps branch and version selection separate
 from entity identity, without adding another positional file-route segment. (b) One mechanism
-pins every verb (`@{cs}/dir/…`, `@{cs}/diff/…`). (c) Developers already read `@scope/pkg@version`
+pins every verb (`@{cs}/folder/…`, `@{cs}/diff/…`). (c) Developers already read `@scope/pkg@version`
 (npm/unpkg/JSR) — `@google/android@01hx…` is native syntax to this audience. (d) CDN policy by
 string inspection: pinned ⇒ `cache-control: public, max-age=31536000, immutable`; floating ⇒
 short TTL + ETag. GitHub's failure to split these (SHA-pinned raw gets `max-age=300`) created the

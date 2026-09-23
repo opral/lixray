@@ -4,6 +4,7 @@ import test from "node:test";
 import {
 	decodeEntityId,
 	encodeEntityId,
+	entityRouteBase,
 	entityRoutePath,
 	entityUrlSplat,
 	parseEntityUrlSplat,
@@ -52,6 +53,10 @@ void test("an entity URL reads as the path it opens, slugified", () => {
 		entityRoutePath("opral", "monorepo", "file", uuid, "/gtm/GTM playbook.md"),
 		`/@opral/monorepo/file/${token}/gtm/gtm-playbook.md`,
 	);
+	assert.equal(
+		entityRouteBase("opral", "monorepo", "file", uuid),
+		`/@opral/monorepo/file/${token}`,
+	);
 	// Folders read as folders; the root has no path to carry.
 	assert.equal(
 		entityRoutePath("opral", "monorepo", "directory", uuid, "/teams/GTM"),
@@ -99,15 +104,18 @@ void test("the id is the identity; the path is rewritten from it", () => {
 	);
 });
 
-void test("folder links written as /dir still open", () => {
-	for (const pathname of [
+void test("folder routes resolve by ID and the /dir alias is absent", () => {
+	const entity = entityFromRoute(
 		`/@opral/monorepo/folder/${token}/teams/GTM`,
-		`/@opral/monorepo/dir/${token}/teams/GTM`,
-	]) {
-		const entity = entityFromRoute(pathname, "opral", "monorepo");
-		assert.equal(entity?.id, uuid);
-		assert.equal(entity?.kind, "directory");
-	}
+		"opral",
+		"monorepo",
+	);
+	assert.equal(entity?.id, uuid);
+	assert.equal(entity?.kind, "directory");
+	assert.equal(
+		entityFromRoute(`/@opral/monorepo/dir/${token}`, "opral", "monorepo"),
+		null,
+	);
 	assert.equal(
 		entityFromRoute(
 			`/@opral/monorepo/file/${token}/gtm/correct.md`,

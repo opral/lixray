@@ -85,10 +85,10 @@ export const SQL_GUIDE_URI = "lixray://docs/sql";
 const MCP_SCOPES = ["openid", "email", "profile", "offline_access"] as const;
 
 export const MCP_URL_GUIDE =
-	"Browser links: use the exact server-generated url from open_lix.files or get_entity_urls. file_paths are SQL paths, not browser URLs. Never build one by hand: an entity URL is /file/<id>/<path-slug> or /folder/<id>/<path-slug>, and the app rewrites the slug from the id anyway. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves canonical links; it is not a persistence verification. A url carries a branch parameter only when it is not the Lix's default branch; keep it exactly as returned. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
+	"Stored links: use the exact server-generated url from open_lix.files or get_entity_urls in Markdown and other machine-readable content. It contains the file or folder id without the current path. display_url includes the current readable path for user-facing links and may change after a move; path is a SQL path, not a browser URL. Never build a URL by hand. After creating or renaming files/directories, call get_entity_urls once with all items you need to link, using the current context. This read resolves links; it is not persistence verification. A URL carries a branch parameter only when it is not the Lix's default branch; keep it exactly as returned. URLs do not grant access or publish private items. If resolution fails, report the error and omit the item link rather than guessing.";
 
 export const GET_ENTITY_URLS_TOOL_DESCRIPTION =
-	"Return canonical browser URLs for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use after writes or renames, or for items absent from open_lix.files; copy the returned urls exactly. Read-only; directory path / is the repository URL.";
+	"Return stable url and readable display_url for up to 50 files or directories in the Lix and branch in context, each given by kind and exactly one of id or absolute path. Use url in documents and display_url for human-facing links. Read-only; directory path / is the repository URL.";
 
 export const UNDO_TOOL_DESCRIPTION =
 	"Undo the latest undoable change on the context branch through SELECT commit_id FROM lix_undo(). Returns the inverse commit_id, or null when there is nothing to undo. Inspect history first if later edits may exist.";
@@ -120,7 +120,7 @@ export const LIST_LIXES_TOOL_DESCRIPTION =
 	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
-	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, canonical url; when file_paths_complete is true, do not list files again.";
+	"Open exact @handle/slug or UUID without calling list_lixes first and mint context (active branch unless branch_id is given). Optional for SQL. Returns counts, file_paths (SQL paths, not URLs), and files with id, path, stable url and readable display_url; when file_paths_complete is true, do not list files again.";
 
 type McpAuthMode = "oauth" | "none";
 
@@ -411,7 +411,14 @@ const openLixOutput = withError(
 		file_count: z.number().int(),
 		directory_count: z.number().int(),
 		files: z.array(
-			z.object({ id: z.string(), path: z.string(), url: z.string() }).strict(),
+			z
+				.object({
+					id: z.string(),
+					path: z.string(),
+					url: z.string(),
+					display_url: z.string(),
+				})
+				.strict(),
 		),
 		file_paths: z.array(z.string()),
 		file_paths_complete: z.boolean(),
@@ -429,6 +436,7 @@ const entityUrlsOutput = withError(
 					id: z.string().nullable(),
 					path: z.string(),
 					url: z.string(),
+					display_url: z.string(),
 				})
 				.strict(),
 		),
@@ -437,7 +445,12 @@ const entityUrlsOutput = withError(
 
 const fileMetadata = z.record(z.string(), z.unknown());
 const listedFile = z
-	.object({ id: z.string(), path: z.string(), url: z.string() })
+	.object({
+		id: z.string(),
+		path: z.string(),
+		url: z.string(),
+		display_url: z.string(),
+	})
 	.strict();
 const listFilesOutput = withError(
 	z.object({
@@ -457,6 +470,7 @@ const readFilesOutput = withError(
 					id: z.string(),
 					path: z.string(),
 					url: z.string(),
+					display_url: z.string(),
 					size: z.number().int(),
 					/** The file's text; absent when `encoding` says why it is not. */
 					content: z.string().optional(),
@@ -487,6 +501,7 @@ const diffOutput = withError(
 					before_commit_id: z.string(),
 					after_commit_id: z.string(),
 					url: z.string(),
+					display_url: z.string(),
 				})
 				.strict(),
 		),
@@ -849,7 +864,7 @@ export function createLixrayMcpServer(
 	registerTool(
 		server,
 		"get_entity_urls",
-		"LixRay: Get canonical item URLs",
+		"LixRay: Get item links",
 		GET_ENTITY_URLS_TOOL_DESCRIPTION,
 		z
 			.object({ context, entities: z.array(entityUrlSelector).min(1).max(50) })
@@ -964,6 +979,7 @@ export function createLixrayMcpServer(
 				before_commit_id: beforeId,
 				after_commit_id: afterId,
 				url: urls.files[index]!,
+				display_url: urls.displayFiles[index]!,
 			}));
 			const named = files.map((file) => file.path.replace(/^\//, ""));
 			const shown = named.slice(0, 20);
@@ -974,7 +990,9 @@ export function createLixrayMcpServer(
 				after: afterId,
 				commit_id: afterId,
 				url: urls.repository,
-				...uiField(changeCard(changes, urls.files, "changed", urls.repository)),
+				...uiField(
+					changeCard(changes, urls.displayFiles, "changed", urls.repository),
+				),
 				[SUMMARY_KEY]: `${files.length} ${files.length === 1 ? "file" : "files"} changed between ${describeDiffRef(before, beforeId)} and ${describeDiffRef(after, afterId)}${shown.length ? `: ${shown.join(", ")}${named.length > shown.length ? `, +${named.length - shown.length} more` : ""}` : ""}.`,
 			};
 		},
@@ -1885,7 +1903,7 @@ function formatListLixIdentity(item: unknown): string {
  * Links a host can render inline for what the call did: the repository on
  * open_lix, and each file or directory an execute_sql batch wrote. Reads
  * (query_sql) link nothing. Resolution reuses get_entity_urls, so a link is
- * only ever a canonical URL for an entity that exists; a failed lookup just
+ * only ever a resolved URL for an entity that exists; a failed lookup just
  * means no links.
  */
 type TouchedByCall = {
@@ -2003,7 +2021,7 @@ async function executeCard(
 	try {
 		const changes = await service.fileChanges(token, span, paths);
 		const urls = await service.changeUrls(token, changes, urlOrigin);
-		return changeCard(changes, urls.files, "written", urls.repository);
+		return changeCard(changes, urls.displayFiles, "written", urls.repository);
 	} catch (caught) {
 		console.error("LixRay MCP file changes failed", {
 			error: errorDetails(caught),
@@ -2096,7 +2114,11 @@ async function resultResourceLinks(
 	}
 	if (name === "diff" && Array.isArray(result.files)) {
 		return (
-			result.files as Array<{ path: string; url: string; status: string }>
+			result.files as Array<{
+				path: string;
+				display_url: string;
+				status: string;
+			}>
 		)
 			.filter((file) => file.status !== "removed")
 			.slice(0, 50)
@@ -2104,7 +2126,7 @@ async function resultResourceLinks(
 				const mimeType = mimeTypeForPath(file.path);
 				return {
 					type: "resource_link",
-					uri: file.url,
+					uri: file.display_url,
 					name: file.path.split("/").filter(Boolean).at(-1) ?? file.path,
 					description: `${file.status === "added" ? "Added" : file.status === "moved" ? "Moved" : "Modified"} ${file.path.replace(/^\//, "")}`,
 					...(mimeType ? { mimeType } : {}),
@@ -2129,7 +2151,7 @@ async function resultResourceLinks(
 				entity.kind === "file" ? mimeTypeForPath(entity.path) : undefined;
 			return {
 				type: "resource_link",
-				uri: entity.url,
+				uri: entity.display_url,
 				name: entity.path.split("/").filter(Boolean).at(-1) ?? entity.path,
 				description: `${action} ${entity.path.replace(/^\//, "")}`,
 				...(mimeType ? { mimeType } : {}),
