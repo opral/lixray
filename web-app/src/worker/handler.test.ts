@@ -88,11 +88,12 @@ void test("operator provisions Markdown only with the internal token", async () 
 	let installed = 0;
 	const options = {
 		installMarkdownPlugin: async (
-			_request: Request,
+			request: Request,
 			_env: WorkerEnv,
 			account: { userId: string },
 			repositoryId: string,
 		) => {
+			assert.equal(new URL(request.url).origin, "http://127.0.0.1:8080");
 			assert.equal(account.userId, "lixray-provisioner");
 			assert.equal(repositoryId, LIX_A);
 			installed++;

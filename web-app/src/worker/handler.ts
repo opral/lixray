@@ -86,6 +86,7 @@ import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
 export { validateMcpJwtClaims } from "../mcp/auth.ts";
 
 export interface WorkerEnv {
+	PORT?: string;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	/** Server-only credential for registering protocol-created repository ownership. */
@@ -432,7 +433,10 @@ export async function handleRequest(
 			return new Response("Unauthorized\n", { status: 401 });
 		try {
 			await (options.installMarkdownPlugin ?? installMarkdownPlugin)(
-				request,
+				new Request(
+					new URL(url.pathname, `http://127.0.0.1:${env.PORT ?? 8080}`),
+					{ method: "POST" },
+				),
 				env,
 				{ userId: "lixray-provisioner" },
 				provisionMarkdownMatch[1]!,
