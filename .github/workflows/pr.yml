@@ -265,15 +265,6 @@ jobs:
       - name: Install Playwright browser
         run: pnpm --dir web-app exec playwright install --with-deps chromium
 
-      - name: Test MCP Apps write preview
-        run: pnpm --dir web-app test:mcp-ui
-
-      - name: Test published file rendering
-        run: pnpm --dir web-app test:published
-
-      - name: Test device recovery and directory review controls
-        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts
-
       - name: Run Compose e2e tests
         env:
           LIXRAY_SERVER_IMAGE: ${{ needs.server-image.outputs.image }}
@@ -290,6 +281,45 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-failure
+          path: web-app/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+
+  e2e-components:
+    name: E2E browser components
+    needs: [changes, sdk]
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/download-artifact@v4
+        with:
+          name: vendored-lix-sdk
+          path: vendor/lix/packages
+      - run: pnpm --dir web-app ci:prepare:web
+      - run: pnpm --dir web-app exec playwright install --with-deps chromium
+      - name: Test MCP Apps write preview
+        run: pnpm --dir web-app test:mcp-ui
+      - name: Test published file rendering
+        run: pnpm --dir web-app test:published
+      - name: Test device recovery and directory review controls
+        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-components-failure
           path: web-app/test-results
           if-no-files-found: ignore
           retention-days: 7
@@ -313,7 +343,7 @@ jobs:
       github.event.action != 'closed' &&
       (github.event.action != 'labeled' || github.event.label.name == 'preview') &&
       (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'preview'))
-    needs: [changes, fast, sdk, frontend, tooling, database, e2e, sync, server-image, web-image]
+    needs: [changes, fast, sdk, frontend, tooling, database, e2e, e2e-components, sync, server-image, web-image]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
