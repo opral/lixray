@@ -129,8 +129,8 @@ For agent work, run the local PR acceptance in an isolated worktree after
 committing the candidate. The artifact check runs first and rejects a pinned
 Lix browser SDK whose producer workflow has not finished successfully. This
 prevents a green local run from relying on an artifact that production will
-later reject. Node 24, pnpm 10.13.1, Docker, and the local Supabase CLI are
-required.
+later reject. Node 24, pnpm 10.13.1, Docker with Buildx, the authenticated
+GitHub CLI (`gh`), and the local Supabase CLI are required.
 
 ```sh
 pnpm ci:local --check-only  # Fast cross-repository artifact gate
