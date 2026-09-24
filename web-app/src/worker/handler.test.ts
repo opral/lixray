@@ -94,7 +94,11 @@ void test("operator provisions Markdown only with the internal token", async () 
 			repositoryId: string,
 		) => {
 			assert.equal(new URL(request.url).origin, "http://127.0.0.1:8080");
-			assert.equal(account.userId, "lixray-provisioner");
+			assert.match(
+				account.userId,
+				/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+			assert.equal(account.userId, "00000000-0000-4000-8000-000000000006");
 			assert.equal(repositoryId, LIX_A);
 			installed++;
 		},

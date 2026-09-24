@@ -263,6 +263,9 @@ const NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH =
 	/^\/profile\/([^/]+)\/activity\/refresh$/;
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Stable operator principal for private host setup retries; the Lix protocol
+// requires a canonical UUID even though this is not a user account.
+const REPOSITORY_PROVISIONER_ID = "00000000-0000-4000-8000-000000000006";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 // Keep server-owned public reads attributed to Lix's built-in anonymous
 // account. Protocol principals are persisted as lix_account IDs, so an
@@ -438,7 +441,7 @@ export async function handleRequest(
 					{ method: "POST" },
 				),
 				env,
-				{ userId: "lixray-provisioner" },
+				{ userId: REPOSITORY_PROVISIONER_ID },
 				provisionMarkdownMatch[1]!,
 				options.fetch,
 			);
