@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { randomInt } from "node:crypto";
 import { cp, mkdir } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
@@ -8,14 +9,23 @@ import { resolveLixServerImage } from "./resolve-lix-server.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const project = `lixray-ci-local-${process.pid}`;
-const port = () => new Promise((resolve, reject) => {
-	const server = createServer();
-	server.once("error", reject);
-	server.listen(0, "127.0.0.1", () => {
-		const selected = server.address().port;
-		server.close(() => resolve(String(selected)));
-	});
-});
+async function port() {
+	for (let attempt = 0; attempt < 20; attempt++) {
+		const selected = randomInt(50000, 60000);
+		const server = createServer();
+		try {
+			await new Promise((resolve, reject) => {
+				server.once("error", reject);
+				server.listen(selected, "127.0.0.1", resolve);
+			});
+			await new Promise((resolve) => server.close(resolve));
+			return String(selected);
+		} catch (error) {
+			if (error.code !== "EADDRINUSE") throw error;
+		}
+	}
+	throw new Error("Could not find an available local CI port.");
+}
 const selectedPorts = new Set();
 async function uniquePort() {
 	let selected;
