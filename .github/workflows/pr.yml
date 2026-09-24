@@ -62,14 +62,18 @@ jobs:
       - name: Validate submodule branches
         run: .github/scripts/validate-submodule-branches.sh
 
-      - name: Require successful Lix CI for the pinned browser artifact
-        env:
-          GH_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-        run: node scripts/check-pinned-lix-ci.mjs
-
       - name: Classify changed files
         id: classify
         run: node .github/scripts/classify-ci-changes.mjs
+
+      - name: Require successful Lix CI for artifact consumers
+        if: >-
+          steps.classify.outputs.frontend == 'true' ||
+          steps.classify.outputs.e2e == 'true' ||
+          contains(github.event.pull_request.labels.*.name, 'preview')
+        env:
+          GH_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+        run: node scripts/check-pinned-lix-ci.mjs
 
       - name: Validate PWA asset references
         if: steps.classify.outputs.deploy == 'true'

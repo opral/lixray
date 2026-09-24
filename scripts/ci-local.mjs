@@ -23,20 +23,24 @@ async function uniquePort() {
 	selectedPorts.add(selected);
 	return selected;
 }
-const webPort = await uniquePort();
-const serverPort = await uniquePort();
-const minioPort = await uniquePort();
-const minioConsolePort = await uniquePort();
 const localEnv = {
 	...process.env,
 	CI: "true",
 	COMPOSE_PROJECT_NAME: project,
-	E2E_PORT: webPort,
-	LIXRAY_DEV_PORT: webPort,
-	LIXRAY_SERVER_PORT: serverPort,
-	LIXRAY_MINIO_PORT: minioPort,
-	LIXRAY_MINIO_CONSOLE_PORT: minioConsolePort,
 };
+
+async function stackEnv(projectName) {
+	const webPort = await uniquePort();
+	return {
+		...localEnv,
+		COMPOSE_PROJECT_NAME: projectName,
+		E2E_PORT: webPort,
+		LIXRAY_DEV_PORT: webPort,
+		LIXRAY_SERVER_PORT: await uniquePort(),
+		LIXRAY_MINIO_PORT: await uniquePort(),
+		LIXRAY_MINIO_CONSOLE_PORT: await uniquePort(),
+	};
+}
 
 function run(label, command, args, env = localEnv) {
 	console.log(`\n==> ${label}`);
@@ -56,8 +60,10 @@ run("Install locked dependencies", "pnpm", ["install", "--frozen-lockfile", "--i
 run("Source, tooling, and frontend CI", "pnpm", ["run", "ci"]);
 run("Install Chromium", "pnpm", ["--dir", "web-app", "exec", "playwright", "install", "chromium"]);
 run("MCP Apps browser component tests", "pnpm", ["--dir", "web-app", "test:mcp-ui"]);
-run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published"]);
-run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts"]);
+run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published"],
+	{ ...localEnv, LIXRAY_PUBLISHED_PORT: await uniquePort() });
+run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts"],
+	{ ...localEnv, LIXRAY_COMPONENT_PORT: await uniquePort() });
 
 try {
 	run("Start local database", "pnpm", ["--dir", "database", "start:ci"]);
@@ -69,10 +75,11 @@ try {
 
 const { image: serverImage } = await resolveLixServerImage({ mode: "local", allowBuild: true });
 if (!serverImage) throw new Error("Pinned Lix server image could not be resolved or built locally.");
+const e2eEnv = await stackEnv(project);
 try {
-	run("Authenticated Compose E2E", "pnpm", ["test:e2e"], { ...localEnv, LIXRAY_SERVER_IMAGE: serverImage });
+	run("Authenticated Compose E2E", "pnpm", ["test:e2e"], { ...e2eEnv, LIXRAY_SERVER_IMAGE: serverImage });
 } finally {
-	run("Stop authenticated E2E services", "node", ["scripts/dev.mjs", "--down"]);
+	run("Stop authenticated E2E services", "node", ["scripts/dev.mjs", "--down"], e2eEnv);
 }
 
 const prepared = join(root, ".lixray-ci", "vendored-lix-sdk");
@@ -88,14 +95,13 @@ run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile"
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
 for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
 	const syncEnv = {
-		...localEnv,
-		COMPOSE_PROJECT_NAME: `${project}-${scenario}`,
+		...(await stackEnv(`${project}-${scenario}`)),
 		LIXRAY_WEB_IMAGE: webImage,
 		LIXRAY_SERVER_IMAGE: serverImage,
-		LIXRAY_LIX_SERVICE_URL: `http://127.0.0.1:${serverPort}`,
 		LIXRAY_INTERNAL_TOKEN: "lixray-local-internal-token",
 		PLAYWRIGHT_SYNC_LOCAL: "1",
 	};
+	syncEnv.LIXRAY_LIX_SERVICE_URL = `http://127.0.0.1:${syncEnv.LIXRAY_SERVER_PORT}`;
 	try {
 		run(`Built-image browser integration: ${scenario}`, "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "tests/e2e/sync-preview.spec.ts", "--grep", `@${scenario}`], syncEnv);
 	} finally {

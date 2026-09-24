@@ -84,7 +84,8 @@ test("the required aggregator checks out its script and ignores unrelated label 
 	assert.ok(aggregate.indexOf("uses: actions/checkout@v4") < aggregate.indexOf("check-ci-results.mjs"));
 	const select = job("changes");
 	assert.match(select, /actions: read/);
-	assert.match(select, /run: node scripts\/check-pinned-lix-ci\.mjs/);
+	assert.ok(select.indexOf("id: classify") < select.indexOf("run: node scripts/check-pinned-lix-ci.mjs"));
+	assert.match(select, /Require successful Lix CI for artifact consumers\n\s+if: >-\n\s+steps\.classify\.outputs\.frontend == 'true' \|\|\n\s+steps\.classify\.outputs\.e2e == 'true' \|\|\n\s+contains\(github\.event\.pull_request\.labels\.\*\.name, 'preview'\)/);
 	assert.match(select, /GH_TOKEN: \$\{\{ secrets\.LIX_ACTIONS_READ_TOKEN \|\| github\.token \}\}/);
 	for (const name of ["sdk", "server-image", "web-image", "frontend", "e2e", "e2e-components", "sync"]) {
 		assert.match(job(name), /needs:[\s\S]*?changes/);

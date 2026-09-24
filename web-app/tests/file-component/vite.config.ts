@@ -42,7 +42,7 @@ export default defineConfig({
 	server: {
 		hmr: false,
 		host: "127.0.0.1",
-		port: 8795,
+		port: Number(process.env.LIXRAY_COMPONENT_PORT ?? 8795),
 		strictPort: true,
 		fs: { allow: [at("../../../")] },
 	},
