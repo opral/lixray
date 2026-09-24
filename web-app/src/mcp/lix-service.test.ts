@@ -1161,40 +1161,6 @@ void test("a diff ref resolves to a commit, or is refused with the reason", asyn
 	await refused("latest_checkpoint", /no checkpoint yet/);
 });
 
-void test("readFiles takes bytes and the read commit through the same transaction", async () => {
-	class SnapshotRuntime extends FakeRuntime {
-		inside = false;
-		override async transaction<T>(
-			lixId: string,
-			branchId: string,
-			run: (tx: TransactionClient) => Promise<T>,
-		) {
-			this.inside = true;
-			try {
-				return await super.transaction(lixId, branchId, run);
-			} finally {
-				this.inside = false;
-			}
-		}
-		override async execute(
-			lixId: string,
-			branchId: string,
-			request: ExecuteRequest,
-		) {
-			if (request.sql.startsWith("SELECT id, path, content"))
-				assert.equal(this.inside, true);
-			return super.execute(lixId, branchId, request);
-		}
-	}
-	const runtime = new SnapshotRuntime();
-	const service = new LixService(runtime);
-	const opened = await service.openLix("@acme/company");
-	runtime.stored.set("/notes.md", "snapshot");
-	const reads = await service.readFiles(opened.context, ["/notes.md"]);
-	assert.equal(reads.files[0]?.content, "snapshot");
-	assert.equal(reads.commitId, "commit-0");
-});
-
 for (const failCheckpoint of [false, true]) {
 	void test(`checkpoint keeps the saved batch receipt when checkpoint ${failCheckpoint ? "fails" : "advances the head"}`, async () => {
 		class CheckpointRuntime extends FakeRuntime {

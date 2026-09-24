@@ -264,19 +264,12 @@ void test("the documented consolidation runs as one guarded, checkpointed batch"
 			"/gtm/b.md": "# B\n",
 		});
 		const before = await files(lix);
-		const read = ok(
-			await call("read_files", {
-				context: ok(
-					await call("query_sql", { lix_ref: LIX_REF, sql: "SELECT 1" }),
-				).context,
-				paths: ["/gtm/plan.md"],
-			}),
-		);
+		const opened = ok(await call("open_lix", { lix_ref: LIX_REF }));
 		// The worked example in docs/mcp.md, exactly as written there.
 		const example = JSON.parse(
 			/## Writing files[\s\S]*?```json\n([\s\S]*?)\n```/.exec(MCP_DOCS)![1]!,
 		) as Record<string, unknown>;
-		example.last_seen_commit_id = read.commit_id;
+		example.last_seen_commit_id = opened.commit_id;
 		const result = await call("execute_sql", example);
 		const receipt = ok(result);
 
@@ -298,7 +291,7 @@ void test("the documented consolidation runs as one guarded, checkpointed batch"
 
 		// One commit for the batch, then the checkpoint on top of it.
 		const commit = receipt.commit as { before: string; after: string };
-		assert.equal(commit.before, read.commit_id);
+		assert.equal(commit.before, opened.commit_id);
 		const checkpoint = receipt.checkpoint_commit_id as string;
 		assert.equal(checkpoint, await head(lix));
 		const log = await lix.execute(

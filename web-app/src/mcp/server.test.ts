@@ -11,10 +11,7 @@ const tracerProvider = new NodeTracerProvider({
 tracerProvider.register();
 import assert from "node:assert/strict";
 import {
-	DIFF_CARD_URI,
 	DIFF_CARD_META,
-	MCP_APP_HTML,
-	DIFF_CARD_HTML,
 } from "./diff-card-app.ts";
 import type { DiffCardPayload } from "./diff-card.ts";
 import test from "node:test";
@@ -84,8 +81,7 @@ function assertCheckpointPolicy(text: string): void {
 const isSqlTool = (name: string) =>
 	name === "query_sql" || name === "execute_sql";
 /** Tools whose card carries a guide, not one line. */
-const isGuidedTool = (name: string) =>
-	isSqlTool(name) || ["list_files", "read_files", "diff"].includes(name);
+const isGuidedTool = (name: string) => isSqlTool(name) || name === "diff";
 
 function toolText(result: {
 	content?: Array<{ type: string; text?: string }>;
@@ -773,8 +769,6 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"list_lixes",
 				"open_lix",
 				"get_entity_urls",
-				"list_files",
-				"read_files",
 				"diff",
 				"query_sql",
 				"execute_sql",
@@ -854,7 +848,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		);
 		assert.match(executeSqlTool.description ?? "", /last_seen_commit_id/);
 		assert.match(executeSqlTool.description ?? "", /lixcol_metadata/);
-		assert.match(queryTool.description ?? "", /read_files and list_files/);
+		assert.match(queryTool.description ?? "", /query_sql is the read path/);
+		assert.match(queryTool.description ?? "", /OCTET_LENGTH\(content\)/);
+		assert.match(queryTool.description ?? "", /SUBSTRING\(content FROM 1 FOR 4096\)/);
+		assert.match(queryTool.description ?? "", /Agents previously overfetched/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 		// The listing stays bounded: the guide lives on two tools only, the
 		// rest are one-liners, output schemas are success-only.
@@ -932,12 +929,12 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				?.destructiveHint,
 			true,
 		);
-		// The file read tools are the only file-named surface; writes are SQL.
+		// File reads are SQL; there are no file-list or file-read shortcuts.
 		assert.deepEqual(
 			tools.tools
 				.map((tool) => tool.name)
-				.filter((name) => name.includes("file")),
-			["list_files", "read_files"],
+				.filter((name) => name === "list_files" || name === "read_files"),
+			[],
 		);
 		const opened = await client.callTool({
 			name: "open_lix",
@@ -1372,7 +1369,8 @@ void test("shipped MCP guidance preserves the shortest read path", async () => {
 		assert.match(text, /list_lixes/i);
 		assert.match(text, /only when the target.*unknown/is);
 		assert.match(text, /file_paths_complete/);
-		assert.match(text, /[Bb]atch known paths together/);
+		assert.match(text, /query_sql/);
+		assert.match(text, /OCTET_LENGTH/);
 	}
 });
 
@@ -2475,119 +2473,6 @@ void test("every MCP guidance surface distinguishes stored and display URLs", as
 	assert.match(MCP_URL_GUIDE, /get_entity_urls/);
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /get_entity_urls/);
 	assert.match(OPEN_LIX_TOOL_DESCRIPTION, /display_url/);
-});
-
-void test("file read tools list and read files; writes go through execute_sql", async () => {
-	const runtime = new FakeRuntime();
-	const service = new LixService(runtime, {
-		contextSigningKey: "file-tools",
-		principal: { userId: "user", clientId: "client" },
-	});
-	const transport = new StreamableHTTPClientTransport(
-		new URL("https://dev.lixray.com/mcp"),
-		{
-			fetch: (input, init) =>
-				handleMcpTransport(new Request(input, init), service, {
-					authMode: "none",
-				}),
-		},
-	);
-	const client = new Client(
-		{ name: "file-tools-test", version: "1" },
-		{ versionNegotiation: { mode: { pin: MCP_PROTOCOL_VERSION } } },
-	);
-	try {
-		await client.connect(transport);
-		await client.listTools();
-		const opened = await client.callTool({
-			name: "open_lix",
-			arguments: { lix_ref: "@acme/company" },
-		});
-		const context = (opened.structuredContent as { context: string }).context;
-
-		const listed = await client.callTool({
-			name: "list_files",
-			arguments: { context, directory: "/skills" },
-		});
-		assert.equal(listed.isError, undefined, JSON.stringify(listed));
-		const listing = listed.structuredContent as {
-			commit_id: string;
-			files: Array<{
-				id: string;
-				path: string;
-				url: string;
-				display_url: string;
-			}>;
-			truncated: boolean;
-		};
-		assert.equal(listing.commit_id, "commit-1");
-		assert.deepEqual(listing.files, [
-			{
-				id: "22222222-2222-4222-8222-222222222222",
-				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg",
-				display_url:
-					"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
-			},
-		]);
-		assert.equal(listing.truncated, false);
-		assert.match(toolText(listed), /Listed 1 file at commit commit-1/);
-
-		const read = await client.callTool({
-			name: "read_files",
-			arguments: { context, paths: ["/skills/hello.md", "/missing.md"] },
-		});
-		assert.equal(read.isError, undefined, JSON.stringify(read));
-		const contents = read.structuredContent as {
-			commit_id: string;
-			files: Array<Record<string, unknown>>;
-			missing: string[];
-		};
-		assert.deepEqual(contents.files, [
-			{
-				id: "22222222-2222-4222-8222-222222222222",
-				path: "/skills/hello.md",
-				url: "https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg",
-				display_url:
-					"https://dev.lixray.com/@acme/company/file/IiIiIiIiQiKCIiIiIiIiIg/skills/hello.md",
-				size: 8,
-				content: "# Hello\n",
-				lixcol_metadata: null,
-			},
-		]);
-		assert.deepEqual(contents.missing, ["/missing.md"]);
-		assert.match(toolText(read), /Read 1 file; missing: \/missing\.md/);
-
-		// There is no file write tool: execute_sql is the one write path.
-		await assert.rejects(
-			client.callTool({
-				name: "write_files",
-				arguments: { context, files: [{ path: "/a.md", content: "a" }] },
-			}),
-		);
-
-		const resources = await client.listResources();
-		assert.ok(
-			resources.resources.some((resource) => resource.uri === DIFF_CARD_URI),
-		);
-		const resource = await client.readResource({ uri: DIFF_CARD_URI });
-		assert.equal(resource.contents[0]?.mimeType, MCP_APP_HTML);
-		assert.ok(resource.contents[0] && "text" in resource.contents[0]);
-		assert.equal(resource.contents[0].text, DIFF_CARD_HTML);
-		const tools = await client.listTools();
-		for (const name of ["execute_sql", "diff"])
-			assert.deepEqual(
-				tools.tools.find((tool) => tool.name === name)?._meta?.ui,
-				{ resourceUri: DIFF_CARD_URI },
-				name,
-			);
-		assert.equal(
-			tools.tools.find((tool) => tool.name === "read_files")?._meta?.ui,
-			undefined,
-		);
-	} finally {
-		await client.close();
-	}
 });
 
 void test("a change query that fails leaves the batch saved, without a card", async () => {

@@ -9,10 +9,8 @@ import {
 	EXECUTE_SQL_CORE_TABLES,
 	EXECUTE_SQL_TOOL_DESCRIPTION,
 	EXECUTE_SQL_TABLES_QUERY,
-	LIST_FILES_TOOL_DESCRIPTION,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
-	READ_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import { MCP_SERVER_INSTRUCTIONS } from "./server.ts";
 
@@ -61,6 +59,11 @@ void test("shared operating guide keeps file-content, upsert, and outcome-aware 
 		);
 	}
 	assert.match(LIX_SQL_OPERATING_GUIDE, /excluded\.content/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /OCTET_LENGTH\(content\)/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /SUBSTRING\(content FROM 1 FOR 4096\)/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /known to be small/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /Agents previously overfetched/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /#485/);
 	assert.match(
 		LIX_SQL_OPERATING_GUIDE,
 		/INSERT INTO lix_key_value \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = excluded\.value/,
@@ -97,8 +100,13 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /ordered atomic SQL batch/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /complete batch is rolled back/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
-	// Reads: files elsewhere, not SQLite, the catalog, core tables, params, history.
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /Prefer read_files and list_files/);
+	// Reads: bounded SQL reads, not SQLite, the catalog, core tables, params, history.
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /query_sql is the read path/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /Agents previously overfetched/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /OCTET_LENGTH\(content\)/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /SUBSTRING\(content FROM 1 FOR 4096\)/);
+	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /known small text file/);
+	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /Prefer (?:read_files|list_files)/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
@@ -128,16 +136,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /Example: \[/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /outcome is unknown/);
 	assert.doesNotMatch(EXECUTE_SQL_TOOL_DESCRIPTION, /write_files/);
-	// The read tools carry the read guide and point writes at execute_sql.
-	// A read hands over text, and names the reason when it cannot.
-	assert.match(READ_FILES_TOOL_DESCRIPTION, /content as text/);
-	assert.match(READ_FILES_TOOL_DESCRIPTION, /"binary" or "too-large"/);
-	assert.match(READ_FILES_TOOL_DESCRIPTION, /atelier_csv/);
-	assert.match(
-		READ_FILES_TOOL_DESCRIPTION,
-		/pass it to execute_sql as last_seen_commit_id/,
-	);
-	assert.match(LIST_FILES_TOOL_DESCRIPTION, /truncated/);
+	// The registered SQL read tool carries a complete, safe file-read guide.
 	// The instructions carry recovery/routing; the full guide is a resource.
 	assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /lixray:\/\/docs\/sql/);
@@ -146,10 +145,8 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	for (const description of [
 		QUERY_SQL_TOOL_DESCRIPTION,
 		EXECUTE_SQL_TOOL_DESCRIPTION,
-		LIST_FILES_TOOL_DESCRIPTION,
-		READ_FILES_TOOL_DESCRIPTION,
 	]) {
-		assert.ok(description.length <= 1_400, `${description.length} chars`);
+		assert.ok(description.length <= 1_800, `${description.length} chars`);
 		assert.doesNotMatch(description, /never infer success from prose/);
 		assert.doesNotMatch(description, /lixcol_branch_id/);
 	}
@@ -160,8 +157,6 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 		MCP_DOCS,
 		QUERY_SQL_TOOL_DESCRIPTION,
 		EXECUTE_SQL_TOOL_DESCRIPTION,
-		LIST_FILES_TOOL_DESCRIPTION,
-		READ_FILES_TOOL_DESCRIPTION,
 	])
 		assert.doesNotMatch(text, /write_files/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /execute_sql is the one write path/);
