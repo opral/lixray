@@ -24,7 +24,7 @@ if (Number(process.versions.node.split(".")[0]) !== 24) {
 
 run("Initialize pinned submodules", "git", ["submodule", "update", "--init", "--recursive"]);
 run("Install locked dependencies", "pnpm", ["install", "--frozen-lockfile", "--ignore-scripts"]);
-run("Source, tooling, and frontend CI", "pnpm", ["ci"]);
+run("Source, tooling, and frontend CI", "pnpm", ["run", "ci"]);
 run("Install Chromium", "pnpm", ["--dir", "web-app", "exec", "playwright", "install", "chromium"]);
 run("MCP Apps browser component tests", "pnpm", ["--dir", "web-app", "test:mcp-ui"]);
 run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published"]);
