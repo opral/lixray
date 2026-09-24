@@ -178,9 +178,11 @@ export async function createSyncFixture({
 				provisionRepositories as (options: {
 					mode: "create-new";
 					ids: string[];
+					webUrl: string;
 				}) => Promise<void>
 			)({
 				mode: "create-new",
+				webUrl: baseURL,
 				ids:
 					scenario === "navigation"
 						? [DEMO_REPOSITORY_ID, SECONDARY_REPOSITORY_ID]

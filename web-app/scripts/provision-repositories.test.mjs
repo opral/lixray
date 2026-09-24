@@ -12,6 +12,7 @@ test("operator explicitly provisions fixed demo IDs through the private host end
 	await provisionRepositories({
 		mode: "create-new",
 		env,
+		webUrl: "http://127.0.0.1:8790",
 		fetchImpl: async (url, request) => {
 			if (url.pathname === "/healthz")
 				return new Response(null, { status: 200 });
@@ -28,7 +29,7 @@ test("operator explicitly provisions fixed demo IDs through the private host end
 	assert.deepEqual(JSON.parse(calls[0].request.body), { mode: "create-new" });
 	assert.equal(
 		calls[1].url,
-		"http://127.0.0.1:8080/internal/repositories/00000000-0000-4000-8000-000000000002/plugins/markdown",
+		"http://127.0.0.1:8790/internal/repositories/00000000-0000-4000-8000-000000000002/plugins/markdown",
 	);
 	assert.equal(calls[1].request.method, "POST");
 	assert.equal(calls[1].request.headers.Authorization, "Bearer private-token");

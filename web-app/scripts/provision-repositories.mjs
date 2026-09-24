@@ -7,6 +7,7 @@ export async function provisionRepositories({
 	ids: requestedIds,
 	env = process.env,
 	fetchImpl = fetch,
+	webUrl = `http://127.0.0.1:${env.PORT ?? 8080}`,
 	sleepImpl = (milliseconds) =>
 		new Promise((resolve) => setTimeout(resolve, milliseconds)),
 }) {
@@ -89,10 +90,7 @@ export async function provisionRepositories({
 		await response.body?.cancel();
 		if (mode === "create-new") {
 			const installed = await fetchImpl(
-				new URL(
-					`/internal/repositories/${id}/plugins/markdown`,
-					`http://127.0.0.1:${env.PORT ?? 8080}`,
-				),
+				new URL(`/internal/repositories/${id}/plugins/markdown`, webUrl),
 				{
 					method: "POST",
 					headers: { Authorization: `Bearer ${env.LIXRAY_INTERNAL_TOKEN}` },
