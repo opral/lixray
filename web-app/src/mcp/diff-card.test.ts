@@ -376,8 +376,8 @@ void test("the resource is one bar until opened, and draws Atelier's glyph", () 
 	);
 	for (const [kind, path] of Object.entries(DIFF_GLYPH.knockout))
 		assert.ok(geometry.includes(`${kind}: "${path}"`), kind);
-	assert.match(geometry, /DIFF_GLYPH_RADIUS = 5;/);
-	assert.match(geometry, /DIFF_GLYPH_STROKE = 1\.7;/);
+	assert.match(geometry, /DIFF_GLYPH_RADIUS = 5\.5;/);
+	assert.match(geometry, /DIFF_GLYPH_STROKE = 1\.5;/);
 	assert.match(DIFF_CARD_HTML, /<script>/);
 	assert.doesNotMatch(DIFF_CARD_HTML, /<link|src="http/);
 });
