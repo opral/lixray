@@ -24,7 +24,6 @@ import {
 	type AtelierHandle,
 	type AtelierProps,
 } from "@opral/atelier";
-import "@opral/atelier/style.css";
 import {
 	Outlet,
 	useNavigate,

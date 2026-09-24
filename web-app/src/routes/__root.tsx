@@ -13,6 +13,8 @@ import { ThemeColorSync } from "~/components/theme-color-sync";
 import { RepositoryProvider } from "~/components/repository-provider";
 import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
 import pwaIcons from "../pwa-icons.json";
+// Atelier bundles global utilities; load its CSS before this app's utilities.
+import atelierCss from "../../../vendor/atelier/src/index.css?url";
 import appCss from "../styles.css?url";
 
 const title = "LixRay — All your work. In one repository.";
@@ -39,7 +41,11 @@ export const Route = createRootRoute({
 			{ name: "twitter:card", content: "summary_large_image" },
 			{ name: "twitter:image", content: ogImage },
 		],
-		links: [{ rel: "stylesheet", href: appCss }, ...pwaIcons],
+		links: [
+			{ rel: "stylesheet", href: atelierCss },
+			{ rel: "stylesheet", href: appCss },
+			...pwaIcons,
+		],
 	}),
 	component: Outlet,
 	shellComponent: RootDocument,
