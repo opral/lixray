@@ -212,13 +212,15 @@ test("upstream body failure is not mislabeled as a client cancellation", async (
 						controller.error(new Error("private upstream body detail"));
 					},
 				}),
-		),
+			),
 		async (origin) => {
 			await new Promise((resolve, reject) => {
 				const call = request(`${origin}/mcp`, (response) => {
 					response.once("error", resolve);
 					response.once("aborted", resolve);
-					response.once("end", () => reject(new Error("response unexpectedly completed")));
+					response.once("end", () =>
+						reject(new Error("response unexpectedly completed")),
+					);
 					response.resume();
 					fail.resolve();
 				});
