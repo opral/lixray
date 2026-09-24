@@ -63,7 +63,7 @@ void test("shared operating guide keeps file-content, upsert, and outcome-aware 
 	assert.match(LIX_SQL_OPERATING_GUIDE, /SUBSTRING\(content FROM 1 FOR 4096\)/);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /known to be small/);
 	assert.match(LIX_SQL_OPERATING_GUIDE, /Agents previously overfetched/);
-	assert.match(LIX_SQL_OPERATING_GUIDE, /#485/);
+	assert.match(LIX_SQL_OPERATING_GUIDE, /issue 485/);
 	assert.match(
 		LIX_SQL_OPERATING_GUIDE,
 		/INSERT INTO lix_key_value \(key, value\) VALUES \(\$1, \$2\) ON CONFLICT \(key\) DO UPDATE SET value = excluded\.value/,
