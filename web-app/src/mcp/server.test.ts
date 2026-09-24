@@ -837,11 +837,11 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		};
 		assert.ok(executeInput.properties.last_seen_commit_id);
 		assert.ok(executeInput.properties.checkpoint);
-		const checkpointTool = tools.tools.find(
+		const checkpointCreateTool = tools.tools.find(
 			(tool) => tool.name === "create_checkpoint",
 		)!;
 		assert.deepEqual(
-			(checkpointTool.inputSchema as { required: string[] }).required,
+			(checkpointCreateTool.inputSchema as { required: string[] }).required,
 			["context", "description"],
 		);
 		const executeOutput = executeSqlTool.outputSchema as {
