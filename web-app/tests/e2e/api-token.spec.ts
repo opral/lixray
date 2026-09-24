@@ -23,6 +23,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 	).toBeVisible();
 
 	const { lixId, otherId, namespace } = await page.evaluate(async () => {
+		const runId = crypto.randomUUID();
 		const moduleUrl = "/src/lib/supabase.ts";
 		const { getBrowserSupabaseClient } = (await import(
 			/* @vite-ignore */ moduleUrl
@@ -51,8 +52,8 @@ test("Account tokens have generated names, creation dates and independent deleti
 			return ((await response.json()) as { id: string }).id;
 		}
 		return {
-			lixId: await create("API token test"),
-			otherId: await create("Other API token test"),
+			lixId: await create(`API token test ${runId}`),
+			otherId: await create(`Other API token test ${runId}`),
 			namespace: data[0].namespace_handle,
 		};
 	});
