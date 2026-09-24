@@ -1447,10 +1447,11 @@ export async function createSyncFixture({
 					);
 					// The other tab in each profile proves durable local publication,
 					// rather than merely observing the writer's unsaved editor draft.
+					// Plugin-backed Markdown projection can take longer than one edit tick.
 					for (const [index, replica] of replicas.entries()) {
 						await expect(replica.mirror.locator("p").last()).toHaveText(
 							markers[index]!,
-							{ timeout: 5_000 },
+							{ timeout: realtimeTimeout },
 						);
 					}
 					await replicas[first]!.context.setOffline(false);
