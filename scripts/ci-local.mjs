@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { cp, mkdir } from "node:fs/promises";
+import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkPinnedLixCi } from "./check-pinned-lix-ci.mjs";
@@ -7,7 +8,35 @@ import { resolveLixServerImage } from "./resolve-lix-server.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const project = `lixray-ci-local-${process.pid}`;
-const localEnv = { ...process.env, CI: "true", COMPOSE_PROJECT_NAME: project };
+const port = () => new Promise((resolve, reject) => {
+	const server = createServer();
+	server.once("error", reject);
+	server.listen(0, "127.0.0.1", () => {
+		const selected = server.address().port;
+		server.close(() => resolve(String(selected)));
+	});
+});
+const selectedPorts = new Set();
+async function uniquePort() {
+	let selected;
+	do { selected = await port(); } while (selectedPorts.has(selected));
+	selectedPorts.add(selected);
+	return selected;
+}
+const webPort = await uniquePort();
+const serverPort = await uniquePort();
+const minioPort = await uniquePort();
+const minioConsolePort = await uniquePort();
+const localEnv = {
+	...process.env,
+	CI: "true",
+	COMPOSE_PROJECT_NAME: project,
+	E2E_PORT: webPort,
+	LIXRAY_DEV_PORT: webPort,
+	LIXRAY_SERVER_PORT: serverPort,
+	LIXRAY_MINIO_PORT: minioPort,
+	LIXRAY_MINIO_CONSOLE_PORT: minioConsolePort,
+};
 
 function run(label, command, args, env = localEnv) {
 	console.log(`\n==> ${label}`);
@@ -61,14 +90,9 @@ for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
 	const syncEnv = {
 		...localEnv,
 		COMPOSE_PROJECT_NAME: `${project}-${scenario}`,
-		E2E_PORT: "28790",
-		LIXRAY_DEV_PORT: "28790",
-		LIXRAY_SERVER_PORT: "28080",
-		LIXRAY_MINIO_PORT: "29000",
-		LIXRAY_MINIO_CONSOLE_PORT: "29001",
 		LIXRAY_WEB_IMAGE: webImage,
 		LIXRAY_SERVER_IMAGE: serverImage,
-		LIXRAY_LIX_SERVICE_URL: "http://127.0.0.1:28080",
+		LIXRAY_LIX_SERVICE_URL: `http://127.0.0.1:${serverPort}`,
 		LIXRAY_INTERNAL_TOKEN: "lixray-local-internal-token",
 		PLAYWRIGHT_SYNC_LOCAL: "1",
 	};
