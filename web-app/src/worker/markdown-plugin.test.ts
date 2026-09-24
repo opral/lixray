@@ -86,7 +86,13 @@ void test("installs the shipped archive on the new host's active branch", async 
 			return lix;
 		}) as typeof openLix,
 	);
-	assert.deepEqual(calls, ["download", "protocol", "install", "checkpoint", "close"]);
+	assert.deepEqual(calls, [
+		"download",
+		"protocol",
+		"install",
+		"checkpoint",
+		"close",
+	]);
 });
 
 void test("unavailable static asset prevents opening a repository", async () => {
