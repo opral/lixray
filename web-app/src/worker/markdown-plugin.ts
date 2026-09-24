@@ -52,11 +52,17 @@ export async function installMarkdownPlugin(
 		},
 	});
 	try {
-		await lix.execute(
+		const installed = await lix.execute(
 			`INSERT INTO lix_file (path, content) VALUES ($1, $2)
 			 ON CONFLICT (path) DO NOTHING`,
 			[MARKDOWN_PLUGIN_PATH, archive],
 		);
+		// A newly created host must open with the plugin in its baseline, not
+		// with a pending working change. Retrying an existing install adds no
+		// checkpoint and preserves the original snapshot's state.
+		if (installed.rowsAffected > 0) {
+			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+		}
 	} finally {
 		await lix.close();
 	}

@@ -240,7 +240,14 @@ test("Account tokens have generated names, creation dates and independent deleti
 			},
 			{ token: first, url: remote.url },
 		);
-		expect(importedHistory).toEqual(snapshot.history);
+		// Hosting adds the pinned Markdown plugin as a tracked file, then marks
+		// that installed state as the new clean checkpoint.
+		const originalHistoryCount = snapshot.history[0]?.["count(*)"];
+		if (typeof originalHistoryCount !== "number")
+			throw new Error("Imported snapshot history count is not a number");
+		expect(importedHistory).toEqual([
+			{ "count(*)": originalHistoryCount + 2 },
+		]);
 		const publication = await request.post(
 			`/api/repositories/${remote.id}/share?path=/shared.txt`,
 			{ headers: { Authorization: `Bearer ${first}` } },

@@ -37,11 +37,15 @@ void test("installs the shipped archive on the new host's active branch", async 
 	const calls: string[] = [];
 	const lix = {
 		execute: async (sql: string, params: unknown[]) => {
-			calls.push("install");
-			assert.match(sql, /INSERT INTO lix_file/);
-			assert.match(sql, /ON CONFLICT \(path\) DO NOTHING/);
-			assert.equal(params[0], MARKDOWN_PLUGIN_PATH);
-			assert.deepEqual(params[1], archive);
+			if (sql.includes("INSERT INTO lix_file")) {
+				calls.push("install");
+				assert.match(sql, /ON CONFLICT \(path\) DO NOTHING/);
+				assert.equal(params[0], MARKDOWN_PLUGIN_PATH);
+				assert.deepEqual(params[1], archive);
+				return { rowsAffected: 1 };
+			}
+			calls.push("checkpoint");
+			assert.equal(sql, "SELECT commit_id FROM lix_create_checkpoint()");
 		},
 		close: async () => {
 			calls.push("close");
@@ -78,7 +82,7 @@ void test("installs the shipped archive on the new host's active branch", async 
 			return lix;
 		}) as typeof openLix,
 	);
-	assert.deepEqual(calls, ["download", "protocol", "install", "close"]);
+	assert.deepEqual(calls, ["download", "protocol", "install", "checkpoint", "close"]);
 });
 
 void test("unavailable static asset prevents opening a repository", async () => {
