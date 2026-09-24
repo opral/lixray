@@ -45,7 +45,11 @@ void test("installs the shipped archive on the new host's active branch", async 
 				return { rowsAffected: 1 };
 			}
 			calls.push("checkpoint");
-			assert.equal(sql, "SELECT commit_id FROM lix_create_checkpoint()");
+			assert.equal(
+				sql,
+				"SELECT commit_id FROM lix_create_checkpoint(ARRAY[lix_row_ref('lix_file', NULL, $1)])",
+			);
+			assert.equal(params[0], MARKDOWN_PLUGIN_PATH);
 		},
 		close: async () => {
 			calls.push("close");

@@ -57,11 +57,13 @@ export async function installMarkdownPlugin(
 			 ON CONFLICT (path) DO NOTHING`,
 			[MARKDOWN_PLUGIN_PATH, archive],
 		);
-		// A newly created host must open with the plugin in its baseline, not
-		// with a pending working change. Retrying an existing install adds no
-		// checkpoint and preserves the original snapshot's state.
+		// Establish the plugin as a clean baseline without checkpointing any
+		// working changes carried by an imported repository snapshot.
 		if (installed.rowsAffected > 0) {
-			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+			await lix.execute(
+				"SELECT commit_id FROM lix_create_checkpoint(ARRAY[lix_row_ref('lix_file', NULL, $1)])",
+				[MARKDOWN_PLUGIN_PATH],
+			);
 		}
 	} finally {
 		await lix.close();
