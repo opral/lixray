@@ -41,9 +41,12 @@ export function SiteHeader({
 					<img className="size-[26px]" src="/lixray-mark.svg" alt="" />
 					<span>LixRay</span>
 				</Link>
-				<span className="h-[18px] w-px bg-overlay/15" aria-hidden="true" />
+				<span
+					className="h-[18px] w-px bg-overlay/15 max-[400px]:hidden"
+					aria-hidden="true"
+				/>
 				<Link
-					className="text-[15px] font-semibold text-fg-muted no-underline hover:text-fg"
+					className="text-[15px] font-semibold text-fg-muted no-underline hover:text-fg max-[400px]:hidden"
 					to="/docs"
 				>
 					Docs
@@ -58,7 +61,7 @@ export function SiteHeader({
 				</a>
 			</div>
 			<nav
-				className="flex items-center gap-5 text-[15px] font-semibold sm:gap-6"
+				className="flex items-center gap-5 text-[15px] font-semibold whitespace-nowrap sm:gap-6"
 				aria-label="Primary navigation"
 			>
 				{user ? (
