@@ -72,6 +72,7 @@ test("local acceptance prepares a usable server image before authenticated E2E",
 	const e2e = local.indexOf('run("Authenticated Compose E2E"');
 	assert.ok(resolve >= 0 && resolve < e2e);
 	assert.match(local, /LIXRAY_SERVER_IMAGE: serverImage/);
+	assert.match(local, /LIXRAY_ACCOUNT_TEST_SERVICE_URL: `http:\/\/127\.0\.0\.1:\$\{serverPort\}`/);
 });
 test("Docker requires a prepared SDK rather than compiling Rust", () => {
 	const docker = read("web-app/Dockerfile");

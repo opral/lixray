@@ -31,12 +31,14 @@ const localEnv = {
 
 async function stackEnv(projectName) {
 	const webPort = await uniquePort();
+	const serverPort = await uniquePort();
 	return {
 		...localEnv,
 		COMPOSE_PROJECT_NAME: projectName,
 		E2E_PORT: webPort,
 		LIXRAY_DEV_PORT: webPort,
-		LIXRAY_SERVER_PORT: await uniquePort(),
+		LIXRAY_SERVER_PORT: serverPort,
+		LIXRAY_ACCOUNT_TEST_SERVICE_URL: `http://127.0.0.1:${serverPort}`,
 		LIXRAY_MINIO_PORT: await uniquePort(),
 		LIXRAY_MINIO_CONSOLE_PORT: await uniquePort(),
 	};
