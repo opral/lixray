@@ -192,10 +192,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 						),
 					],
 				);
-				const history = (await local.execute("SELECT count(*) FROM lix_log()"))
-					.rows;
 				return {
-					history,
 					bytes: Array.from(
 						new Uint8Array(
 							await new Response(local.exportSnapshot()).arrayBuffer(),
@@ -223,7 +220,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 			url: string;
 		};
 		createdIds.push(remote.id);
-		const importedHistory = await page.evaluate(
+		const importedState = await page.evaluate(
 			async ({ token, url }) => {
 				const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
 				const { openLix } = (await import(
@@ -233,19 +230,38 @@ test("Account tokens have generated names, creation dates and independent deleti
 					server: { url, headers: { Authorization: `Bearer ${token}` } },
 				});
 				try {
-					return (await hosted.execute("SELECT count(*) FROM lix_log()")).rows;
+					return {
+						files: (
+							await hosted.execute(
+								"SELECT path FROM lix_file WHERE path IN ('/.lix/plugins/plugin_markdown.lixplugin', '/private.txt', '/public.md', '/shared.txt') ORDER BY path",
+							)
+						).rows,
+						workingFiles: (
+							await hosted.execute(
+								"SELECT to_path FROM lix_diff('lix_file') WHERE to_path IN ('/.lix/plugins/plugin_markdown.lixplugin', '/private.txt', '/public.md', '/shared.txt') ORDER BY to_path",
+							)
+						).rows,
+					};
 				} finally {
 					await hosted.close();
 				}
 			},
 			{ token: first, url: remote.url },
 		);
-		// Hosting adds the pinned Markdown plugin as a tracked file, then marks
-		// that installed state as the new clean checkpoint.
-		const originalHistoryCount = snapshot.history[0]?.["count(*)"];
-		if (typeof originalHistoryCount !== "number")
-			throw new Error("Imported snapshot history count is not a number");
-		expect(importedHistory).toEqual([{ "count(*)": originalHistoryCount + 2 }]);
+		// Hosting checkpoints only its plugin; imported files remain working changes.
+		expect(importedState).toEqual({
+			files: [
+				{ path: "/.lix/plugins/plugin_markdown.lixplugin" },
+				{ path: "/private.txt" },
+				{ path: "/public.md" },
+				{ path: "/shared.txt" },
+			],
+			workingFiles: [
+				{ to_path: "/private.txt" },
+				{ to_path: "/public.md" },
+				{ to_path: "/shared.txt" },
+			],
+		});
 		const publication = await request.post(
 			`/api/repositories/${remote.id}/share?path=/shared.txt`,
 			{ headers: { Authorization: `Bearer ${first}` } },
