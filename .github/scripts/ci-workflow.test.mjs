@@ -29,12 +29,20 @@ test("fast feedback and ordinary E2E never wait for a web image or deployment", 
 	assert.match(job("sync"), /browser-integration.yml/);
 });
 test("E2E prepares generated dependencies before Playwright imports fixtures", () => {
-	const e2e = job("e2e");
-	const prepare = e2e.indexOf("run: pnpm --dir web-app ci:prepare:web");
-	const collect = e2e.indexOf("run: pnpm --dir web-app exec playwright test");
-	assert.ok(prepare >= 0 && prepare < collect);
+	for (const name of ["e2e", "e2e-components"]) {
+		const lane = job(name);
+		const prepare = lane.indexOf("run: pnpm --dir web-app ci:prepare:web");
+		const collect = lane.indexOf("run: pnpm --dir web-app exec playwright test");
+		assert.ok(prepare >= 0 && prepare < collect, name);
+	}
 	const scripts = JSON.parse(read("web-app/package.json")).scripts;
 	assert.match(scripts["pretest:e2e"], /pnpm ci:prepare:web/);
+});
+test("independent browser component suites run beside Compose and remain required", () => {
+	assert.match(job("e2e"), /Run Compose e2e tests/);
+	assert.doesNotMatch(job("e2e"), /Test device recovery and directory review controls/);
+	assert.match(job("e2e-components"), /Test device recovery and directory review controls/);
+	assert.match(job("ci"), /e2e-components/);
 });
 test("only an explicitly labeled PR can deploy a preview", () => {
 	assert.match(job("deploy-preview"), /contains\(github.event.pull_request.labels.\*.name, 'preview'\)/);
@@ -73,7 +81,7 @@ test("the required aggregator checks out its script and ignores unrelated label 
 test("static UI selects fast checks without implicitly starting heavy jobs", () => {
   assert.match(job("changes"), /fast: \$\{\{ steps.classify.outputs.fast \}\}/);
   assert.match(job("fast"), /if: needs.changes.outputs.fast == 'true' \|\| needs.changes.outputs.frontend == 'true'/);
-  for (const name of ["sdk", "frontend", "server-image", "web-image", "e2e", "sync"]) {
+  for (const name of ["sdk", "frontend", "server-image", "web-image", "e2e", "e2e-components", "sync"]) {
     assert.doesNotMatch(job(name), /outputs.fast/);
   }
 });

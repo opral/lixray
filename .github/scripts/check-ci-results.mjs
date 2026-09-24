@@ -14,7 +14,7 @@ export function checkCiResults(needs, previewRequested = false, forkPullRequest 
 		frontend: ["fast", "frontend", "sdk"],
 		tooling: ["tooling"],
 		database: ["database"],
-		e2e: ["sdk", "server-image", "web-image", "e2e", "sync"],
+		e2e: ["sdk", "server-image", "web-image", "e2e", "e2e-components", "sync"],
 	})) {
 		if (selected[lane] === "true") jobs.forEach(requireSuccess);
 	}
