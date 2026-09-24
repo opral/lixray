@@ -837,6 +837,13 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		};
 		assert.ok(executeInput.properties.last_seen_commit_id);
 		assert.ok(executeInput.properties.checkpoint);
+		const checkpointTool = tools.tools.find(
+			(tool) => tool.name === "create_checkpoint",
+		)!;
+		assert.deepEqual(
+			(checkpointTool.inputSchema as { required: string[] }).required,
+			["context", "description"],
+		);
 		const executeOutput = executeSqlTool.outputSchema as {
 			properties: Record<string, unknown>;
 		};
@@ -1332,7 +1339,7 @@ void test("checkpoint copy encourages agent judgment at meaningful milestones", 
 	assert.match(CREATE_CHECKPOINT_TOOL_DESCRIPTION, /not required to save/);
 	assert.match(MCP_SERVER_INSTRUCTIONS, /already saved/);
 	assert.match(MCP_DOCS, /Writes persist without a\s+checkpoint/);
-	// execute_sql states persistence and what checkpoint: true is for; the
+	// execute_sql states persistence and what checkpoint descriptions are for; the
 	// policy itself is not repeated there.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /already persisted/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /saving needs no checkpoint/);
