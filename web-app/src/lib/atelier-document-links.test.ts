@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createAtelierDocumentLinks } from "./atelier-document-links.ts";
+import {
+	createAtelierDocumentLinks,
+	createAtelierNavigation,
+} from "./atelier-document-links.ts";
 import { encodeEntityId } from "./entity-url.ts";
 
 const FILE_ID = "22222222-2222-4222-8222-222222222222";
@@ -77,4 +80,39 @@ void test("writes the permanent URL, with a branch only off the default", () => 
 	assert.deepEqual(links("feature").resolve(links("feature").href(file)), {
 		id: FILE_ID,
 	});
+});
+
+void test("a conversation location links to its conversation URL", () => {
+	const CONVERSATION_ID = "33333333-3333-4333-8333-333333333333";
+	const navigation = (active = "main") =>
+		createAtelierNavigation({
+			namespace: "acme",
+			repository: "company",
+			activeBranchId: () => active,
+			defaultBranchId: () => "main",
+		});
+	const location = {
+		view: "atelier_conversation",
+		state: { conversationId: CONVERSATION_ID },
+	};
+	const token = encodeEntityId(CONVERSATION_ID);
+	assert.equal(
+		navigation().href(location),
+		`/@acme/company/conversation/${token}`,
+	);
+	// Off the default branch the link keeps the branch being viewed.
+	assert.equal(
+		navigation("feature/x").href(location),
+		`/@acme/company/conversation/${token}?branch=feature%2Fx`,
+	);
+	assert.equal(
+		navigation().href({ ...location, branchId: "main" }),
+		`/@acme/company/conversation/${token}`,
+	);
+	// Anything else is the repository; a malformed conversation id too.
+	assert.equal(
+		navigation().href({ view: "atelier_conversation", state: {} }),
+		"/@acme/company",
+	);
+	assert.equal(navigation().href({ path: "/notes.md" }), "/@acme/company");
 });

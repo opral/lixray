@@ -1,6 +1,6 @@
 # LixRay URL Schema Specification
 
-Status: **design reference** · Updated 2026-09-10
+Status: **design reference** · Updated 2026-09-23
 
 Implementation note: the current hard-cut schema uses one `namespaces` model for
 personal and organization ownership, one global `handles` pool, and internal
@@ -13,6 +13,10 @@ unpadded Base64url, followed by an optional descriptive slug. This is a hard URL
 refactor: old path-based URLs are not supported. Encoding is deterministic and
 reversible; there is no public-ID registry or additional field in Lix or the control
 plane. The repository route scopes the UUID and permissions remain unchanged.
+
+Conversation routes (`/conversation/{entity-token}/{title-slug?}`) use the same
+token encoding for the `lix_conversation` UUID and open Atelier's conversation
+view; see D3a.
 
 Scope: the public URL grammar of lixray.com, the identity model behind it (handles, namespaces,
 repositories), and the Postgres schema that implements it. v1 ships latest-only URLs, no raw-bytes
@@ -36,6 +40,7 @@ path         = "/@" handle                          ; namespace profile
 sub          = ""                                   ; repository overview
              | "/file/" entity-token [ "/" display-path ]   ; file viewer         (v1)
              | "/folder/" entity-token [ "/" display-path ] ; directory listing   (v1; root = repository overview)
+             | "/conversation/" entity-token [ "/" display-slug ] ; conversation (v1; D3a)
              | "/raw/" entity-token [ "/" display-path ]    ; raw bytes           (RESERVED)
              | "/llms.txt"                          ; machine index       (RESERVED)
              | "/" verb …                           ; future closed-set verbs (RESERVED)
@@ -59,7 +64,9 @@ entity-token = 22-character unpadded Base64url encoding of the existing UUID's 1
 display-path = display-segment *( "/" display-segment )
                ; slugged current path for readability; never used to resolve or authorize
 display-segment = nonempty percent-encoded URL segment
-verb (v1)    = "file" | "folder" | "team" | "settings" | "sql"
+display-slug = display-segment                      ; slugged conversation title (else its anchor);
+               ; never used to resolve or authorize
+verb (v1)    = "file" | "folder" | "conversation" | "team" | "settings" | "sql"
 verb (rsvd)  = raw diff change changes history blame edit new embed
                archive zip releases agents threads blob tree files sync
 ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped —
@@ -68,6 +75,7 @@ ns-verb      = future closed set under "/@" handle "/-/" (RESERVED; none shipped
 
 Examples: `lixray.com/@samuel` · `lixray.com/profile/019c…` ·
 `lixray.com/@google/android/file/ERERERERQRGBEREREREREQ/housing.step` ·
+`lixray.com/@google/android/conversation/ERERERERQRGBEREREREREQ/launch-review` ·
 `lixray.com/@google/android@01hx4f…/file/ERERERERQRGBEREREREREQ/launch-plan.md` (future pin).
 
 ---
@@ -155,6 +163,32 @@ branch from the fresh session; a URL with `?branch=` stays pinned to that branch
 
 **Migration.** This is a hard cut. Existing path-based file and directory URLs are not
 aliases. There are no compatibility redirects. Generated links always use UUID tokens.
+
+### D3a — Conversations: `/conversation/{entity-token}/{title-slug?}`
+
+**Decision.** A Lix conversation (`lix_conversation`) mounts at
+`/conversation/{entity-token}/{title-slug?}`, the file and folder shape. The token is the
+conversation UUID in the D3 encoding. The optional slug is one segment: the conversation's
+title, else what it is attached to (Atelier's anchor label, such as `notes.md › Intro`), else
+`conversation`, slugged like a path segment. It is decoration only: resolve exclusively by the
+decoded UUID within the requested repository. The URL opens Atelier's conversation view
+(`atelier_conversation`) in its own tab; one tab per conversation.
+
+**Canonicalization.** A missing, stale, or mistyped slug is rewritten in place (history
+`replace`). While the view is active the URL names it; when its title changes the entry is
+replaced, not pushed. A conversation that does not exist, or that the reader cannot see, still
+opens the view, which says so in its tab; the URL is left as linked. Canonical metadata uses
+the token-only form and keeps `?branch=` off the default branch, as in D3.
+
+**Permissions.** A conversation is not a publication target. Read access follows the repository:
+anyone can read a public repository's conversations; a private repository's are for members. The
+Share action therefore copies the open conversation URL (without `?invite=`), states which of
+the two applies, and offers no publish or unpublish control for it.
+
+**Why a separate verb.** A conversation is attached to a checkpoint, a document block, or a row,
+but is not addressed by it: its anchor may be removed while the conversation remains. The
+closed-set verb keeps parsing static, and `threads` stays reserved for a future list of
+conversations rather than being overloaded for a single one.
 
 ### D4 — Version pin: `{slug}@{changeset-id}`, reserved now, shipped later
 
