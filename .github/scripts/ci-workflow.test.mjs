@@ -75,6 +75,8 @@ test("Docker requires a prepared SDK rather than compiling Rust", () => {
 test("the required aggregator checks out its script and ignores unrelated label cancellation", () => {
 	const aggregate = job("ci");
 	assert.ok(aggregate.indexOf("uses: actions/checkout@v4") < aggregate.indexOf("check-ci-results.mjs"));
+	assert.match(aggregate, /run: node scripts\/check-pinned-lix-ci\.mjs/);
+	assert.match(aggregate, /GH_TOKEN: \$\{\{ secrets\.LIX_ACTIONS_READ_TOKEN \|\| github\.token \}\}/);
 	assert.match(pr, /label.name != 'preview' && 'ignored-label'/);
 });
 
