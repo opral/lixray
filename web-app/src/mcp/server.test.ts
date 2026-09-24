@@ -10,9 +10,7 @@ const tracerProvider = new NodeTracerProvider({
 });
 tracerProvider.register();
 import assert from "node:assert/strict";
-import {
-	DIFF_CARD_META,
-} from "./diff-card-app.ts";
+import { DIFF_CARD_META } from "./diff-card-app.ts";
 import type { DiffCardPayload } from "./diff-card.ts";
 import test from "node:test";
 import {
@@ -850,7 +848,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(executeSqlTool.description ?? "", /lixcol_metadata/);
 		assert.match(queryTool.description ?? "", /query_sql is the read path/);
 		assert.match(queryTool.description ?? "", /OCTET_LENGTH\(content\)/);
-		assert.match(queryTool.description ?? "", /SUBSTRING\(content FROM 1 FOR 4096\)/);
+		assert.match(
+			queryTool.description ?? "",
+			/SUBSTRING\(content FROM 1 FOR 4096\)/,
+		);
 		assert.match(queryTool.description ?? "", /Agents previously overfetched/);
 		assert.match(MCP_SERVER_INSTRUCTIONS, /outcome is unknown/);
 		// The listing stays bounded: the guide lives on two tools only, the

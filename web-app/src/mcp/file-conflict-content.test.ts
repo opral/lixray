@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { readFileContent, TEXT_CONTENT_LIMIT } from "./file-conflict-content.ts";
+import {
+	readFileContent,
+	TEXT_CONTENT_LIMIT,
+} from "./file-conflict-content.ts";
 
 void test("conflict details bound text and identify binary content", () => {
 	assert.deepEqual(readFileContent(new TextEncoder().encode("héllo")), {

@@ -104,9 +104,15 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /query_sql is the read path/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /Agents previously overfetched/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /OCTET_LENGTH\(content\)/);
-	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /SUBSTRING\(content FROM 1 FOR 4096\)/);
+	assert.match(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/SUBSTRING\(content FROM 1 FOR 4096\)/,
+	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /known small text file/);
-	assert.doesNotMatch(QUERY_SQL_TOOL_DESCRIPTION, /Prefer (?:read_files|list_files)/);
+	assert.doesNotMatch(
+		QUERY_SQL_TOOL_DESCRIPTION,
+		/Prefer (?:read_files|list_files)/,
+	);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /not SQLite/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.tables/);
 	assert.match(QUERY_SQL_TOOL_DESCRIPTION, /information_schema\.columns/);
