@@ -86,6 +86,25 @@ export async function provisionRepositories({
 				`Repository ${id} provisioning failed (HTTP ${response.status}).`,
 			);
 		}
+		await response.body?.cancel();
+		if (mode === "create-new") {
+			const installed = await fetchImpl(
+				new URL(
+					`/internal/repositories/${id}/plugins/markdown`,
+					`http://127.0.0.1:${env.PORT ?? 8080}`,
+				),
+				{
+					method: "POST",
+					headers: { Authorization: `Bearer ${env.LIXRAY_INTERNAL_TOKEN}` },
+					signal: AbortSignal.timeout(60_000),
+				},
+			);
+			await installed.body?.cancel();
+			if (!installed.ok)
+				throw new Error(
+					`Repository ${id} Markdown plugin installation failed (HTTP ${installed.status}).`,
+				);
+		}
 	}
 }
 

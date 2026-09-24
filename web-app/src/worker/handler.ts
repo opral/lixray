@@ -415,6 +415,41 @@ export async function handleRequest(
 		);
 	}
 
+	const provisionMarkdownMatch =
+		/^\/internal\/repositories\/([0-9a-f-]{36})\/plugins\/markdown$/.exec(
+			url.pathname,
+		);
+	if (provisionMarkdownMatch) {
+		if (request.method !== "POST")
+			return new Response("Method not allowed\n", { status: 405 });
+		if (!UUID_PATTERN.test(provisionMarkdownMatch[1]!))
+			return new Response("Invalid repository ID\n", { status: 400 });
+		if (
+			!env.LIXRAY_INTERNAL_TOKEN ||
+			request.headers.get("authorization") !==
+				`Bearer ${env.LIXRAY_INTERNAL_TOKEN}`
+		)
+			return new Response("Unauthorized\n", { status: 401 });
+		try {
+			await (options.installMarkdownPlugin ?? installMarkdownPlugin)(
+				request,
+				env,
+				{ userId: "lixray-provisioner" },
+				provisionMarkdownMatch[1]!,
+				options.fetch,
+			);
+			return new Response(null, { status: 204 });
+		} catch (error) {
+			console.error("Provisioned repository Markdown plugin install failed", {
+				repositoryId: provisionMarkdownMatch[1],
+				error,
+			});
+			return new Response("Markdown plugin installation failed\n", {
+				status: 503,
+			});
+		}
+	}
+
 	if (url.pathname === "/api/published/entity") {
 		return handlePublishedEntity(
 			request,

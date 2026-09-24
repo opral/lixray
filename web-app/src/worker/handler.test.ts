@@ -82,6 +82,48 @@ void test("GET /healthz identifies the exact Railway deployment", async () => {
 	});
 });
 
+void test("operator provisions Markdown only with the internal token", async () => {
+	const path = `https://example.test/internal/repositories/${LIX_A}/plugins/markdown`;
+	const configured = env({ extra: { LIXRAY_INTERNAL_TOKEN: "private-token" } });
+	let installed = 0;
+	const options = {
+		installMarkdownPlugin: async (
+			_request: Request,
+			_env: WorkerEnv,
+			account: { userId: string },
+			repositoryId: string,
+		) => {
+			assert.equal(account.userId, "lixray-provisioner");
+			assert.equal(repositoryId, LIX_A);
+			installed++;
+		},
+	};
+	assert.equal(
+		(
+			await handleRequest(
+				new Request(path, { method: "POST" }),
+				configured,
+				options,
+			)
+		).status,
+		401,
+	);
+	assert.equal(
+		(
+			await handleRequest(
+				new Request(path, {
+					method: "POST",
+					headers: { Authorization: "Bearer private-token" },
+				}),
+				configured,
+				options,
+			)
+		).status,
+		204,
+	);
+	assert.equal(installed, 1);
+});
+
 void test("GET /.well-known/openai-apps-challenge returns the OpenAI verification token", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/.well-known/openai-apps-challenge"),
