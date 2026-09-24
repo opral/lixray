@@ -111,11 +111,13 @@ function RepositoryFileRoute() {
 						await (fileOpenTrace
 							? fileOpenTrace.run(() =>
 									atelier.documents.open(requestedPath, {
+										fileId: entityId,
 										signal: controller.signal,
 										navigationCause: "route",
 									}),
 								)
 							: atelier.documents.open(requestedPath, {
+									fileId: entityId,
 									signal: controller.signal,
 									navigationCause: "route",
 								}));
