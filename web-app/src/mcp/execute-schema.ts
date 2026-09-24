@@ -46,7 +46,21 @@ export const EXECUTE_SQL_CORE_TABLES: ReadonlyArray<ExecuteSqlCoreTable> = [
 			"origin_key",
 		],
 	},
+	{
+		name: "lix_conversation",
+		purpose:
+			"Discussions, including global checkpoint-commit descriptions. target is a row reference.",
+		columns: ["id", "target", "title", "resolved", "lixcol_global"],
+	},
+	{
+		name: "lix_comment",
+		purpose:
+			"Zettel comments in a conversation; body is JSONB. For checkpoint notes, use create_checkpoint with description.",
+		columns: ["id", "conversation_id", "body", "lixcol_global"],
+	},
 ];
+
+export const LIX_COMMENT_BODY_GUIDE = `lix_comment.body is a Zettel JSON document (schema: https://github.com/opral/lix/blob/main/packages/lix/vendor/zettel/schema.json). Minimal plain text: {"_type":"zettel_doc","blocks":[{"_type":"zettel_block","_key":"p1","style":"normal","markDefs":[],"children":[{"_type":"zettel_span","_key":"s1","text":"A note","marks":[]}]}]}. Use create_checkpoint({description}) for checkpoint notes; it creates this body and links it to the commit.`;
 
 export const EXECUTE_SQL_CORE_SCHEMA = EXECUTE_SQL_CORE_TABLES.map(
 	(table) =>
@@ -68,10 +82,12 @@ ORDER BY ordinal_position;`;
  * Shared Lix operating guide. Lives once on server instructions / docs — not
  * on every tool description.
  */
-export const LIX_SQL_OPERATING_GUIDE = `Prefer read_files for ordinary file reads; list_files discovers paths. Use query_sql for advanced reads. execute_sql is the one write path: one call per coherent change, with every create, update, move, rename, copy, delete and directory change in one ordered atomic batch against public lix_file and lix_directory. \`checkpoint: true\` marks the result; \`last_seen_commit_id\` (read_files' commit_id, or \`commit.after\` of an earlier batch) refuses the batch if a file or directory it touches changed since that commit, and the conflict error carries the current contents. Lix SQL is a Postgres dialect subset. Use the registered tools only.
+export const LIX_SQL_OPERATING_GUIDE = `Prefer read_files for ordinary file reads; list_files discovers paths. Use query_sql for advanced reads. execute_sql is the one write path: one call per coherent change, with every create, update, move, rename, copy, delete and directory change in one ordered atomic batch against public lix_file and lix_directory. \`checkpoint: { description: "what changed and why; include caveats" }\` marks the result; \`last_seen_commit_id\` (read_files' commit_id, or \`commit.after\` of an earlier batch) refuses the batch if a file or directory it touches changed since that commit, and the conflict error carries the current contents. Lix SQL is a Postgres dialect subset. Use the registered tools only.
 
 Core tables:
 ${EXECUTE_SQL_CORE_SCHEMA}
+
+${LIX_COMMENT_BODY_GUIDE}
 
 UTF-8 / text files: pass \`$1\` (path) and \`$2\` (file body) as \`kind: "text"\` and write with \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content\`. Never use \`CAST(... AS BLOB)\`; if a SQL cast is needed, use \`BYTEA\`. Actual binaries use \`kind: "blob"\` without CAST. Missing parent directories are created. Per-file JSON metadata lives in the \`lixcol_metadata\` column (\`kind: "json"\`). To read a text file, use \`SELECT path, CAST(content AS TEXT) AS content FROM lix_file WHERE path = $1\`. Create directories with \`INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (path) DO NOTHING\`.
 
@@ -119,7 +135,7 @@ export const LIX_CATALOG_HINT = `Discover tables with: ${EXECUTE_SQL_TABLES_QUER
 // writes each get their half; the other tools stay one or two sentences.
 const LIX_SQL_READ_GUIDE = `Prefer read_files and list_files for ordinary file work; use query_sql for repository data. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with \`${EXECUTE_SQL_TABLES_QUERY.replace(/\s+/g, " ")}\` and columns with \`${EXECUTE_SQL_COLUMNS_WITH_DESCRIPTIONS_QUERY.replace(/\s+/g, " ")}\`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: "text", value: "…" }]. History: lix_log([anchor]) lists retained commits with active checkpoint metadata; lix_history('lix_file'[, anchor]) gives net changes; lix_diff('lix_file') gives working changes; lix_as_of('lix_file', $1) gives state at a commit. Join log to history on destination commit ID for checkpoint filters.`;
 
-const LIX_SQL_WRITE_GUIDE = `The one write path: one call per coherent change, its creates, updates, moves, copies, deletes and directory changes in order. checkpoint: true marks a milestone (saving needs no checkpoint); last_seen_commit_id (read_files' commit_id or a batch's commit.after) refuses the batch if a file it touches changed since. Upsert: \`INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content\` (metadata: lixcol_metadata); parents are created. Move/rename: \`UPDATE lix_file SET path = $1 WHERE path = $2\` keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id; never move that way. Delete: \`DELETE FROM lix_file WHERE path = $1\`. Directories likewise on lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert /gtm/plan.md, move /gtm/a.md to /gtm/archive/a.md, upsert a redirect at /gtm/a.md], checkpoint: true. Errors carry statement_index and an outcome; never blindly retry unknown or committed.`;
+const LIX_SQL_WRITE_GUIDE = `The one write path: one call per coherent change. checkpoint: { description: "what changed and why; include caveats" } marks a milestone (saving needs no checkpoint). last_seen_commit_id guards against changed files. Upsert: INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content (metadata: lixcol_metadata); parents are created. Move: UPDATE lix_file SET path = $1 WHERE path = $2 keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id. Delete: DELETE FROM lix_file WHERE path = $1. Directories use lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert, move, redirect], checkpoint: { description: "why" }. Errors carry statement_index and outcome; if outcome is unknown, inspect state before retry. lix_comment.body is Zettel JSON (https://github.com/opral/lix/blob/main/packages/lix/vendor/zettel/schema.json); create_checkpoint({description}) builds it for checkpoint notes.`;
 
 export const LIST_FILES_TOOL_DESCRIPTION =
 	"List the files of the Lix and branch in context with id, path, stable url for documents, and readable display_url for users, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.";

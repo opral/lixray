@@ -920,7 +920,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID; no open_lix needed), optionally branch_id, or context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted, read back only if the outcome is unknown or validation is part of the task. UI hosts show a card; summarize, do not list files.\n\nThe one write path: one call per coherent change, its creates, updates, moves, copies, deletes and directory changes in order. checkpoint: true marks a milestone (saving needs no checkpoint); last_seen_commit_id (read_files' commit_id or a batch's commit.after) refuses the batch if a file it touches changed since. Upsert: `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content` (metadata: lixcol_metadata); parents are created. Move/rename: `UPDATE lix_file SET path = $1 WHERE path = $2` keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id; never move that way. Delete: `DELETE FROM lix_file WHERE path = $1`. Directories likewise on lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert /gtm/plan.md, move /gtm/a.md to /gtm/archive/a.md, upsert a redirect at /gtm/a.md], checkpoint: true. Errors carry statement_index and an outcome; never blindly retry unknown or committed.",
+		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID; no open_lix needed), optionally branch_id, or context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted, read back only if the outcome is unknown or validation is part of the task. UI hosts show a card; summarize, do not list files.\n\nThe one write path: one call per coherent change. checkpoint: { description: \"what changed and why; include caveats\" } marks a milestone (saving needs no checkpoint). last_seen_commit_id guards against changed files. Upsert: INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content (metadata: lixcol_metadata); parents are created. Move: UPDATE lix_file SET path = $1 WHERE path = $2 keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id. Delete: DELETE FROM lix_file WHERE path = $1. Directories use lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert, move, redirect], checkpoint: { description: \"why\" }. Errors carry statement_index and outcome; if outcome is unknown, inspect state before retry. lix_comment.body is Zettel JSON (https://github.com/opral/lix/blob/main/packages/lix/vendor/zettel/schema.json); create_checkpoint({description}) builds it for checkpoint notes.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1066,7 +1066,15 @@
 					"minLength": 1
 				},
 				"checkpoint": {
-					"type": "boolean"
+					"type": "object",
+					"properties": {
+						"description": {
+							"type": "string",
+							"minLength": 1
+						}
+					},
+					"required": ["description"],
+					"additionalProperties": false
 				},
 				"options": {
 					"type": "object",
@@ -1353,7 +1361,7 @@
 	{
 		"name": "create_checkpoint",
 		"title": "Create checkpoint",
-		"description": "Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.",
+		"description": "Mark a meaningful milestone on the branch in context. Required description: explain what changed, why, and any caveat a future agent should know. The description becomes a global Zettel comment attached to this checkpoint commit. Changes are already saved automatically; a checkpoint is not required to save them.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -1362,9 +1370,69 @@
 					"type": "string",
 					"minLength": 1,
 					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
 				}
 			},
-			"required": ["context"],
+			"required": ["context", "description"],
+			"additionalProperties": false
+		},
+		"outputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string"
+				}
+			},
+			"required": ["context", "commit_id"],
+			"additionalProperties": false
+		},
+		"annotations": {
+			"readOnlyHint": false,
+			"destructiveHint": false,
+			"idempotentHint": false,
+			"openWorldHint": false
+		},
+		"_meta": {
+			"securitySchemes": [
+				{
+					"type": "noauth"
+				}
+			]
+		}
+	},
+	{
+		"name": "describe_checkpoint",
+		"title": "Retry checkpoint description",
+		"description": "Attach or correct an existing checkpoint description after create_checkpoint reports checkpoint_description_failed. Reuses its one opening comment; a new description replaces the body. Do not create another checkpoint. Describe what changed, why, and any caveat for future agents.",
+		"inputSchema": {
+			"$schema": "https://json-schema.org/draft/2020-12/schema",
+			"type": "object",
+			"properties": {
+				"context": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
+				},
+				"commit_id": {
+					"type": "string",
+					"minLength": 1,
+					"description": "Lix commit id"
+				},
+				"description": {
+					"type": "string",
+					"minLength": 1
+				}
+			},
+			"required": ["context", "commit_id", "description"],
 			"additionalProperties": false
 		},
 		"outputSchema": {

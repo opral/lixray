@@ -782,6 +782,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"switch_branch",
 				"create_branch",
 				"create_checkpoint",
+				"describe_checkpoint",
 				"restore",
 				"undo",
 				"redo",
@@ -826,7 +827,10 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(queryTool.description ?? "", /not SQLite/);
 		assert.match(executeSqlTool.description ?? "", /UPDATE lix_file SET path/);
 		assert.match(executeSqlTool.description ?? "", /outcome is unknown/);
-		assert.match(executeSqlTool.description ?? "", /checkpoint: true/);
+		assert.match(
+			executeSqlTool.description ?? "",
+			/checkpoint: \{ description:/,
+		);
 		assert.match(executeSqlTool.description ?? "", /one write path/);
 		const executeInput = executeSqlTool.inputSchema as {
 			properties: Record<string, unknown>;
@@ -1437,7 +1441,7 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 			},
 			{
 				name: "create_checkpoint",
-				arguments: { context },
+				arguments: { context, description: "Completed the draft for review." },
 				text: /Checkpoint created/,
 			},
 			{ name: "undo", arguments: { context }, text: /Undo committed as/ },

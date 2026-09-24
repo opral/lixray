@@ -100,7 +100,7 @@ export const DIFF_CARD_GUIDE =
 export const DIFF_TOOL_DESCRIPTION =
 	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Use read_files for ordinary file reads and list_files only to discover paths; batch known paths together. Use query_sql for advanced reads. execute_sql is the one write path: put every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: true to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Use read_files for ordinary file reads and list_files only to discover paths; batch known paths together. Use query_sql for advanced reads. execute_sql is the one write path: put every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: { description: "what changed and why; include caveats" } to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
 
@@ -108,10 +108,10 @@ ${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use checkpoint: true on the batch, or create_checkpoint, to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use checkpoint: { description: "what changed and why; include caveats" } on the batch, or create_checkpoint, to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
-	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
+	"Mark a meaningful milestone on the branch in context. Required description: explain what changed, why, and any caveat a future agent should know. The description becomes a global Zettel comment attached to this checkpoint commit. Changes are already saved automatically; a checkpoint is not required to save them.";
 
 export const RESTORE_TOOL_DESCRIPTION =
 	"Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.";
@@ -651,6 +651,7 @@ function traceToolDispatch(
 			[
 				"execute_sql",
 				"create_checkpoint",
+				"describe_checkpoint",
 				"restore",
 				"undo",
 				"redo",
@@ -1064,7 +1065,10 @@ export function createLixrayMcpServer(
 					.describe(
 						"Refuse the batch if a file it touches changed since this commit.",
 					),
-				checkpoint: z.boolean().optional(),
+				checkpoint: z
+					.object({ description: z.string().trim().min(1) })
+					.strict()
+					.optional(),
 				options: executeOptions.optional(),
 			})
 			.strict(),
@@ -1217,12 +1221,42 @@ export function createLixrayMcpServer(
 		"create_checkpoint",
 		"Create checkpoint",
 		CREATE_CHECKPOINT_TOOL_DESCRIPTION,
-		z.object({ context }).strict(),
+		z.object({ context, description: z.string().trim().min(1) }).strict(),
 		checkpointOutput,
 		writeAnnotations(false, false),
 		securitySchemes,
-		async ({ context: token }) => {
-			const result = await service.createCheckpoint(token);
+		async ({ context: token, description }) => {
+			const result = await service.createCheckpoint(token, description);
+			return { context: result.context, commit_id: result.commitId };
+		},
+		undefined,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"describe_checkpoint",
+		"Retry checkpoint description",
+		"Attach or correct an existing checkpoint description after create_checkpoint reports checkpoint_description_failed. Reuses its one opening comment; a new description replaces the body. Do not create another checkpoint. Describe what changed, why, and any caveat for future agents.",
+		z
+			.object({
+				context,
+				commit_id: commitId,
+				description: z.string().trim().min(1),
+			})
+			.strict(),
+		checkpointOutput,
+		writeAnnotations(false, false),
+		securitySchemes,
+		async ({ context: token, commit_id, description }) => {
+			const result = await service.describeCheckpoint(
+				token,
+				commit_id,
+				description,
+			);
 			return { context: result.context, commit_id: result.commitId };
 		},
 		undefined,
@@ -1622,7 +1656,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files for ordinary file reads; batch known paths together. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: true marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			'Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool\'s description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files for ordinary file reads; batch known paths together. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: { description: "what changed and why; include caveats" } marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.',
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
@@ -2219,7 +2253,10 @@ function summarizeToolResult(
 		return "Branch created.";
 	}
 	if (name === "create_checkpoint") {
-		return `Checkpoint created at commit ${String(result.commit_id)}.`;
+		return `Checkpoint created and described at commit ${String(result.commit_id)}.`;
+	}
+	if (name === "describe_checkpoint") {
+		return `Checkpoint ${String(result.commit_id)} described.`;
 	}
 	if (name === "restore") {
 		return typeof result.commit_id === "string"
@@ -2345,11 +2382,15 @@ function toMcpError(caught: unknown): {
 	message: string;
 	hint?: string;
 	details?: unknown;
+	outcome?: "committed";
 } {
 	if (isLixError(caught)) {
 		return {
 			code: caught.code ?? "internal_error",
 			message: caught.message,
+			...(caught.code === "checkpoint_description_failed"
+				? { outcome: "committed" as const }
+				: {}),
 			...(caught.hint ? { hint: caught.hint } : {}),
 			...(caught.details !== undefined ? { details: caught.details } : {}),
 		};
@@ -2385,6 +2426,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"switch_branch",
 		"create_branch",
 		"create_checkpoint",
+		"describe_checkpoint",
 		"restore",
 		"undo",
 		"redo",

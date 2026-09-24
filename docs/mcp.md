@@ -105,7 +105,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
 6. Write with `execute_sql`, one call per coherent change: its creates,
    updates, moves, renames, copies, deletes and directory changes in one
    ordered atomic batch, guarded by `last_seen_commit_id` and marked by
-   `checkpoint: true` when it is a milestone. It is always treated as
+   `checkpoint: { description: "what changed and why; include caveats" }` when it is a milestone. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
 7. Successful batches are persisted. Read back when the outcome is unknown or
@@ -115,7 +115,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    browser links; it is not a persistence-verification read.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
-checkpoint. Use `checkpoint: true` on the batch, or `create_checkpoint`, to
+checkpoint. Use `checkpoint: { description: "what changed and why; include caveats" }` on the batch, or `create_checkpoint`, to
 mark meaningful milestones so the user
 can follow your work and return to important states. Create a checkpoint when
 you finish a substantial, coherent piece of work, such as completing a document,
@@ -209,7 +209,7 @@ SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
 read; `execute_sql` has one top-level `commit: { before, after } | null` for the
 batch. Its per-statement results contain rows, counts and notices, without
 repeating the receipt; `commit.after` is the commit to pass as the next
-batch's `last_seen_commit_id`. With `checkpoint: true` the result also carries
+batch's `last_seen_commit_id`. With `checkpoint: { description: "what changed and why; include caveats" }` the result also carries
 `checkpoint_commit_id`. If completion reporting or the checkpoint fails after
 the batch committed, the result is still a success and carries a `warning`
 ("Saved; checkpoint unavailable. Do not repeat the batch."); do not repeat it.
@@ -249,7 +249,7 @@ rows are unchanged.
 
 Restore is not undoable. `undo` only applies to commits made after the restore.
 
-`create_checkpoint` returns a commit id that can be passed directly to
+`create_checkpoint` requires a plain-text description and returns a commit id that can be passed directly to
 `restore`. There is no `restore_checkpoint` tool.
 
 ## Discover tables and columns
@@ -290,7 +290,7 @@ as an ordered batch that commits or rolls back as a whole.
 - Delete: `DELETE FROM lix_file WHERE path = $1`. Directories work the same
   on `lix_directory`; moving a directory moves its files, ids kept. Paths
   have no trailing slash.
-- `checkpoint: true` marks the batch's result as a checkpoint and returns
+- `checkpoint: { description: "what changed and why; include caveats" }` marks the batch's result as a checkpoint and returns
   `checkpoint_commit_id`.
 - `last_seen_commit_id` (the `commit_id` of `read_files`, or `commit.after`
   of an earlier batch) guards the batch. It runs in one transaction that
@@ -377,6 +377,44 @@ Parent directories: `INSERT INTO lix_directory (path) VALUES ($1) ON CONFLICT (p
 Name the conflict columns. Lix does not support `ON CONSTRAINT`, inference
 without columns, or `DO UPDATE WHERE`.
 
+
+## Checkpoint descriptions
+
+Use `create_checkpoint({ context, description })` after a substantial milestone,
+or pass `checkpoint: { description }` to `execute_sql` when the batch is the
+milestone. The description should tell a future agent what changed, why, and any
+remaining caveat. LixRay stores it as a global `lix_conversation` and
+`lix_comment` targeted at the returned checkpoint commit. The input is plain
+text; the service creates the Zettel JSON body. A blank description is rejected
+before creating the checkpoint. A successful write already persisted its files
+whether or not a checkpoint was requested.
+
+If a checkpoint is created but its description fails, `create_checkpoint`
+returns an error with `commit_id` in details. Retry with
+`describe_checkpoint({ context, commit_id, description })`; do not create a
+second checkpoint. `execute_sql` returns the checkpoint commit ID and a warning
+in this case, because its SQL batch already succeeded. Repeating
+`describe_checkpoint` for the same commit ID updates its one opening note rather
+than adding another; it can also correct a description later.
+
+For raw comments, `lix_comment.body` is a Zettel document. The full schema is
+https://github.com/opral/lix/blob/main/packages/lix/vendor/zettel/schema.json. A minimal plain-text example is
+`{"_type":"zettel_doc","blocks":[{"_type":"zettel_block","_key":"p1","style":"normal","markDefs":[],"children":[{"_type":"zettel_span","_key":"s1","text":"A note","marks":[]}]}]}`.
+
+Read a checkpoint description with its commit ID bound as `$1`:
+
+```sql
+SELECT note.body
+FROM lix_conversation AS thread
+JOIN lix_comment AS note
+  ON note.conversation_id = thread.id
+ AND note.lixcol_global = thread.lixcol_global
+WHERE thread.target = lix_row_ref('lix_commit', NULL, $1)
+  AND thread.lixcol_global = true
+ORDER BY note.lixcol_created_at, note.id;
+```
+
+The note is a later global write, so query from a head that includes it.
 
 ## Version-control reads
 

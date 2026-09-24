@@ -31,7 +31,15 @@ const SHARED_GUIDE_MARKERS = [
 void test("SQL guidance models the public Lix surfaces", () => {
 	assert.deepEqual(
 		EXECUTE_SQL_CORE_TABLES.map((table) => table.name),
-		["lix_file", "lix_directory", "lix_branch", "lix_commit", "lix_change"],
+		[
+			"lix_file",
+			"lix_directory",
+			"lix_branch",
+			"lix_commit",
+			"lix_change",
+			"lix_conversation",
+			"lix_comment",
+		],
 	);
 	assert.match(EXECUTE_SQL_CORE_SCHEMA, /content \(binary\)/);
 	assert.match(EXECUTE_SQL_TABLES_QUERY, /information_schema\.tables/);
@@ -111,7 +119,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	// Writes: the one write path, with its guard, checkpoint, and recipes.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one write path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one call per coherent change/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /checkpoint: true/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /checkpoint: \{ description:/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /last_seen_commit_id/);
 	assert.match(
 		EXECUTE_SQL_TOOL_DESCRIPTION,

@@ -528,17 +528,52 @@ void test("checkpoint uses the canonical SQL function on the context branch", as
 	const opened = await service.openLix(LIX_ID, "draft");
 	runtime.calls.length = 0;
 
-	const checkpoint = await service.createCheckpoint(opened.context);
+	const checkpoint = await service.createCheckpoint(
+		opened.context,
+		"Completed the draft because the review is ready.",
+	);
 
 	assert.equal(checkpoint.commitId, "commit-1");
-	assert.deepEqual(runtime.calls, [
-		{
-			lixId: LIX_ID,
-			branchId: "draft",
-			sql: "SELECT commit_id FROM lix_create_checkpoint()",
-			params: undefined,
+	assert.equal(
+		runtime.calls[0]?.sql,
+		"SELECT commit_id FROM lix_create_checkpoint()",
+	);
+	assert.match(runtime.calls[1]?.sql ?? "", /INSERT INTO lix_conversation/);
+	assert.match(runtime.calls[2]?.sql ?? "", /INSERT INTO lix_comment/);
+	assert.equal(runtime.calls[1]?.branchId, "draft");
+	assert.deepEqual(runtime.calls[2]?.params?.[0], {
+		kind: "text",
+		value: "commit-1",
+	});
+});
+
+void test("checkpoint description failure exposes the created commit for retry", async () => {
+	class NoteFailureRuntime extends FakeRuntime {
+		override async executeBatch(
+			lixId: string,
+			branchId: string,
+			request: ExecuteBatchRequest,
+		) {
+			if (request.statements[0]?.sql.includes("lix_conversation"))
+				throw new Error("comment write failed");
+			return super.executeBatch(lixId, branchId, request);
+		}
+	}
+	const service = new LixService(new NoteFailureRuntime());
+	const opened = await service.openLix("@acme/company");
+	await assert.rejects(
+		service.createCheckpoint(opened.context, "Completed the draft."),
+		(error: unknown) => {
+			assert.equal(
+				(error as { code?: string }).code,
+				"checkpoint_description_failed",
+			);
+			assert.deepEqual((error as { details?: unknown }).details, {
+				commit_id: "commit-1",
+			});
+			return true;
 		},
-	]);
+	);
 });
 
 void test("restore returns the newly created commit rather than the source", async () => {
@@ -1217,10 +1252,12 @@ for (const failCheckpoint of [false, true]) {
 		runtime.commit = 1;
 		const written = await service.executeBatch(opened.context, {
 			statements: [upsert("/saved.md", "saved")],
-			checkpoint: true,
+			checkpoint: {
+				description: "Saved the document to complete the milestone.",
+			},
 		});
 		assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
-		assert.equal(runtime.batches, 1);
+		assert.equal(runtime.batches, failCheckpoint ? 1 : 2);
 		if (failCheckpoint) {
 			assert.equal(written.checkpointCommitId, undefined);
 			assert.equal(written.warning, BATCH_CHECKPOINT_WARNING);

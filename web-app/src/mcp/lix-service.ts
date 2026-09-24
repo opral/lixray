@@ -9,6 +9,7 @@ import {
 	type FileRead,
 } from "./file-tools.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
+import { checkpointDescriptionDocument } from "@lix-js/sdk";
 import {
 	destinationFromParams,
 	namespaceConflictMessage,
@@ -568,7 +569,7 @@ export class LixService {
 		contextToken: string,
 		request: ExecuteBatchRequest & {
 			lastSeenCommitId?: string;
-			checkpoint?: boolean;
+			checkpoint?: { description: string };
 		},
 	): Promise<
 		ExecuteScriptResponse & {
@@ -577,6 +578,8 @@ export class LixService {
 			warning?: string;
 		}
 	> {
+		if (request.checkpoint)
+			checkpointDescriptionDocument(request.checkpoint.description);
 		const context = await this.readContext(contextToken);
 		const { lastSeenCommitId, checkpoint, ...batch } = request;
 		let executed: ExecuteScriptResponse & { warning?: string };
@@ -596,10 +599,27 @@ export class LixService {
 		let checkpointCommitId: string | undefined;
 		if (checkpoint) {
 			try {
-				checkpointCommitId = (await this.createCheckpoint(contextToken))
-					.commitId;
-			} catch {
-				warning = [warning, BATCH_CHECKPOINT_WARNING].filter(Boolean).join(" ");
+				checkpointCommitId = (
+					await this.createCheckpoint(contextToken, checkpoint.description)
+				).commitId;
+			} catch (caught) {
+				if (
+					isLixError(caught) &&
+					caught.code === "checkpoint_description_failed"
+				) {
+					const details = caught.details as { commit_id?: string } | undefined;
+					checkpointCommitId = details?.commit_id;
+					warning = [
+						warning,
+						"Saved and checkpointed, but its description was not saved. Retry describe_checkpoint with checkpoint_commit_id; do not repeat the batch.",
+					]
+						.filter(Boolean)
+						.join(" ");
+				} else {
+					warning = [warning, BATCH_CHECKPOINT_WARNING]
+						.filter(Boolean)
+						.join(" ");
+				}
 			}
 		}
 		return {
@@ -1160,8 +1180,9 @@ export class LixService {
 		});
 	}
 
-	async createCheckpoint(contextToken: string) {
+	async createCheckpoint(contextToken: string, description: string) {
 		return withSpan("lix.checkpoint", async () => {
+			const body = JSON.stringify(checkpointDescriptionDocument(description));
 			const context = await this.readContext(contextToken);
 			const response = await this.client.execute(
 				context.lixId,
@@ -1175,7 +1196,52 @@ export class LixService {
 					"Lix did not return a checkpoint commit id.",
 				);
 			}
+			try {
+				await this.saveCheckpointDescription(context, commitId.value, body);
+			} catch {
+				throw createLixError(
+					"checkpoint_description_failed",
+					`Checkpoint ${commitId.value} was created, but its description was not saved.`,
+					{
+						details: { commit_id: commitId.value },
+						hint: "Retry with describe_checkpoint using this commit_id. Do not create another checkpoint.",
+					},
+				);
+			}
 			return { context: contextToken, commitId: commitId.value };
+		});
+	}
+
+	async describeCheckpoint(
+		contextToken: string,
+		commitId: string,
+		description: string,
+	) {
+		const body = JSON.stringify(checkpointDescriptionDocument(description));
+		const context = await this.readContext(contextToken);
+		await this.saveCheckpointDescription(context, commitId, body);
+		return { context: contextToken, commitId };
+	}
+
+	private async saveCheckpointDescription(
+		context: LixContext,
+		commitId: string,
+		body: string,
+	) {
+		await this.client.executeBatch(context.lixId, context.branchId, {
+			statements: [
+				{
+					sql: "INSERT INTO lix_conversation (id, target, title, lixcol_global) VALUES ($1, lix_row_ref('lix_commit', NULL, $1), 'Checkpoint description', true) ON CONFLICT (id) DO NOTHING",
+					params: [{ kind: "text", value: commitId }],
+				},
+				{
+					sql: "INSERT INTO lix_comment (id, conversation_id, body, lixcol_global) VALUES ($1, $1, $2::jsonb, true) ON CONFLICT (id) DO UPDATE SET body = excluded.body",
+					params: [
+						{ kind: "text", value: commitId },
+						{ kind: "text", value: body },
+					],
+				},
+			],
 		});
 	}
 
