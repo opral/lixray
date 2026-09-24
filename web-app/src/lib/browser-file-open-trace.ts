@@ -40,6 +40,7 @@ export function createBrowserFileOpenTraceController(
 ) {
 	let active: FileOpenScope | undefined;
 	let completedFileId: string | undefined;
+	const rawLixByProxy = new WeakMap<Lix, Lix>();
 
 	const finish = (scope: FileOpenScope, outcome: string, failed = false) => {
 		if (active !== scope) return;
@@ -140,7 +141,11 @@ export function createBrowserFileOpenTraceController(
 			}
 			return result;
 		};
-		return new Proxy(lix, {
+		// A document scope can receive the already-scoped repository handle.
+		// Use its raw handle so an old document cannot inherit a newer file's
+		// root through the outer repository proxy.
+		const rawLix = rawLixByProxy.get(lix) ?? lix;
+		const scopedLix = new Proxy(rawLix, {
 			get(target, key) {
 				const value = Reflect.get(target, key, target) as unknown;
 				if (typeof value !== "function") return value;
@@ -169,10 +174,39 @@ export function createBrowserFileOpenTraceController(
 						});
 					};
 				}
+				if (key === "beginTransaction") {
+					return (...args: unknown[]) =>
+						(
+							run(
+								() => callMethod(value, target, args),
+								true,
+							) as Promise<object>
+						).then(
+							(transaction) =>
+								new Proxy(transaction, {
+									get(source, transactionKey) {
+										const method = Reflect.get(
+											source,
+											transactionKey,
+											source,
+										) as unknown;
+										return typeof method === "function"
+											? (...methodArgs: unknown[]) =>
+													run(
+														() => callMethod(method, source, methodArgs),
+														true,
+													)
+											: method;
+									},
+								}),
+						);
+				}
 				return (...args: unknown[]) =>
 					run(() => callMethod(value, target, args), true);
 			},
 		}) as Lix;
+		rawLixByProxy.set(scopedLix, rawLix);
+		return scopedLix;
 	};
 
 	return {

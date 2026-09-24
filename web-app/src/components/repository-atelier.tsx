@@ -579,7 +579,7 @@ export function RepositoryAtelier({
 		const lix = activeLixRef.current?.lix;
 		if (!entity || !lix) throw new Error("Item is unavailable.");
 		const resource = await findLixEntity(
-			lix,
+			fileOpenTrace.scopeRepositoryLix(lix),
 			routeChildKind === "file" ? "file" : "directory",
 			{ id: entity.id },
 		);
@@ -957,7 +957,11 @@ export function RepositoryAtelier({
 						activeBranchId !== session.activeBranchSnapshot()
 					)
 						return;
-					const entity = await findLixEntity(session.lix, kind, { path });
+					const entity = await findLixEntity(
+						fileOpenTrace.scopeRepositoryLix(session.lix),
+						kind,
+						{ path },
+					);
 					if (
 						!entity ||
 						revision !== navigationRevision ||
@@ -1310,7 +1314,10 @@ export function RepositoryAtelier({
 							},
 						}).blob();
 					const atelierProps: AtelierProps = {
-						lix: session.lix,
+						// Atelier owns the shell, built-in extensions, and document views.
+						// Scope its shared Lix handle once so every initial SQL read joins
+						// the active file-open trace, regardless of which view starts it.
+						lix: fileOpenTrace.scopeRepositoryLix(session.lix),
 						scopeDocumentLix: (path, fileId, lix) =>
 							fileOpenTrace.scopeLix(path, fileId, lix),
 						onError: (error) =>
@@ -1375,7 +1382,6 @@ export function RepositoryAtelier({
 								? stableSettingsApiRef.current
 								: null,
 							repositoryVisibility,
-							(lix) => fileOpenTrace.scopeRepositoryLix(lix),
 						),
 						onReady: setInstance,
 						mainArea: {
