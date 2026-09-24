@@ -40,12 +40,12 @@ export const DIFF_CARD_OPEN_HEIGHT = 480;
  */
 export const DIFF_GLYPH = {
 	viewBox: "0 0 12 12",
-	radius: 5,
-	stroke: 1.7,
+	radius: 5.5,
+	stroke: 1.5,
 	knockout: {
-		added: "M6 3.6v4.8M3.6 6h4.8",
-		modified: "M3.3 6.3c.9-1.5 1.8-1.5 2.7 0s1.8 1.5 2.7 0",
-		removed: "M3.6 6h4.8",
+		added: "M6 3.5v5M3.5 6h5",
+		modified: "M3.3 6.6c.9-1.1 1.8-1.1 2.7 0s1.8 1.1 2.7 0",
+		removed: "M3.5 6h5",
 		moved: "M4.8 3.6 7.2 6 4.8 8.4",
 	},
 } as const;

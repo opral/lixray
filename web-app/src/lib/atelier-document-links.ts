@@ -1,6 +1,21 @@
-import type { AtelierDocumentLinks } from "@opral/atelier";
-import { atelierBranchSearch } from "./atelier-navigation.ts";
-import { entityRouteBase, parseEntityUrlSplat } from "./entity-url.ts";
+import type {
+	ATELIER_CONVERSATION_VIEW_ID,
+	AtelierDocumentLinks,
+	AtelierNavigation,
+} from "@opral/atelier";
+import {
+	atelierBranchSearch,
+	conversationFromViewState,
+} from "./atelier-navigation.ts";
+import {
+	conversationRouteBase,
+	entityRouteBase,
+	parseEntityUrlSplat,
+} from "./entity-url.ts";
+
+/** Checked against Atelier's export; a value import would load Atelier. */
+const CONVERSATION_VIEW_ID: typeof ATELIER_CONVERSATION_VIEW_ID =
+	"atelier_conversation";
 
 /** The origins whose file URLs name files of this deployment. */
 const CANONICAL_ORIGIN = "https://lixray.com";
@@ -70,6 +85,47 @@ export function createAtelierDocumentLinks({
 			);
 			if (branch) url.searchParams.set("branch", branch);
 			return url.href;
+		},
+	};
+}
+
+/**
+ * Atelier's `navigation.href`: the URL a view location has in LixRay, so
+ * Atelier can render real links (History's and a document's "Open
+ * conversation"), which open in a new browser tab or copy like any link.
+ * A plain click still stays in the app: Atelier opens the tab and the
+ * activation drives the URL.
+ *
+ * Only conversations are addressed by view location. Files resolve by id,
+ * which a path location does not carry, so every other location falls back
+ * to the repository; Atelier asks for those only when `fileHref` is set,
+ * which LixRay does not provide.
+ */
+export function createAtelierNavigation({
+	namespace,
+	repository,
+	activeBranchId,
+	defaultBranchId,
+}: {
+	readonly namespace: string;
+	readonly repository: string;
+	readonly activeBranchId: () => string;
+	readonly defaultBranchId: () => string;
+}): AtelierNavigation {
+	return {
+		href(location) {
+			const { branch } = atelierBranchSearch(
+				location.branchId ?? activeBranchId(),
+				defaultBranchId(),
+			);
+			const query = branch ? `?${new URLSearchParams({ branch })}` : "";
+			const conversation =
+				"view" in location && location.view === CONVERSATION_VIEW_ID
+					? conversationFromViewState(location.state)
+					: null;
+			return conversation
+				? `${conversationRouteBase(namespace, repository, conversation.conversationId)}${query}`
+				: `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}${query}`;
 		},
 	};
 }

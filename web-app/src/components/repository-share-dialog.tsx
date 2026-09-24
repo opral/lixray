@@ -1,5 +1,12 @@
 import { fileIconUrl } from "@opral/atelier/file-icons";
-import { Check, Copy, Globe2, LockKeyhole, Users } from "lucide-react";
+import {
+	Check,
+	Copy,
+	Globe2,
+	LockKeyhole,
+	MessageSquare,
+	Users,
+} from "lucide-react";
 import { type ReactElement, useEffect, useState } from "react";
 import { Popover as PopoverPrimitive } from "radix-ui";
 import { Button } from "~/components/ui/button";
@@ -17,16 +24,21 @@ export type ReadShareAccess =
 	  };
 
 interface RepositoryShareDialogProps {
-	/** The public, canonical resource URL. */
+	/** The canonical URL of what is open, without any invite capability. */
 	canonicalUrl: string;
 	documentName: string;
-	publicationLabel: "file" | "folder" | "repository";
+	/**
+	 * What the link opens. Files, folders and the repository can be published;
+	 * a conversation cannot, so its read access follows the repository and
+	 * a private repository's members can still copy its link.
+	 */
+	publicationLabel: "file" | "folder" | "conversation" | "repository";
 	readAccess: ReadShareAccess | null;
 	/** An optional composed trigger owned by the surrounding shell. */
 	trigger?: ReactElement;
 	open?: boolean;
 	onOpenChange?: (open: boolean) => void;
-	onCopied?: (url: string) => void;
+	onCopied?: (url: string, mode: "public" | "members") => void;
 	publishReadLink: () => Promise<void>;
 	unpublishReadLink: () => Promise<void>;
 	/** Opens the repository People tab, where membership invitations live. */
@@ -59,6 +71,10 @@ export function RepositoryShareDialog({
 	const [errorMessage, setErrorMessage] = useState<string | null>(null);
 	const [busy, setBusy] = useState<"publish" | "unpublish" | null>(null);
 	const isPublished = readAccess?.status === "published";
+	// A private conversation is still worth linking: members open it.
+	const isMembersLink =
+		publicationLabel === "conversation" && readAccess?.status === "private";
+	const canCopy = isPublished || isMembersLink;
 	const documentIconUrl = fileIconUrl(documentName);
 
 	useEffect(() => {
@@ -76,7 +92,7 @@ export function RepositoryShareDialog({
 	};
 
 	const handleCopy = async () => {
-		if (!isPublished) return;
+		if (!canCopy) return;
 		try {
 			await copyText(canonicalUrl);
 		} catch {
@@ -87,7 +103,7 @@ export function RepositoryShareDialog({
 		}
 
 		setCopyState("copied");
-		onCopied?.(canonicalUrl);
+		onCopied?.(canonicalUrl, isPublished ? "public" : "members");
 	};
 
 	const runPermissionChange = async (
@@ -141,7 +157,13 @@ export function RepositoryShareDialog({
 					)}
 				>
 					<div className="flex items-center gap-2.5">
-						{publicationLabel === "repository" ? null : (
+						{publicationLabel === "repository" ? null : publicationLabel ===
+						  "conversation" ? (
+							<MessageSquare
+								className="size-[18px] shrink-0 text-fg-muted"
+								aria-hidden="true"
+							/>
+						) : (
 							<img
 								src={documentIconUrl}
 								alt=""
@@ -173,7 +195,9 @@ export function RepositoryShareDialog({
 							{readAccess === null
 								? "Checking publication status…"
 								: readAccess.status === "private"
-									? `This ${publicationLabel} is private.`
+									? publicationLabel === "conversation"
+										? "Only repository members can open this conversation."
+										: `This ${publicationLabel} is private.`
 									: readAccess.source === "ancestor"
 										? `Public through ${readAccess.inheritedFrom ?? "a published parent folder"}.`
 										: readAccess.source === "repository"
@@ -182,14 +206,14 @@ export function RepositoryShareDialog({
 						</span>
 					</div>
 
-					{isPublished ? (
+					{canCopy ? (
 						<div className="flex min-w-0 items-stretch gap-2 max-[420px]:flex-col">
 							<div
 								className="flex h-9 min-w-0 grow cursor-text select-all items-center overflow-hidden rounded-lg border border-border bg-panel px-3 font-mono text-[11px] text-fg-muted focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 								tabIndex={0}
 								role="textbox"
 								aria-readonly="true"
-								aria-label={`Public link: ${canonicalUrl}`}
+								aria-label={`${isPublished ? "Public link" : "Members-only link"}: ${canonicalUrl}`}
 								title={canonicalUrl}
 								onClick={(event) => selectLinkText(event.currentTarget)}
 								onKeyDown={(event) => {
@@ -233,6 +257,11 @@ export function RepositoryShareDialog({
 							<span className="text-danger-border" role="alert">
 								{errorMessage}
 							</span>
+						) : isMembersLink ? (
+							<>
+								A conversation follows the repository’s access: members can open
+								this link.
+							</>
 						) : readAccess?.status === "private" ? (
 							readAccess.canPublish ? (
 								publicationLabel === "folder" ? (

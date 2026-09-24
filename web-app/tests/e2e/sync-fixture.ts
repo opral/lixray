@@ -1164,7 +1164,7 @@ export async function createSyncFixture({
 					.getByRole("list", { name: "Checkpoints" })
 					.locator(":scope > li")
 					.nth(1)
-					.getByRole("button")
+					.locator('[data-attr="history-view-checkpoint"]')
 					.click();
 				const exitHistory = left.getByRole("button", { name: "Exit" });
 				await expect(exitHistory).toBeVisible({

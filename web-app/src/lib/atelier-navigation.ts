@@ -71,3 +71,51 @@ function normalizeAtelierFilePath(filePath: string): string | null {
 	}
 	return segments.length > 0 ? `/${segments.join("/")}` : null;
 }
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The words a conversation URL's slug is made from: its title, else what it
+ * is attached to (Atelier's `anchorLabel`), else "Conversation" — the same
+ * name the conversation's tab shows.
+ */
+/** What names a conversation: the part of Atelier's `ConversationSummary` a URL reads. */
+export type ConversationNameParts = {
+	readonly title: string | null;
+	readonly anchorLabel: string | null;
+};
+
+export function conversationSlugText(summary: ConversationNameParts): string {
+	return summary.title ?? summary.anchorLabel ?? "Conversation";
+}
+
+/**
+ * The conversation an active `atelier_conversation` view names, from its
+ * `main_view_activated` state. `slugText` is null until the view has read
+ * the conversation and labelled its tab; a later event for the same view
+ * carries it.
+ */
+export function conversationFromViewState(state: unknown): {
+	readonly conversationId: string;
+	readonly slugText: string | null;
+} | null {
+	if (!state || typeof state !== "object") return null;
+	const { conversationId, title, atelier } = state as {
+		conversationId?: unknown;
+		title?: unknown;
+		atelier?: unknown;
+	};
+	if (typeof conversationId !== "string" || !UUID.test(conversationId))
+		return null;
+	const label =
+		atelier && typeof atelier === "object"
+			? (atelier as { label?: unknown }).label
+			: undefined;
+	const slugText =
+		typeof title === "string" && title.trim()
+			? title
+			: typeof label === "string" && label.trim()
+				? label
+				: null;
+	return { conversationId: conversationId.toLowerCase(), slugText };
+}
