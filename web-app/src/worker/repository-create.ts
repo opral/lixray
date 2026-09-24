@@ -1,5 +1,6 @@
 import type { WorkerEnv } from "./handler.ts";
 import { lixServiceRequestHeaders } from "../lib/lix-service-proxy.ts";
+import { installMarkdownPlugin } from "./markdown-plugin.ts";
 
 export const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -17,6 +18,7 @@ export async function createHostedRepository(
 	env: WorkerEnv,
 	account: { userId: string; token: string },
 	fetcher: typeof fetch = fetch,
+	installPlugin: typeof installMarkdownPlugin = installMarkdownPlugin,
 ): Promise<Response> {
 	const service =
 		env.LIXRAY_LIX_SERVICE_URL ??
@@ -109,6 +111,19 @@ export async function createHostedRepository(
 				502,
 				"The server returned an invalid repository descriptor.",
 			);
+		try {
+			await installPlugin(request, env, account, id, fetcher);
+		} catch (error) {
+			console.error("New repository Markdown plugin installation failed", {
+				repositoryId: id,
+				error,
+			});
+			return failure(
+				503,
+				"Repository setup is incomplete. Retry with the same Idempotency-Key and snapshot.",
+				"LIX_HOST_PLUGIN_INSTALL_FAILED",
+			);
+		}
 
 		// This RPC is service-role-only. A browser must never be able to claim an
 		// arbitrary existing server ID. It atomically records the receipt and owner.

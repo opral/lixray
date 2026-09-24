@@ -10,6 +10,7 @@ import { handlePublishedEntity, type EntityKind } from "./published-entity.ts";
 import { deleteHostedRepository } from "./repository-delete.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
 import { createHostedRepository } from "./repository-create.ts";
+import { installMarkdownPlugin } from "./markdown-plugin.ts";
 import { validateMcpJwtClaims } from "../mcp/auth.ts";
 import { jwtVerify, type JWTPayload } from "jose";
 import {
@@ -151,6 +152,7 @@ interface HandleRequestOptions {
 	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
+	installMarkdownPlugin?: typeof installMarkdownPlugin;
 	executionContext?: RequestExecutionContext;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 	captureSignup?: typeof captureUserSignedUp;
@@ -486,7 +488,13 @@ export async function handleRequest(
 		if (auth.auth.isDemo)
 			return new Response("Sign in to create a repository", { status: 403 });
 		return withRemoteLixCors(
-			await createHostedRepository(request, env, auth.auth, options.fetch),
+			await createHostedRepository(
+				request,
+				env,
+				auth.auth,
+				options.fetch,
+				options.installMarkdownPlugin,
+			),
 			request,
 		);
 	}

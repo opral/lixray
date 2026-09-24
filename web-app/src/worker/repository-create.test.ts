@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createHostedRepository } from "./repository-create.ts";
+import { createHostedRepository as createHostedRepositoryWithPlugin } from "./repository-create.ts";
+import type { installMarkdownPlugin } from "./markdown-plugin.ts";
+const skipPluginInstall: typeof installMarkdownPlugin = async () => {};
+const createHostedRepository = (
+	...args: Parameters<typeof createHostedRepositoryWithPlugin>
+) =>
+	createHostedRepositoryWithPlugin(
+		args[0],
+		args[1],
+		args[2],
+		args[3],
+		args[4] ?? skipPluginInstall,
+	);
 const id = "11111111-1111-4111-8111-111111111111";
 const namespaceId = "33333333-3333-4333-8333-333333333333";
 const account = {
@@ -65,6 +77,114 @@ void test("streams creation under authenticated principal and registers before r
 	);
 	assert.equal(calls[1]!.headers.get("authorization"), "Bearer internal");
 	assert.equal(calls[2]!.headers.get("authorization"), "Bearer secret");
+});
+
+void test("installs Markdown before registration for direct snapshot uploads", async () => {
+	const events: string[] = [];
+	const response = await createHostedRepositoryWithPlugin(
+		request(),
+		env,
+		account,
+		async (input, init) => {
+			const upstream = new Request(input, init);
+			if (upstream.url.endsWith("authorize_hosted_lix_creation")) {
+				events.push("authorize");
+				return Response.json(namespaceId);
+			}
+			if (upstream.url.endsWith("/lix/v1")) {
+				events.push("upload");
+				assert.equal(await upstream.text(), "snapshot");
+				return Response.json({ id }, { status: 201 });
+			}
+			events.push("register");
+			return new Response(null, { status: 204 });
+		},
+		async (_request, _env, _account, repositoryId) => {
+			events.push("install");
+			assert.equal(repositoryId, id);
+		},
+	);
+	assert.equal(response.status, 201);
+	assert.deepEqual(events, ["authorize", "upload", "install", "register"]);
+});
+
+void test("a failed plugin install leaves registration pending for retry", async () => {
+	let registrations = 0;
+	const response = await createHostedRepositoryWithPlugin(
+		request(),
+		env,
+		account,
+		async (input) => {
+			const upstream = new Request(input);
+			if (upstream.url.endsWith("authorize_hosted_lix_creation"))
+				return Response.json(namespaceId);
+			if (upstream.url.endsWith("/lix/v1"))
+				return Response.json({ id }, { status: 201 });
+			registrations++;
+			return new Response(null, { status: 204 });
+		},
+		async () => {
+			throw new Error("invalid archive");
+		},
+	);
+	assert.equal(response.status, 503);
+	assert.equal(registrations, 0);
+	const body: unknown = await response.json();
+	assert.deepEqual(body, {
+		error: {
+			code: "LIX_HOST_PLUGIN_INSTALL_FAILED",
+			message:
+				"Repository setup is incomplete. Retry with the same Idempotency-Key and snapshot.",
+		},
+	});
+});
+
+void test("retry with the same key completes plugin installation and registration", async () => {
+	const keys: string[] = [];
+	let attempts = 0;
+	let registrations = 0;
+	const fetcher: typeof fetch = async (input, init) => {
+		const upstream = new Request(input, init);
+		if (upstream.url.endsWith("authorize_hosted_lix_creation"))
+			return Response.json(namespaceId);
+		if (upstream.url.endsWith("/lix/v1")) {
+			keys.push(upstream.headers.get("idempotency-key")!);
+			await upstream.text();
+			return Response.json({ id }, { status: 201 });
+		}
+		registrations++;
+		return new Response(null, { status: 204 });
+	};
+	const installer: typeof installMarkdownPlugin = async () => {
+		if (++attempts === 1) throw new Error("temporary failure");
+	};
+	assert.equal(
+		(
+			await createHostedRepositoryWithPlugin(
+				request(),
+				env,
+				account,
+				fetcher,
+				installer,
+			)
+		).status,
+		503,
+	);
+	assert.equal(
+		(
+			await createHostedRepositoryWithPlugin(
+				request(),
+				env,
+				account,
+				fetcher,
+				installer,
+			)
+		).status,
+		201,
+	);
+	assert.deepEqual(keys, ["stable-key", "stable-key"]);
+	assert.equal(attempts, 2);
+	assert.equal(registrations, 1);
 });
 
 void test("retry after registration failure reuses the original scoped creation key", async () => {
@@ -146,6 +266,7 @@ void test("public collection route dispatches creation and preserves CORS", asyn
 	req.headers.set("origin", "https://client.test");
 	const response = await handleRequest(req, env, {
 		authenticate: async () => ({ ok: true, auth: account }),
+		installMarkdownPlugin: skipPluginInstall,
 		fetch: async (input, init) => {
 			const req = new Request(input, init);
 			calls++;
@@ -170,6 +291,7 @@ void test("account PAT creates a snapshot repository without a browser session",
 	req.headers.set("authorization", `Bearer lixray_pat_${"a".repeat(64)}`);
 	let authorized = false;
 	const response = await handleRequest(req, env, {
+		installMarkdownPlugin: skipPluginInstall,
 		fetch: async (input, init) => {
 			const upstream = new Request(input, init);
 			if (upstream.url.endsWith("/authorize_api_token")) {
