@@ -141,7 +141,9 @@ The full command runs the four built-image sync scenarios in separate
 disposable Compose projects. It builds a local web image with placeholder
 Supabase build settings and resolves or builds the pinned Lix server image
 locally. It does not publish images, migrate a linked production database, or
-promote Railway services; those remain GitHub release gates.
+promote Railway services; those remain GitHub release gates. The independent
+Gitleaks secret scan also remains a required GitHub check because it scans a
+clean repository mirror with fixed configuration.
 
 The same acceptance path used by CI is available locally:
 
