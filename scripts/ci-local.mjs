@@ -67,8 +67,10 @@ try {
 	run("Stop local database", "pnpm", ["--dir", "database", "stop"]);
 }
 
+const { image: serverImage } = await resolveLixServerImage({ mode: "local", allowBuild: true });
+if (!serverImage) throw new Error("Pinned Lix server image could not be resolved or built locally.");
 try {
-	run("Authenticated Compose E2E", "pnpm", ["test:e2e"]);
+	run("Authenticated Compose E2E", "pnpm", ["test:e2e"], { ...localEnv, LIXRAY_SERVER_IMAGE: serverImage });
 } finally {
 	run("Stop authenticated E2E services", "node", ["scripts/dev.mjs", "--down"]);
 }
@@ -84,8 +86,6 @@ run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile"
 	"--build-arg", "VITE_SUPABASE_URL=https://example.invalid",
 	"--build-arg", "VITE_SUPABASE_KEY=ci-public-placeholder",
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
-const { image: serverImage } = await resolveLixServerImage({ mode: "local", allowBuild: true });
-if (!serverImage) throw new Error("Pinned Lix server image could not be resolved or built locally.");
 for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
 	const syncEnv = {
 		...localEnv,

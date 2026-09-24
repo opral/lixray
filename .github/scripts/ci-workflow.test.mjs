@@ -66,6 +66,13 @@ test("built-image correctness uses local services without Supabase or Railway", 
 	assert.match(integration, /if: inputs.performance != true/);
 	assert.match(integration, /playwright.performance.config.ts/);
 });
+test("local acceptance prepares a usable server image before authenticated E2E", () => {
+	const local = read("scripts/ci-local.mjs");
+	const resolve = local.indexOf('resolveLixServerImage({ mode: "local", allowBuild: true })');
+	const e2e = local.indexOf('run("Authenticated Compose E2E"');
+	assert.ok(resolve >= 0 && resolve < e2e);
+	assert.match(local, /LIXRAY_SERVER_IMAGE: serverImage/);
+});
 test("Docker requires a prepared SDK rather than compiling Rust", () => {
 	const docker = read("web-app/Dockerfile");
 	assert.match(docker, /Prepared SDK required/);
@@ -75,8 +82,13 @@ test("Docker requires a prepared SDK rather than compiling Rust", () => {
 test("the required aggregator checks out its script and ignores unrelated label cancellation", () => {
 	const aggregate = job("ci");
 	assert.ok(aggregate.indexOf("uses: actions/checkout@v4") < aggregate.indexOf("check-ci-results.mjs"));
-	assert.match(aggregate, /run: node scripts\/check-pinned-lix-ci\.mjs/);
-	assert.match(aggregate, /GH_TOKEN: \$\{\{ secrets\.LIX_ACTIONS_READ_TOKEN \|\| github\.token \}\}/);
+	const select = job("changes");
+	assert.match(select, /actions: read/);
+	assert.match(select, /run: node scripts\/check-pinned-lix-ci\.mjs/);
+	assert.match(select, /GH_TOKEN: \$\{\{ secrets\.LIX_ACTIONS_READ_TOKEN \|\| github\.token \}\}/);
+	for (const name of ["sdk", "server-image", "web-image", "frontend", "e2e", "e2e-components", "sync"]) {
+		assert.match(job(name), /needs:[\s\S]*?changes/);
+	}
 	assert.match(pr, /label.name != 'preview' && 'ignored-label'/);
 });
 

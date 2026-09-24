@@ -41,6 +41,9 @@ jobs:
       (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
     outputs:
       fast: ${{ steps.classify.outputs.fast }}
       frontend: ${{ steps.classify.outputs.frontend }}
@@ -58,6 +61,11 @@ jobs:
 
       - name: Validate submodule branches
         run: .github/scripts/validate-submodule-branches.sh
+
+      - name: Require successful Lix CI for the pinned browser artifact
+        env:
+          GH_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+        run: node scripts/check-pinned-lix-ci.mjs
 
       - name: Classify changed files
         id: classify
@@ -354,11 +362,6 @@ jobs:
           PREVIEW_REQUESTED: ${{ contains(github.event.pull_request.labels.*.name, 'preview') }}
           FORK_PULL_REQUEST: ${{ github.event.pull_request.head.repo.full_name != github.repository }}
         run: node .github/scripts/check-ci-results.mjs
-
-      - name: Require successful Lix CI for the pinned browser artifact
-        env:
-          GH_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
-        run: node scripts/check-pinned-lix-ci.mjs
 
   deploy-preview:
     name: Deploy preview
