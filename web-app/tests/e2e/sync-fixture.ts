@@ -49,7 +49,11 @@ export async function createSyncFixture({
 	const analyticsStubFailures: string[] = [];
 	const newContext = async () => {
 		const context = await browser.newContext();
-		if (scenario === "editing" || scenario === "history")
+		if (
+			scenario === "editing" ||
+			scenario === "history" ||
+			scenario === "conflicts"
+		)
 			await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
 			// Analytics is not part of the sync contract. Keep a built production
@@ -1475,6 +1479,16 @@ export async function createSyncFixture({
 				}
 			} catch (error) {
 				primaryFailure = true;
+				await test.info().attach("offline-conflict-diagnostics.json", {
+					body: JSON.stringify(
+						await Promise.allSettled(
+							[left, right, fresh, mirror].map(collectSyncDiagnostics),
+						),
+						null,
+						2,
+					),
+					contentType: "application/json",
+				});
 				throw error;
 			} finally {
 				const cleanup = await Promise.allSettled([
