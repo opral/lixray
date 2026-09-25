@@ -1,96 +1,91 @@
-import { Table2 } from "lucide-react";
+import { CircleCheck } from "lucide-react";
 
-type IllustrationItem = {
-	name: string;
-	icon?: string;
-};
-
-const todayGroups: { label: string; items: IllustrationItem[] }[] = [
-	{ label: "Code host", items: [{ name: "crm-sync.py", icon: "icon-sq-py" }] },
-	{
-		label: "Cloud drive",
-		items: [
-			{ name: "handbook.docx", icon: "icon-sq-docx" },
-			{ name: "roadmap.md", icon: "icon-sq-md" },
-			{ name: "launch-deck.pdf", icon: "icon-sq-pdf" },
-		],
-	},
-	{
-		label: "Database",
-		items: [{ name: "orders" }, { name: "customers" }],
-	},
-];
-
-const repositoryItems = todayGroups.flatMap((group) => group.items);
-
-function ItemPill({ name, icon }: IllustrationItem) {
-	return (
-		<span className="inline-flex items-center gap-1.5 rounded-[7px] border border-fg/12 bg-panel px-2.5 py-1.5 text-[12.5px] leading-none whitespace-nowrap">
-			{icon ? (
-				<img
-					className="size-3.5 shrink-0"
-					src={`/landing/${icon}.svg`}
-					alt=""
-				/>
-			) : (
-				<Table2
-					className="size-3.5 shrink-0 text-fg-subtle"
-					strokeWidth={1.5}
-					aria-hidden="true"
-				/>
-			)}
-			{name}
-		</span>
-	);
-}
+const markers = [
+	{ x: 52, icon: "icon-sq-csv" },
+	{ x: 120, icon: "icon-sq-docx" },
+	{ x: 188, icon: "icon-sq-pdf" },
+	{ x: 548, icon: "icon-sq-xlsx" },
+	{ x: 674, icon: "icon-sq-md" },
+] as const;
 
 export function WhyRepositoryIllustration() {
 	return (
 		<figure
-			className="mt-5 grid w-full grid-cols-1 items-start gap-4 sm:grid-cols-[minmax(0,1fr)_24px_minmax(0,1fr)]"
+			className="relative m-0 h-[160px] w-full"
 			role="img"
-			aria-label="Today, code, documents, and tables sit in separate services. LixRay puts them in one repository where changes can be proposed for review."
+			aria-label="Claude proposes changes to a repository, checks pass, and the changes are accepted into its history"
 		>
-			<div className="flex min-w-0 flex-col gap-2.5">
-				<span className="text-[11.5px] leading-[normal] font-semibold tracking-[.04em] text-fg-faint uppercase">
-					Today
-				</span>
-				{todayGroups.map((group) => (
-					<div
-						key={group.label}
-						className="flex flex-col gap-2 rounded-[10px] border border-dashed border-fg/25 p-2.5"
-					>
-						<span className="text-xs leading-[normal] text-fg-subtle">
-							{group.label}
-						</span>
-						<div className="flex flex-wrap gap-1.5">
-							{group.items.map((item) => (
-								<ItemPill key={item.name} {...item} />
-							))}
-						</div>
-					</div>
-				))}
-			</div>
-
-			<span
-				className="self-center text-center text-xl text-fg-faint max-sm:rotate-90"
+			<svg
+				className="absolute inset-0 h-full w-full"
+				viewBox="0 0 736 160"
+				preserveAspectRatio="xMidYMid meet"
 				aria-hidden="true"
 			>
-				→
+				<path
+					d="M0 116 H736"
+					fill="none"
+					stroke="var(--atelier-fg)"
+					strokeWidth="1.7"
+				/>
+				<path
+					d="M188 116 C218 116 216 44 248 44 H488 C520 44 518 116 548 116"
+					fill="none"
+					stroke="var(--atelier-link)"
+					strokeWidth="2"
+				/>
+				{markers.map(({ x, icon }) => (
+					<g key={x}>
+						<circle
+							cx={x}
+							cy="116"
+							r="17"
+							fill="var(--atelier-panel)"
+							stroke="var(--atelier-border)"
+						/>
+						<image
+							href={"/landing/" + icon + ".svg"}
+							x={x - 7}
+							y="109"
+							width="14"
+							height="14"
+						/>
+					</g>
+				))}
+				<rect
+					x="313"
+					y="30"
+					width="58"
+					height="28"
+					rx="14"
+					fill="var(--atelier-panel)"
+					stroke="var(--atelier-border)"
+				/>
+				<image
+					href="/landing/icon-sq-xlsx.svg"
+					x="323"
+					y="37"
+					width="14"
+					height="14"
+				/>
+				<image
+					href="/landing/icon-sq-csv.svg"
+					x="344"
+					y="37"
+					width="14"
+					height="14"
+				/>
+			</svg>
+			<span className="absolute top-0 left-[29%] inline-flex items-center gap-1.5 rounded-full border border-border bg-panel px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap shadow-sm sm:text-[12px]">
+				<img className="size-3" src="/landing/claude-spark.svg" alt="" />
+				Claude proposes changes
 			</span>
-
-			<div className="flex min-w-0 flex-col gap-2.5 self-center">
-				<span className="text-[11.5px] leading-[normal] font-semibold tracking-[.04em] text-fg-faint uppercase">
-					LixRay
-				</span>
-				<div className="w-full overflow-hidden rounded-[10px] border border-fg/25">
-					<div className="flex flex-wrap gap-1.5 p-3">
-						{repositoryItems.map((item) => (
-							<ItemPill key={item.name} {...item} />
-						))}
-					</div>
-				</div>
-			</div>
+			<span className="absolute top-9 left-[50%] inline-flex items-center gap-1 rounded-full bg-success-subtle px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap text-success sm:left-[51%] sm:text-[12px]">
+				<CircleCheck className="size-3" strokeWidth={2} aria-hidden="true" />
+				Checks passed
+			</span>
+			<span className="absolute right-[21%] bottom-0 text-[12px] font-semibold">
+				Accepted
+			</span>
 		</figure>
 	);
 }
