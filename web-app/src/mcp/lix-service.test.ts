@@ -107,7 +107,9 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
-		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
+		if (
+			request.sql === "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)"
+		) {
 			this.commit += 1;
 			return {
 				columns: ["commit_id"],
@@ -535,7 +537,7 @@ void test("checkpoint uses the canonical SQL function on the context branch", as
 		{
 			lixId: LIX_ID,
 			branchId: "draft",
-			sql: "SELECT commit_id FROM lix_create_checkpoint()",
+			sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
 			params: undefined,
 		},
 	]);
@@ -1170,7 +1172,8 @@ for (const failCheckpoint of [false, true]) {
 				request: ExecuteRequest,
 			) {
 				if (
-					request.sql === "SELECT commit_id FROM lix_create_checkpoint()" &&
+					request.sql ===
+						"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)" &&
 					failCheckpoint
 				)
 					throw new Error("checkpoint failed");

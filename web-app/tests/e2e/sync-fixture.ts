@@ -256,7 +256,7 @@ export async function createSyncFixture({
 							"Idempotency-Key": `fixture-checkpoint-${scenario}-${randomUUID()}`,
 						},
 						data: {
-							sql: "SELECT commit_id FROM lix_create_checkpoint()",
+							sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
 							params: [],
 						},
 					},
