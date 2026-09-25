@@ -78,13 +78,10 @@ export default defineConfig(({ command }) => ({
 		alias:
 			command === "serve"
 				? [
-						{
-							find: "@opral/atelier/style.css",
-							replacement: path.resolve(atelierSourceDir, "index.css"),
-						},
 						// The token sheet, the Tailwind adapter and the document sheet
-						// are package exports; in serve mode the bare alias below would
-						// send them to index.ts/<file>. Every CSS export needs a line.
+						// are source-backed package exports; in serve mode the bare alias
+						// below would send them to index.ts/<file>. The full style.css
+						// export must resolve to Atelier's built CSS instead.
 						{
 							find: "@opral/atelier/theme.css",
 							replacement: path.resolve(atelierSourceDir, "shell/theme.css"),

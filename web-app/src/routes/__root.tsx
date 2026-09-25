@@ -13,8 +13,9 @@ import { ThemeColorSync } from "~/components/theme-color-sync";
 import { RepositoryProvider } from "~/components/repository-provider";
 import { RepositoryMcpGuidance } from "~/components/repository-mcp-guidance";
 import pwaIcons from "../pwa-icons.json";
-// Atelier bundles global utilities; load its CSS before this app's utilities.
-import atelierCss from "../../../vendor/atelier/src/index.css?url";
+// Atelier's published stylesheet includes its editor and extension styles.
+// Load it before this app's utilities so app-level styling can follow it.
+import atelierCss from "@opral/atelier/style.css?url";
 import appCss from "../styles.css?url";
 
 const title = "LixRay — All your work. In one repository.";
