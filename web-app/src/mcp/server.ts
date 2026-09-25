@@ -23,12 +23,10 @@ import { z } from "zod";
 import { sqlLooksLikeWrite } from "../lib/lix-sql-access.ts";
 import {
 	EXECUTE_SQL_TOOL_DESCRIPTION,
-	LIST_FILES_TOOL_DESCRIPTION,
 	LIX_CATALOG_HINT,
 	LIX_IS_NOT_SQLITE_MESSAGE,
 	LIX_SQL_OPERATING_GUIDE,
 	QUERY_SQL_TOOL_DESCRIPTION,
-	READ_FILES_TOOL_DESCRIPTION,
 } from "./execute-schema.ts";
 import {
 	createLixError,
@@ -100,7 +98,7 @@ export const DIFF_CARD_GUIDE =
 export const DIFF_TOOL_DESCRIPTION =
 	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix only for its file inventory or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, use it instead of listing files again. Use read_files for ordinary file reads and list_files only to discover paths; batch known paths together. Use query_sql for advanced reads. execute_sql is the one write path: put every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: true to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix for its bounded file_paths manifest or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. When file_paths_complete is true, use the manifest instead of querying paths again. query_sql is the read path for repository data and files; execute_sql is the one write path. For file size, select OCTET_LENGTH(content), then fetch only the needed range with SUBSTRING(content FROM 1 FOR length). Do not select full content just to measure it or retrieve an excerpt. Agents previously overfetched because read_files selected the entire content blob and enforced its 1 MiB cutoff only after retrieval (issue 485). CAST(content AS TEXT) is appropriate only for known small text files. execute_sql puts every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: true to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
 
@@ -117,7 +115,7 @@ export const RESTORE_TOOL_DESCRIPTION =
 	"Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.";
 
 export const LIST_LIXES_TOOL_DESCRIPTION =
-	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.";
+	"List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to SQL, or use open_lix for its file path manifest and branch context.";
 
 export const OPEN_LIX_TOOL_DESCRIPTION =
 	"Open exact @handle/slug or UUID without calling list_lixes first; mint context on the active branch or branch_id. Returns counts, SQL file_paths, and files with id, path, ID-only url and pathful display_url. Branchless URLs follow the current default; ?branch pins its branch ID. Use file_paths if file_paths_complete.";
@@ -443,45 +441,6 @@ const entityUrlsOutput = withError(
 	}),
 );
 
-const fileMetadata = z.record(z.string(), z.unknown());
-const listedFile = z
-	.object({
-		id: z.string(),
-		path: z.string(),
-		url: z.string(),
-		display_url: z.string(),
-	})
-	.strict();
-const listFilesOutput = withError(
-	z.object({
-		context,
-		commit_id: z.string(),
-		files: z.array(listedFile),
-		truncated: z.boolean(),
-	}),
-);
-const readFilesOutput = withError(
-	z.object({
-		context,
-		commit_id: z.string(),
-		files: z.array(
-			z
-				.object({
-					id: z.string(),
-					path: z.string(),
-					url: z.string(),
-					display_url: z.string(),
-					size: z.number().int(),
-					/** The file's text; absent when `encoding` says why it is not. */
-					content: z.string().optional(),
-					encoding: z.enum(["binary", "too-large"]).optional(),
-					lixcol_metadata: fileMetadata.nullable(),
-				})
-				.strict(),
-		),
-		missing: z.array(z.string()),
-	}),
-);
 const diffRef = z.union([
 	z.object({ checkpoint_id: commitId }).strict(),
 	z.object({ commit_id: commitId }).strict(),
@@ -874,68 +833,6 @@ export function createLixrayMcpServer(
 		securitySchemes,
 		async ({ context: token, entities }) =>
 			service.getEntityUrls(token, entities, options.urlOrigin),
-		undefined,
-		surfaceVersion,
-		requestId,
-		service,
-		options.urlOrigin,
-	);
-
-	registerTool(
-		server,
-		"list_files",
-		"LixRay: List files",
-		LIST_FILES_TOOL_DESCRIPTION,
-		z
-			.object({
-				context,
-				directory: z.string().min(1).optional(),
-				name: z.string().min(1).optional(),
-			})
-			.strict(),
-		listFilesOutput,
-		readAnnotations(),
-		securitySchemes,
-		async ({ context: token, directory, name }) => {
-			const listed = await service.listFiles(
-				token,
-				{ ...(directory ? { directory } : {}), ...(name ? { name } : {}) },
-				options.urlOrigin,
-			);
-			return {
-				context: listed.context,
-				commit_id: listed.commitId,
-				files: listed.files,
-				truncated: listed.truncated,
-			};
-		},
-		undefined,
-		surfaceVersion,
-		requestId,
-		service,
-		options.urlOrigin,
-	);
-
-	registerTool(
-		server,
-		"read_files",
-		"LixRay: Read files",
-		READ_FILES_TOOL_DESCRIPTION,
-		z
-			.object({ context, paths: z.array(z.string().min(1)).min(1).max(100) })
-			.strict(),
-		readFilesOutput,
-		readAnnotations(),
-		securitySchemes,
-		async ({ context: token, paths }) => {
-			const read = await service.readFiles(token, paths, options.urlOrigin);
-			return {
-				context: read.context,
-				commit_id: read.commitId,
-				files: read.files,
-				missing: read.missing,
-			};
-		},
 		undefined,
 		surfaceVersion,
 		requestId,
@@ -1622,7 +1519,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). Prefer read_files for ordinary file reads; batch known paths together. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: true marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). query_sql is the sole read path for repository data and file contents. For size use OCTET_LENGTH(content), and for excerpts use SUBSTRING(content FROM 1 FOR length); do not fetch the whole blob to measure or slice it. Agents previously overfetched because read_files selected full content before applying the 1 MiB size check (issue 485). CAST(content AS TEXT) is for known small text files. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: true marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
@@ -2196,15 +2093,6 @@ function summarizeToolResult(
 			typeof result.warning === "string" ? `. ${result.warning}` : "";
 		return `${summarizeExecuteSql(result.results, touched)}${checkpoint}${warning}`;
 	}
-	if (name === "list_files") {
-		const files = Array.isArray(result.files) ? result.files : [];
-		return `Listed ${files.length} ${files.length === 1 ? "file" : "files"}${result.truncated ? " (truncated; narrow the filter)" : ""} at commit ${String(result.commit_id)}.`;
-	}
-	if (name === "read_files") {
-		const files = Array.isArray(result.files) ? result.files : [];
-		const missing = Array.isArray(result.missing) ? result.missing : [];
-		return `Read ${files.length} ${files.length === 1 ? "file" : "files"}${missing.length ? `; missing: ${missing.join(", ")}` : ""} at commit ${String(result.commit_id)}.`;
-	}
 	if (name === "active_branch_id") {
 		return `Active branch ${String(result.branch_id)} at commit ${String(result.commit_id)}.`;
 	}
@@ -2376,8 +2264,6 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"list_lixes",
 		"open_lix",
 		"get_entity_urls",
-		"list_files",
-		"read_files",
 		"diff",
 		"query_sql",
 		"execute_sql",

@@ -2,7 +2,7 @@
 	{
 		"name": "list_lixes",
 		"title": "LixRay: Discover lixes",
-		"description": "List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; With an exact reference, use open_lix for file-tool context or lix_ref directly for SQL.",
+		"description": "List the lixes the signed-in user can access, each as @handle/slug plus uuid. Call only when the target Lix is unknown; with an exact reference, pass lix_ref directly to SQL, or use open_lix for its file path manifest and branch context.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -309,201 +309,6 @@
 		}
 	},
 	{
-		"name": "list_files",
-		"title": "LixRay: List files",
-		"description": "List the files of the Lix and branch in context with id, path, stable url for documents, and readable display_url for users, sorted by path. Optional directory (an absolute path prefix such as /gtm) and name (a case-insensitive substring of the file name) narrow the list; truncated says to narrow further. Read-only.",
-		"inputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"directory": {
-					"type": "string",
-					"minLength": 1
-				},
-				"name": {
-					"type": "string",
-					"minLength": 1
-				}
-			},
-			"required": ["context"],
-			"additionalProperties": false
-		},
-		"outputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"commit_id": {
-					"type": "string"
-				},
-				"files": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"id": {
-								"type": "string"
-							},
-							"path": {
-								"type": "string"
-							},
-							"url": {
-								"type": "string"
-							},
-							"display_url": {
-								"type": "string"
-							}
-						},
-						"required": ["id", "path", "url", "display_url"],
-						"additionalProperties": false
-					}
-				},
-				"truncated": {
-					"type": "boolean"
-				}
-			},
-			"required": ["context", "commit_id", "files", "truncated"],
-			"additionalProperties": false
-		},
-		"annotations": {
-			"readOnlyHint": true,
-			"destructiveHint": false,
-			"openWorldHint": false
-		},
-		"_meta": {
-			"securitySchemes": [
-				{
-					"type": "noauth"
-				}
-			]
-		}
-	},
-	{
-		"name": "read_files",
-		"title": "LixRay: Read files",
-		"description": "Prefer this tool for ordinary reads; batch absolute paths together. Each returns id, stable url for documents, readable display_url for users, size, content as text, and lixcol_metadata: the JSON the app keeps per file, null when none (the CSV view stores its column model there under atelier_csv: { version: 1, columns: [{ id, header, index, type, options? }] }). A file whose bytes are not text, or that is over a megabyte, comes back with no content and an encoding of \"binary\" or \"too-large\" saying why; read its bytes with SQL (SELECT content FROM lix_file WHERE path = $1) when you need them. Paths that do not exist come back in missing. commit_id is the commit the read reflects; pass it to execute_sql as last_seen_commit_id.",
-		"inputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"paths": {
-					"minItems": 1,
-					"maxItems": 100,
-					"type": "array",
-					"items": {
-						"type": "string",
-						"minLength": 1
-					}
-				}
-			},
-			"required": ["context", "paths"],
-			"additionalProperties": false
-		},
-		"outputSchema": {
-			"$schema": "https://json-schema.org/draft/2020-12/schema",
-			"type": "object",
-			"properties": {
-				"context": {
-					"type": "string",
-					"minLength": 1,
-					"description": "Opaque Lix context returned by SQL tools, open_lix or switch_branch"
-				},
-				"commit_id": {
-					"type": "string"
-				},
-				"files": {
-					"type": "array",
-					"items": {
-						"type": "object",
-						"properties": {
-							"id": {
-								"type": "string"
-							},
-							"path": {
-								"type": "string"
-							},
-							"url": {
-								"type": "string"
-							},
-							"display_url": {
-								"type": "string"
-							},
-							"size": {
-								"type": "integer",
-								"minimum": -9007199254740991,
-								"maximum": 9007199254740991
-							},
-							"content": {
-								"type": "string"
-							},
-							"encoding": {
-								"type": "string",
-								"enum": ["binary", "too-large"]
-							},
-							"lixcol_metadata": {
-								"anyOf": [
-									{
-										"type": "object",
-										"propertyNames": {
-											"type": "string"
-										},
-										"additionalProperties": {}
-									},
-									{
-										"type": "null"
-									}
-								]
-							}
-						},
-						"required": [
-							"id",
-							"path",
-							"url",
-							"display_url",
-							"size",
-							"lixcol_metadata"
-						],
-						"additionalProperties": false
-					}
-				},
-				"missing": {
-					"type": "array",
-					"items": {
-						"type": "string"
-					}
-				}
-			},
-			"required": ["context", "commit_id", "files", "missing"],
-			"additionalProperties": false
-		},
-		"annotations": {
-			"readOnlyHint": true,
-			"destructiveHint": false,
-			"openWorldHint": false
-		},
-		"_meta": {
-			"securitySchemes": [
-				{
-					"type": "noauth"
-				}
-			]
-		}
-	},
-	{
 		"name": "diff",
 		"title": "LixRay: Diff two points",
 		"description": "List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, \"working\" (the branch as it stands), or \"latest_checkpoint\" (the nearest checkpoint behind it); paths narrows the list. Read-only. \"What changed since the last checkpoint\" is { before: \"latest_checkpoint\", after: \"working\" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.",
@@ -708,7 +513,7 @@
 	{
 		"name": "query_sql",
 		"title": "LixRay: Query SQL",
-		"description": "Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nPrefer read_files and list_files for ordinary file work; use query_sql for repository data. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }]. History: lix_log([anchor]) lists retained commits with active checkpoint metadata; lix_history('lix_file'[, anchor]) gives net changes; lix_diff('lix_file') gives working changes; lix_as_of('lix_file', $1) gives state at a commit. Join log to history on destination commit ID for checkpoint filters.",
+		"description": "Run one read-only SQL statement against lix_ref (@handle/slug or UUID), optionally branch_id. Defaults to the repository default branch; no open_lix needed. Or pass context alone for its pinned branch. INSERT, UPDATE, and DELETE are rejected; use execute_sql for writes.\n\nquery_sql is the read path for repository data and files. Agents previously overfetched: read_files selected full file content, then applied its 1 MiB cutoff after retrieval (issue 485). Do not fetch full content to check size or read an excerpt. First run `SELECT OCTET_LENGTH(content) AS size FROM lix_file WHERE path = $1`; for a bounded excerpt run `SELECT SUBSTRING(content FROM 1 FOR 4096) AS excerpt_bytes FROM lix_file WHERE path = $1`. `CAST(content AS TEXT)` is only for a known small text file. Lix SQL is a Postgres dialect subset, not SQLite: there is no sqlite_master and no PRAGMA. Discover tables with `SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public' ORDER BY table_name;` and columns with `SELECT column_name, data_type, is_nullable, description FROM information_schema.columns WHERE table_schema = 'public' AND table_name = $1 ORDER BY ordinal_position;`. Core tables: lix_file (id, path, directory_id, name, content), lix_directory (id, path, parent_id, name), lix_branch, lix_commit, lix_change; entity tables are repository-defined, so discover them rather than guess. Parameters are $1, $2, … given as params: [{ kind: \"text\", value: \"…\" }]. History: lix_log([anchor]) lists retained commits with active checkpoint metadata; lix_history('lix_file'[, anchor]) gives net changes; lix_diff('lix_file') gives working changes; lix_as_of('lix_file', $1) gives state at a commit. Join log to history on destination commit ID for checkpoint filters.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",
@@ -920,7 +725,7 @@
 	{
 		"name": "execute_sql",
 		"title": "Execute SQL atomically",
-		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID; no open_lix needed), optionally branch_id, or context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted, read back only if the outcome is unknown or validation is part of the task. UI hosts show a card; summarize, do not list files.\n\nThe one write path: one call per coherent change, its creates, updates, moves, copies, deletes and directory changes in order. checkpoint: true marks a milestone (saving needs no checkpoint); last_seen_commit_id (read_files' commit_id or a batch's commit.after) refuses the batch if a file it touches changed since. Upsert: `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content` (metadata: lixcol_metadata); parents are created. Move/rename: `UPDATE lix_file SET path = $1 WHERE path = $2` keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id; never move that way. Delete: `DELETE FROM lix_file WHERE path = $1`. Directories likewise on lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert /gtm/plan.md, move /gtm/a.md to /gtm/archive/a.md, upsert a redirect at /gtm/a.md], checkpoint: true. Errors carry statement_index and an outcome; never blindly retry unknown or committed.",
+		"description": "Run an ordered atomic SQL batch against lix_ref (@handle/slug or UUID; no open_lix needed), optionally branch_id, or context alone for its pinned branch. If a statement fails, the complete batch is rolled back; a returned result is already persisted, read back only if the outcome is unknown or validation is part of the task. UI hosts show a card; summarize, do not list files.\n\nThe one write path: one call per coherent change, its creates, updates, moves, copies, deletes and directory changes in order. checkpoint: true marks a milestone (saving needs no checkpoint); last_seen_commit_id (open_lix's commit_id or a batch's commit.after) refuses the batch if a file it touches changed since. Upsert: `INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content` (metadata: lixcol_metadata); parents are created. Move/rename: `UPDATE lix_file SET path = $1 WHERE path = $2` keeps the id, so links survive; an occupied target fails the batch. Copy+delete makes a new id; never move that way. Delete: `DELETE FROM lix_file WHERE path = $1`. Directories likewise on lix_directory (no trailing slash: /skills, not /skills/). Example: [upsert /gtm/plan.md, move /gtm/a.md to /gtm/archive/a.md, upsert a redirect at /gtm/a.md], checkpoint: true. Errors carry statement_index and an outcome; never blindly retry unknown or committed.",
 		"inputSchema": {
 			"$schema": "https://json-schema.org/draft/2020-12/schema",
 			"type": "object",

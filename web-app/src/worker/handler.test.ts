@@ -82,6 +82,53 @@ void test("GET /healthz identifies the exact Railway deployment", async () => {
 	});
 });
 
+void test("operator provisions Markdown only with the internal token", async () => {
+	const path = `https://example.test/internal/repositories/${LIX_A}/plugins/markdown`;
+	const configured = env({ extra: { LIXRAY_INTERNAL_TOKEN: "private-token" } });
+	let installed = 0;
+	const options = {
+		installMarkdownPlugin: async (
+			request: Request,
+			_env: WorkerEnv,
+			account: { userId: string },
+			repositoryId: string,
+		) => {
+			assert.equal(new URL(request.url).origin, "http://127.0.0.1:8080");
+			assert.match(
+				account.userId,
+				/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+			);
+			assert.equal(account.userId, "00000000-0000-7000-8000-000000000001");
+			assert.equal(repositoryId, LIX_A);
+			installed++;
+		},
+	};
+	assert.equal(
+		(
+			await handleRequest(
+				new Request(path, { method: "POST" }),
+				configured,
+				options,
+			)
+		).status,
+		401,
+	);
+	assert.equal(
+		(
+			await handleRequest(
+				new Request(path, {
+					method: "POST",
+					headers: { Authorization: "Bearer private-token" },
+				}),
+				configured,
+				options,
+			)
+		).status,
+		204,
+	);
+	assert.equal(installed, 1);
+});
+
 void test("GET /.well-known/openai-apps-challenge returns the OpenAI verification token", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/.well-known/openai-apps-challenge"),

@@ -78,9 +78,12 @@ export default defineConfig(({ command }) => ({
 		alias:
 			command === "serve"
 				? [
+						// Vite serves Atelier source in development, so each editor's
+						// JavaScript import brings in its own CSS. The production build
+						// instead links the package's complete, built stylesheet.
 						{
-							find: "@opral/atelier/style.css",
-							replacement: path.resolve(atelierSourceDir, "index.css"),
+							find: /^@opral\/atelier\/style\.css(?:\?url)?$/,
+							replacement: `${path.resolve(atelierSourceDir, "index.css")}?url`,
 						},
 						// The token sheet, the Tailwind adapter and the document sheet
 						// are package exports; in serve mode the bare alias below would

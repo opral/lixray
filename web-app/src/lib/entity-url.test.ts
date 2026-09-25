@@ -11,6 +11,11 @@ import {
 	entityFromRoute,
 	canonicalEntitySplat,
 	resolvePublishedEntity,
+	conversationUrlSplat,
+	canonicalConversationSplat,
+	conversationRouteBase,
+	conversationRoutePath,
+	conversationFromRoute,
 } from "./entity-url.ts";
 
 const uuid = "017f22e2-79b0-7cc3-98c4-dc0c0c07398f";
@@ -185,4 +190,111 @@ void test("a slug stays a plain URL segment, whatever the name holds", () => {
 			].join("/"),
 		);
 	}
+});
+
+void test("a conversation URL reads as its title; the id resolves", () => {
+	assert.equal(
+		conversationUrlSplat(uuid, "Launch plan: Q4 review"),
+		`${token}/launch-plan-q4-review`,
+	);
+	// Untitled conversations read as what they are attached to.
+	assert.equal(
+		conversationUrlSplat(uuid, "notes.md › Intro"),
+		`${token}/notes.md-intro`,
+	);
+	// A name that slugs to nothing leaves the bare id.
+	for (const title of [null, undefined, "", "???", ".", ".."])
+		assert.equal(conversationUrlSplat(uuid, title), token);
+	// The title is one segment, whatever it holds.
+	assert.equal(conversationUrlSplat(uuid, "a/b c"), `${token}/a-b-c`);
+	assert.equal(
+		conversationRoutePath("opral", "monorepo", uuid, "Launch plan"),
+		`/@opral/monorepo/conversation/${token}/launch-plan`,
+	);
+	assert.equal(
+		conversationRoutePath("opral", "monorepo", uuid, null),
+		`/@opral/monorepo/conversation/${token}`,
+	);
+	assert.equal(
+		conversationRouteBase("opral", "monorepo", uuid),
+		`/@opral/monorepo/conversation/${token}`,
+	);
+	assert.equal(
+		conversationRoutePath("opral", "monorepo", uuid, "𐐀 plan"),
+		`/@opral/monorepo/conversation/${token}/${encodeURIComponent("𐐨-plan")}`,
+	);
+});
+
+void test("a conversation slug is display-only and rewritten from the title", () => {
+	const conversation = { id: uuid, title: "Launch plan" };
+	for (const splat of [
+		token,
+		`${token}/`,
+		`${token}/old-title`,
+		`${token}/launch-plan/`,
+		`${token}/launch/plan`,
+	]) {
+		assert.equal(parseEntityUrlSplat(splat)?.id, uuid);
+		assert.equal(
+			canonicalConversationSplat(splat, conversation),
+			`${token}/launch-plan`,
+		);
+	}
+	assert.equal(
+		canonicalConversationSplat(`${token}/launch-plan`, conversation),
+		null,
+	);
+	// Untitled: the bare id is canonical, a leftover slug is dropped.
+	assert.equal(
+		canonicalConversationSplat(token, { id: uuid, title: null }),
+		null,
+	);
+	assert.equal(
+		canonicalConversationSplat(`${token}/stale`, { id: uuid, title: null }),
+		token,
+	);
+	// Another conversation's URL is never silently adopted.
+	assert.equal(
+		canonicalConversationSplat(token, {
+			id: "017f22e2-79b0-7cc3-98c4-dc0c0c07398e",
+			title: "Other",
+		}),
+		"AX8i4nmwfMOYxNwMDAc5jg/other",
+	);
+});
+
+void test("conversation routes resolve by id within their repository", () => {
+	assert.equal(
+		conversationFromRoute(
+			`/@opral/monorepo/conversation/${token}/launch-plan`,
+			"opral",
+			"monorepo",
+		)?.id,
+		uuid,
+	);
+	assert.equal(
+		conversationFromRoute(
+			`/@opral/monorepo/conversation/${token}`,
+			"opral",
+			"monorepo",
+		)?.id,
+		uuid,
+	);
+	for (const pathname of [
+		`/@opral/other/conversation/${token}`,
+		`/@opral/monorepo/threads/${token}`,
+		`/@opral/monorepo/file/${token}`,
+		`/@opral/monorepo/conversation/not-a-token`,
+		`/@opral/monorepo/conversation/${uuid}`,
+	])
+		assert.equal(conversationFromRoute(pathname, "opral", "monorepo"), null);
+	// A conversation is not a file or folder entity.
+	assert.equal(
+		entityFromRoute(
+			`/@opral/monorepo/conversation/${token}`,
+			"opral",
+			"monorepo",
+		),
+		null,
+	);
 });

@@ -2,20 +2,22 @@
 
 ## Direct SQL calls
 
-For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for inventory and for obtaining contexts used by branch and file read tools.
+For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for its bounded path manifest and for obtaining contexts used by branch and URL tools.
 
 Example: `execute_sql({ lix_ref: "@acme/company", statements: [{ sql: "UPDATE lix_file SET content = CAST($1 AS BYTEA) WHERE path = $2", params: [{ kind: "text", value: "hello" }, { kind: "text", value: "/notes.txt" }] }] })`.
 
-DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. `execute_sql` is the one write path; `list_files` and `read_files` are read conveniences.
+DataFusion scalar expressions such as `REPLACE`, `CONCAT`, and `||` work inside a `BYTEA` cast for file updates. Use one statement per batch entry and explicit `ON CONFLICT (path)` targets. `query_sql` is the sole read path for repository data and files; `execute_sql` is the one write path.
 
 Execution errors return `isError: true` and a JSON text block, without success-schema `structuredContent`. Errors include the code, message, hint and details, plus zero-based `statement_index` when known. Two Lix errors are restated in the caller's terms: a move or write onto a path that is taken names that destination path (Lix names the parent directory by id) with the hint "The destination exists; pick another path or delete it first in the same batch.", and text bound straight into `lix_file.content` gets "Bind text as CAST($n AS BYTEA) with a text param." Write `outcome` is `not_committed` for known rejections, `unknown` for ambiguous transport/internal failures, and `committed` for response failures after confirmed completion. Correct rejected statements before retrying. Inspect affected state for unknown outcomes; never blindly replay a batch. Verify successful writes when the user requested validation, rather than routinely reading every write back.
 
 LixRay exposes Lix through a deliberately small MCP surface. SQL is the
-universal interface for repository data; file and entity CRUD stays in SQL. `get_entity_urls` resolves browser links without changing repository data or permissions. Lix SQL is a Postgres dialect subset.
+universal interface for repository data, including file reads and file/entity
+CRUD. `get_entity_urls` resolves browser links without changing repository
+data or permissions. Lix SQL is a Postgres dialect subset.
 
-Each tool carries its own guide in its description: the file read tools say
-how text and metadata come back; `query_sql` says
-how to discover tables and columns through `information_schema` (Lix is not
+Each SQL tool carries its guide in its description: `query_sql` says how to
+read bounded file content and discover tables and columns through
+`information_schema` (Lix is not
 SQLite; a query against `sqlite_master` gets that answer by name);
 `execute_sql` says how every write looks — upserts, moves, deletes, the guard
 and the checkpoint — and how to recover from failed writes. That is what an agent reads before its first
@@ -46,17 +48,11 @@ diagnostic timestamps or identifiers.
 ## Tools
 
 - `list_lixes`, `open_lix`: find a Lix and mint its context (see below).
-- `list_files`, `read_files`: preferred for ordinary file reads. `read_files`
-  returns `content` as text, `lixcol_metadata`, size, id, stable `url`, and readable `display_url`,
-  and the `commit_id` the read reflects. A file whose bytes are not UTF-8,
-  or that is over a megabyte, comes back with no `content` and an
-  `encoding` of `binary` or `too-large` saying which — base64 of an image
-  is not something the reader asking for it can use, and bytes are fetched
-  deliberately with `SELECT content FROM lix_file WHERE path = $1`.
-  Pass that `commit_id` to `execute_sql` as `last_seen_commit_id`.
-- `query_sql`, `execute_sql`: everything else. Files and directories are
-  tables (`lix_file`, `lix_directory`), and `execute_sql` is the one write
-  path: see [Writing files](#writing-files).
+- `query_sql`: the read path for repository data and files. Paths, metadata,
+  sizes, and content are selected with SQL. Use
+  [bounded file reads](#bounded-file-reads) for content.
+- `execute_sql`: the write path. Files and directories are tables (`lix_file`,
+  `lix_directory`); see [Writing files](#writing-files).
 - `get_entity_urls`: stable document links and readable display links for files and directories.
 - `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
   branch head.
@@ -72,6 +68,30 @@ When a call answers `context_expired`, `malformed_context`, or
 `invalid_context`, call `open_lix` again and take the new context from
 `structuredContent`; nothing else needs redoing, because contexts carry no
 state of their own.
+
+## Bounded file reads
+
+Agents previously overfetched file data through `read_files`: its SQL selected
+the full `content` blob, then the service applied the 1 MiB text cutoff after
+the bytes had already been fetched. This caused [#485](https://github.com/opral/lixray/issues/485): large-file hydration could exceed the transport response budget before the agent received the promised `too-large` metadata. An agent asking only for a size or excerpt still fetched the full file.
+
+Use `OCTET_LENGTH(content)` to measure a file, then
+`SUBSTRING(content FROM 1 FOR 4096)` to fetch only an initial byte range:
+
+```sql
+SELECT path, OCTET_LENGTH(content) AS size
+FROM lix_file
+WHERE path = $1;
+
+SELECT SUBSTRING(content FROM 1 FOR 4096) AS excerpt_bytes
+FROM lix_file
+WHERE path = $1;
+```
+
+The Lix engine pushes these expressions down to blob metadata and range reads,
+so size checks and excerpts do not materialize full content. Only select
+`CAST(content AS TEXT)` without `SUBSTRING` when the file is known to be small
+and its full content is needed.
 
 ## End-to-end trace correlation
 
@@ -89,7 +109,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
 
 1. Match the exact LixRay server name instead of searching broadly for generic
    repository or file tools.
-2. For SQL with an exact `@handle/slug` or Lix UUID, pass lix_ref directly to query_sql or execute_sql. For the file read tools, obtain context with open_lix or reuse a returned SQL context. Call `list_lixes` only when the target is unknown.
+2. For SQL with an exact `@handle/slug` or Lix UUID, pass lix_ref directly to query_sql or execute_sql. Call `list_lixes` only when the target is unknown.
 3. Use open_lix when inventory is useful. Retain the context returned by SQL or open_lix from `structuredContent`
    when the host provides it. Never copy a context token from the prose
    summary. Text-only hosts receive a later `content` text block that is the
@@ -98,9 +118,10 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    true, do not run another query just to list files; when it is false, the
    result carries `file_paths_sql`, the one `query_sql` statement that lists
    every path.
-4. Prefer read_files for ordinary file reads. Batch known paths together
-   instead of listing them first. Use query_sql for repository data and
-   advanced file queries; list_files discovers paths.
+4. Read files with `query_sql`: select only needed metadata and use
+   `OCTET_LENGTH(content)` for size or bounded `SUBSTRING` for excerpts.
+   Avoid full-content projections unless the file is known to be small and its
+   full content is needed.
 5. Before guessing dynamic table or column names, query `information_schema`.
 6. Write with `execute_sql`, one call per coherent change: its creates,
    updates, moves, renames, copies, deletes and directory changes in one
@@ -132,7 +153,9 @@ zero or more `resource_link` content blocks, and the full `structuredContent`
 as JSON text for hosts that only show text. The links are what a host renders
 as clickable chips inside the step: `open_lix` links the repository, and an
 `execute_sql` batch links each file or directory it wrote or updated, with
-the same readable `display_url` that `get_entity_urls` would return. File read tools return both URL forms in their results, and a failed call has the summary and the JSON text only. The summary names the
+the same readable `display_url` that `get_entity_urls` would return. Use
+`get_entity_urls` when SQL results need browser links. A failed call has the
+summary and the JSON text only. The summary names the
 action ("Wrote sales/lead-research.md · Updated leads.csv · 7 rows
 affected"), so an agent's narration is not the only trace of what happened.
 
@@ -202,8 +225,6 @@ repository `url`, a one-line summary ("3 files changed between latest
 checkpoint … and working: …"), file links, and the same card. A ref that names
 nothing is refused with a hint before Lix is asked to compare. Removed files
 have no current entity to open, so both URL fields point to the repository.
-
-`read_files` returns its text and `commit_id` from one snapshot.
 
 SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
 read; `execute_sql` has one top-level `commit: { before, after } | null` for the
@@ -292,7 +313,7 @@ as an ordered batch that commits or rolls back as a whole.
   have no trailing slash.
 - `checkpoint: true` marks the batch's result as a checkpoint and returns
   `checkpoint_commit_id`.
-- `last_seen_commit_id` (the `commit_id` of `read_files`, or `commit.after`
+- `last_seen_commit_id` (the `commit_id` of `open_lix`, or `commit.after`
   of an earlier batch) guards the batch. It runs in one transaction that
   finds the files and directories that changed between that commit and the
   head, runs the statements, and compares each of those entities as the
@@ -310,7 +331,7 @@ ids and links survive), leave a redirect where one was, and checkpoint:
 ```json
 {
   "lix_ref": "@acme/company",
-  "last_seen_commit_id": "<commit_id from read_files>",
+  "last_seen_commit_id": "<commit_id from open_lix>",
   "checkpoint": true,
   "statements": [
     {

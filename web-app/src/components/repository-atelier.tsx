@@ -6,6 +6,9 @@ import {
 	createShellRouteHydrationGuard,
 } from "~/lib/shell-navigation-queue";
 import {
+	canonicalConversationSplat,
+	conversationRoutePath,
+	conversationUrlSplat,
 	entityUrlSplat,
 	entityRoutePath,
 	findLixEntity,
@@ -15,11 +18,12 @@ import {
 import {
 	Atelier,
 	AtelierSkeleton,
+	ATELIER_CONVERSATION_VIEW_ID,
+	selectConversationSummary,
 	type AtelierEvent,
 	type AtelierHandle,
 	type AtelierProps,
 } from "@opral/atelier";
-import "@opral/atelier/style.css";
 import {
 	Outlet,
 	useNavigate,
@@ -49,12 +53,17 @@ import {
 	type ReadShareAccess,
 } from "~/components/repository-share-dialog";
 import { Button } from "~/components/ui/button";
-import { createAtelierDocumentLinks } from "~/lib/atelier-document-links";
+import {
+	createAtelierDocumentLinks,
+	createAtelierNavigation,
+} from "~/lib/atelier-document-links";
 import { createAtelierTelemetryHandler } from "~/lib/atelier-telemetry";
 import { isDemoModeEnabled } from "~/lib/demo-client";
 import { DEMO_AUTH_TOKEN } from "~/lib/demo-identity";
 import {
 	atelierBranchSearch,
+	conversationFromViewState,
+	conversationSlugText,
 	isLixBranchNotFoundError,
 	resolveAtelierRouteBranchId,
 	shouldNormalizeInitialBranch,
@@ -111,6 +120,16 @@ import {
 	REPOSITORY_OPEN_MARKS,
 	resetRepositoryOpenPerformance,
 } from "~/lib/repository-open-performance";
+
+/** The repository sub-route the URL names; null is the repository root. */
+type RouteChildKind =
+	| "file"
+	| "folder"
+	| "conversation"
+	| "team"
+	| "settings"
+	| "sql"
+	| null;
 
 interface RepositoryAtelierProps {
 	repositoryId: string;
@@ -210,11 +229,14 @@ export function RepositoryAtelier({
 	const routeParams = useParams({ strict: false });
 	const routeSplat = "_splat" in routeParams ? routeParams._splat : undefined;
 	const repositoryRootPath = `/@${namespace}/${repositorySlug}`;
-	const routeChildKind: "file" | "folder" | "team" | "settings" | "sql" | null =
-		pathname.startsWith(`${repositoryRootPath}/file/`)
-			? "file"
-			: pathname.startsWith(`${repositoryRootPath}/folder/`)
-				? "folder"
+	const routeChildKind: RouteChildKind = pathname.startsWith(
+		`${repositoryRootPath}/file/`,
+	)
+		? "file"
+		: pathname.startsWith(`${repositoryRootPath}/folder/`)
+			? "folder"
+			: pathname.startsWith(`${repositoryRootPath}/conversation/`)
+				? "conversation"
 				: pathname === `${repositoryRootPath}/team`
 					? "team"
 					: pathname === `${repositoryRootPath}/settings`
@@ -249,10 +271,15 @@ export function RepositoryAtelier({
 	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
 		null,
 	);
+	// The open conversation's name, as its tab shows it, for the Share dialog.
+	const [conversationName, setConversationName] = useState<{
+		id: string;
+		name: string;
+	} | null>(null);
 	const activeLixRef = useRef<RepositoryLixSession | null>(null);
 	const pathnameRef = useRef(pathname);
 	const routeChildRef = useRef<{
-		kind: "file" | "folder" | "team" | "settings" | "sql" | null;
+		kind: RouteChildKind;
 		splat: string | undefined;
 	}>({ kind: routeChildKind, splat: routeSplat });
 	const branchIdRef = useRef(branchId);
@@ -542,8 +569,9 @@ export function RepositoryAtelier({
 			Share
 		</span>
 	);
-	// Sharing is available for the whole repository as well as individual files;
-	// the current browser URL is captured when the dialog is opened.
+	// Sharing is available for the whole repository as well as individual files
+	// and conversations; the current browser URL is captured when the dialog is
+	// opened, so Share always shares what is open.
 	const resolveRouteResourcePath = async () => {
 		if (routeChildKind !== "file" && routeChildKind !== "folder") return "/";
 		const entity = parseEntityUrlSplat(routeSplat);
@@ -581,6 +609,11 @@ export function RepositoryAtelier({
 							canUnpublish:
 								routeChildKind === null && currentAccess.role === "admin",
 						};
+					}
+					// A conversation is not published on its own; its access is
+					// the repository's, and the dialog offers members its link.
+					if (routeChildKind === "conversation") {
+						return { status: "private", canPublish: false };
 					}
 					if (routeChildKind !== "file" && routeChildKind !== "folder") {
 						return {
@@ -630,6 +663,8 @@ export function RepositoryAtelier({
 					return { status: "private", canPublish: true };
 				}}
 				publishReadLink={async () => {
+					if (routeChildKind === "conversation")
+						throw new Error("A conversation follows the repository's access.");
 					if (routeChildKind === "file" || routeChildKind === "folder") {
 						const path = await resolveRouteResourcePath();
 						const { error } = await client.rpc("publish_lix_resource", {
@@ -648,6 +683,8 @@ export function RepositoryAtelier({
 					await refresh({ organizationId: namespaceId, repositoryId });
 				}}
 				unpublishReadLink={async () => {
+					if (routeChildKind === "conversation")
+						throw new Error("A conversation follows the repository's access.");
 					if (routeChildKind === "file" || routeChildKind === "folder") {
 						const { error } = await client.rpc("unpublish_lix_resource", {
 							p_lix_id: repositoryId,
@@ -669,9 +706,18 @@ export function RepositoryAtelier({
 						? "file"
 						: routeChildKind === "folder"
 							? "folder"
-							: "repository"
+							: routeChildKind === "conversation"
+								? "conversation"
+								: "repository"
 				}
-				documentName={documentName}
+				documentName={
+					routeChildKind === "conversation"
+						? conversationName &&
+							conversationName.id === parseEntityUrlSplat(routeSplat)?.id
+							? conversationName.name
+							: "conversation"
+						: documentName
+				}
 				onOpenTeam={() => {
 					void instance?.views
 						.open(LIXRAY_PEOPLE_EXTENSION_ID, { newTab: true })
@@ -755,6 +801,22 @@ export function RepositoryAtelier({
 				await navigate({
 					to: "/@{$namespace}/$repository/sql",
 					params: { namespace, repository: repositorySlug },
+					search,
+					replace,
+				});
+				return;
+			}
+			if (
+				routeChild.kind === "conversation" &&
+				routeChild.splat !== undefined
+			) {
+				await navigate({
+					to: "/@{$namespace}/$repository/conversation/$",
+					params: {
+						namespace,
+						repository: repositorySlug,
+						_splat: routeChild.splat,
+					},
 					search,
 					replace,
 				});
@@ -863,6 +925,14 @@ export function RepositoryAtelier({
 				routeLifecycle.current.cancel();
 				routeSyncedRef.current = true;
 			} else if (event.type !== "main_view_activated") return;
+			if (event.viewKind === ATELIER_CONVERSATION_VIEW_ID) {
+				const named = conversationFromViewState(event.state);
+				if (named?.slugText)
+					setConversationName({
+						id: named.conversationId,
+						name: named.slugText,
+					});
+			}
 			const revision = ++navigationRevision;
 			if (!routeSyncedRef.current) return;
 			// Keep a pending shell marker until its own route commit consumes it.
@@ -932,6 +1002,85 @@ export function RepositoryAtelier({
 					console.error("Unable to resolve item URL", error);
 				}
 			};
+			// A conversation tab claims /conversation/<id>/<title>. Its view
+			// reports again once it has read the conversation, and whenever the
+			// title changes: the same conversation's URL is then replaced, not
+			// pushed, so a rename leaves no history entry behind.
+			const navigateConversation = async (
+				conversationId: string,
+				slugText: string | null,
+			) => {
+				const session = activeLixRef.current;
+				if (!session) return;
+				const stillCurrent = (startingPath: string) =>
+					revision === navigationRevision &&
+					session === activeLixRef.current &&
+					startingPath === pathnameRef.current &&
+					activeBranchId === session.activeBranchSnapshot();
+				try {
+					const startingPath = await navigationQueue.settle(
+						() => pathnameRef.current,
+					);
+					if (startingPath === null || !stillCurrent(startingPath)) return;
+					const current = routeChildRef.current;
+					const routed =
+						current.kind === "conversation" &&
+						parseEntityUrlSplat(current.splat)?.id === conversationId;
+					let name = slugText;
+					if (name === null) {
+						// Not read yet: the URL already names it, or the summary does.
+						if (routed) return;
+						const summary = await selectConversationSummary(
+							session.lix,
+							conversationId,
+						).catch(() => null);
+						if (!stillCurrent(startingPath)) return;
+						name = summary ? conversationSlugText(summary) : null;
+					}
+					if (
+						routed &&
+						canonicalConversationSplat(current.splat, {
+							id: conversationId,
+							title: name,
+						}) === null
+					)
+						return;
+					// Only a new conversation re-runs the route; a renamed slug
+					// does not, so it leaves no marker to consume.
+					if (!routed)
+						shellNavigationRef.current = `conversation:${conversationId}`;
+					await navigationQueue.navigate(
+						conversationRoutePath(
+							namespace,
+							repositorySlug,
+							conversationId,
+							name,
+						),
+						() =>
+							navigate({
+								to: "/@{$namespace}/$repository/conversation/$",
+								params: {
+									namespace,
+									repository: repositorySlug,
+									_splat: conversationUrlSplat(conversationId, name),
+								},
+								search,
+								replace: routed,
+							}),
+					);
+				} catch (error) {
+					console.error("Unable to resolve conversation URL", error);
+				}
+			};
+			if (event.viewKind === ATELIER_CONVERSATION_VIEW_ID) {
+				const conversation = conversationFromViewState(event.state);
+				if (conversation)
+					void navigateConversation(
+						conversation.conversationId,
+						conversation.slugText,
+					);
+				return;
+			}
 			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
 				// Home is the primary Files surface (flow A): drilled into a
 				// folder it claims the /folder URL, at the root it claims the
@@ -1181,6 +1330,13 @@ export function RepositoryAtelier({
 						// relative links; mentions write the permanent form.
 						documentLinks: createAtelierDocumentLinks({
 							origin: window.location.origin,
+							namespace,
+							repository: repositorySlug,
+							activeBranchId: () => session.activeBranchSnapshot(),
+							defaultBranchId: () => session.defaultBranchSnapshot(),
+						}),
+						// Real URLs for Atelier's own links (Open conversation).
+						navigation: createAtelierNavigation({
 							namespace,
 							repository: repositorySlug,
 							activeBranchId: () => session.activeBranchSnapshot(),
@@ -1564,7 +1720,7 @@ function RepositoryShareControl({
 	loadReadAccess: () => Promise<ReadShareAccess>;
 	publishReadLink: () => Promise<void>;
 	unpublishReadLink: () => Promise<void>;
-	publicationLabel: "file" | "folder" | "repository";
+	publicationLabel: "file" | "folder" | "conversation" | "repository";
 	documentName: string;
 	onOpenTeam?: () => void;
 }) {
@@ -1628,9 +1784,9 @@ function RepositoryShareControl({
 				}
 				openShare();
 			}}
-			onCopied={() => {
+			onCopied={(_url, mode) => {
 				captureTelemetry(PRODUCT_EVENTS.shareLinkCopied, {
-					share_mode: "public",
+					share_mode: mode,
 				});
 			}}
 			trigger={

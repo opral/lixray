@@ -196,6 +196,71 @@ export function entityFromRoute(
 	return null;
 }
 
+/**
+ * Conversations mount at `/conversation/<token>/<title-slug>`, the file and
+ * folder shape: the token is the `lix_conversation` UUID and resolves; the
+ * slug is the conversation's name, one segment, for a human reading the URL.
+ * A conversation has no path, so its name is its title — else what it is
+ * attached to — and it may change without the link changing.
+ */
+export function conversationUrlSplat(
+	id: string,
+	title?: string | null,
+): string {
+	const slug = title ? slugSegment(title) : "";
+	return slug && slug !== "." && slug !== ".."
+		? `${encodeEntityId(id)}/${slug}`
+		: encodeEntityId(id);
+}
+
+/**
+ * The splat a conversation URL should carry, or null when it already does.
+ * Like {@link canonicalEntitySplat}, a missing, stale, or mistyped slug is
+ * rewritten; unlike it, the display part is a single segment.
+ */
+export function canonicalConversationSplat(
+	splat: string | undefined,
+	conversation: { id: string; title?: string | null },
+): string | null {
+	const canonical = conversationUrlSplat(conversation.id, conversation.title);
+	const current = parseEntityUrlSplat(splat);
+	if (!current || current.id !== conversation.id) return canonical;
+	if ((splat ?? "").endsWith("/")) return canonical;
+	return `${current.token}${current.path ?? ""}` === canonical
+		? null
+		: canonical;
+}
+
+export function conversationRouteBase(
+	namespace: string,
+	repository: string,
+	id: string,
+): string {
+	return `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/conversation/${encodeEntityId(id)}`;
+}
+
+export function conversationRoutePath(
+	namespace: string,
+	repository: string,
+	id: string,
+	title?: string | null,
+): string {
+	const slug = conversationUrlSplat(id, title).split("/")[1];
+	return `${conversationRouteBase(namespace, repository, id)}${slug ? `/${encodeURIComponent(slug)}` : ""}`;
+}
+
+/** The conversation a repository pathname names, if it is a conversation URL. */
+export function conversationFromRoute(
+	pathname: string,
+	namespace: string,
+	repository: string,
+): { id: string } | null {
+	const prefix = `/@${encodeURIComponent(namespace)}/${encodeURIComponent(repository)}/conversation/`;
+	if (!pathname.startsWith(prefix)) return null;
+	const conversation = parseEntityUrlSplat(pathname.slice(prefix.length));
+	return conversation ? { id: conversation.id } : null;
+}
+
 export async function resolvePublishedEntity(args: {
 	namespace: string;
 	repository: string;

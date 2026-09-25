@@ -12,6 +12,7 @@ test("operator explicitly provisions fixed demo IDs through the private host end
 	await provisionRepositories({
 		mode: "create-new",
 		env,
+		webUrl: "http://127.0.0.1:8790",
 		fetchImpl: async (url, request) => {
 			if (url.pathname === "/healthz")
 				return new Response(null, { status: 200 });
@@ -19,13 +20,19 @@ test("operator explicitly provisions fixed demo IDs through the private host end
 			return new Response(null, { status: 201 });
 		},
 	});
-	assert.equal(calls.length, 2);
+	assert.equal(calls.length, 4);
 	assert.equal(
 		calls[0].url,
 		"http://lix-private:8080/internal/repositories/00000000-0000-4000-8000-000000000002/provision",
 	);
 	assert.equal(calls[0].request.headers.Authorization, "Bearer private-token");
 	assert.deepEqual(JSON.parse(calls[0].request.body), { mode: "create-new" });
+	assert.equal(
+		calls[1].url,
+		"http://127.0.0.1:8790/internal/repositories/00000000-0000-4000-8000-000000000002/plugins/markdown",
+	);
+	assert.equal(calls[1].request.method, "POST");
+	assert.equal(calls[1].request.headers.Authorization, "Bearer private-token");
 });
 
 test("failed adoption never falls back to creating or ignores a tombstone", async () => {
@@ -106,7 +113,15 @@ test("operator wakes the private service before any mutation", async () => {
 			return new Response(null, { status: 201 });
 		},
 	});
-	assert.deepEqual(methods, ["GET", "GET", "GET", "POST", "POST"]);
+	assert.deepEqual(methods, [
+		"GET",
+		"GET",
+		"GET",
+		"POST",
+		"POST",
+		"POST",
+		"POST",
+	]);
 	assert.deepEqual(sleeps, [5000, 5000]);
 });
 
@@ -153,7 +168,27 @@ for (const alias of [
 					return new Response(null, { status: 200 });
 				},
 			});
-			assert.deepEqual(urls, Array(3).fill(primary ?? "http://legacy:8080"));
+			assert.deepEqual(urls, [
+				primary ?? "http://legacy:8080",
+				primary ?? "http://legacy:8080",
+				"http://127.0.0.1:8080",
+				primary ?? "http://legacy:8080",
+				"http://127.0.0.1:8080",
+			]);
 		}
 	});
 }
+
+test("plugin installation failure stops preview provisioning", async () => {
+	await assert.rejects(
+		provisionRepositories({
+			mode: "create-new",
+			env,
+			fetchImpl: async (url) =>
+				new Response(null, {
+					status: url.pathname.endsWith("/plugins/markdown") ? 503 : 200,
+				}),
+		}),
+		/Markdown plugin installation failed \(HTTP 503\)/,
+	);
+});

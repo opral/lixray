@@ -56,7 +56,7 @@ process.stdout.write(JSON.stringify({ args: process.argv.slice(2), prefix: proce
     rmSync(fixtureBin, { recursive: true, force: true });
   }
   assert.match(compose, /S3_PREFIX: \$\{LIXRAY_STORAGE_PREFIX:-local\}/);
-  assert.match(compose, /local\/lixray\/local\/perf\/\$\$\{LIXRAY_PERF_REPOSITORY\}\//);
+  assert.match(compose, /s3:\/\/lixray\/local\/perf\/\$\$\{LIXRAY_PERF_REPOSITORY\}\//);
 });
 
 test("local Lix server advertises the web gateway origin", () => {

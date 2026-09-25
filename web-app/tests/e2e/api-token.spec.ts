@@ -22,40 +22,47 @@ test("Account tokens have generated names, creation dates and independent deleti
 		page.getByRole("button", { name: "Account menu" }),
 	).toBeVisible();
 
-	const { lixId, otherId, namespace } = await page.evaluate(async () => {
-		const moduleUrl = "/src/lib/supabase.ts";
-		const { getBrowserSupabaseClient } = (await import(
-			/* @vite-ignore */ moduleUrl
-		)) as typeof import("../../src/lib/supabase");
-		const client = getBrowserSupabaseClient();
-		const { data, error } = await client.rpc("bootstrap_personal_namespace");
-		if (error || !data?.[0]) throw new Error("Local account bootstrap failed");
-		const {
-			data: { session },
-		} = await client.auth.getSession();
-		if (!session) throw new Error("Local session required");
-		async function create(name: string) {
-			const response = await fetch("/lix/v1", {
-				method: "POST",
-				headers: {
-					authorization: `Bearer ${session!.access_token}`,
-					"idempotency-key": crypto.randomUUID(),
-					"x-lixray-namespace-id": data![0]!.namespace_id,
-					"x-lixray-repository-name": encodeURIComponent(name),
-				},
-			});
-			if (!response.ok)
-				throw new Error(
-					`Test repository creation failed: ${response.status} ${await response.text()}`,
-				);
-			return ((await response.json()) as { id: string }).id;
-		}
-		return {
-			lixId: await create("API token test"),
-			otherId: await create("Other API token test"),
-			namespace: data[0].namespace_handle,
-		};
-	});
+	const { namespace, namespaceId, accessToken } = await page.evaluate(
+		async () => {
+			const moduleUrl = "/src/lib/supabase.ts";
+			const { getBrowserSupabaseClient } = (await import(
+				/* @vite-ignore */ moduleUrl
+			)) as typeof import("../../src/lib/supabase");
+			const client = getBrowserSupabaseClient();
+			const { data, error } = await client.rpc("bootstrap_personal_namespace");
+			if (error || !data?.[0])
+				throw new Error("Local account bootstrap failed");
+			const {
+				data: { session },
+			} = await client.auth.getSession();
+			if (!session) throw new Error("Local session required");
+			return {
+				namespace: data[0].namespace_handle,
+				namespaceId: data[0].namespace_id,
+				accessToken: session.access_token,
+			};
+		},
+	);
+	const runId = crypto.randomUUID();
+	async function create(name: string) {
+		const idempotencyKey = crypto.randomUUID();
+		const response = await request.post(`${baseURL}/lix/v1`, {
+			maxRetries: 2,
+			headers: {
+				authorization: `Bearer ${accessToken}`,
+				"idempotency-key": idempotencyKey,
+				"x-lixray-namespace-id": namespaceId,
+				"x-lixray-repository-name": encodeURIComponent(name),
+			},
+		});
+		if (!response.ok())
+			throw new Error(
+				`Test repository creation failed: ${response.status()} ${await response.text()}`,
+			);
+		return ((await response.json()) as { id: string }).id;
+	}
+	const lixId = await create(`API token test ${runId}`);
+	const otherId = await create(`Other API token test ${runId}`);
 	const createdIds = [lixId, otherId];
 	try {
 		await page.goto(`/settings/@${namespace}`);
@@ -117,6 +124,35 @@ test("Account tokens have generated names, creation dates and independent deleti
 			page.getByRole("button", { name: "Generate token", exact: true }),
 		).toBeEnabled();
 		await expect(secret).toHaveCount(0);
+
+		// Vite may reload the page while discovering these browser-only SDK
+		// modules. Let that happen before the stateful SDK assertions below.
+		await expect
+			.poll(
+				async () => {
+					try {
+						await page.evaluate(async () => {
+							await import(
+								/* @vite-ignore */ "/node_modules/@lix-js/sdk/dist/index.js"
+							);
+							await import(
+								/* @vite-ignore */ "/node_modules/@lix-js/storage-opfs/dist/index.js"
+							);
+						});
+						return true;
+					} catch (error) {
+						if (
+							/Execution context was destroyed|Failed to fetch/.test(
+								String(error),
+							)
+						)
+							return false;
+						throw error;
+					}
+				},
+				{ timeout: 30_000 },
+			)
+			.toBe(true);
 
 		// Exercise both SDK modes against the real local gateway and Lix server.
 		const paths = await page.evaluate(
@@ -192,10 +228,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 						),
 					],
 				);
-				const history = (await local.execute("SELECT count(*) FROM lix_log()"))
-					.rows;
 				return {
-					history,
 					bytes: Array.from(
 						new Uint8Array(
 							await new Response(local.exportSnapshot()).arrayBuffer(),
@@ -223,7 +256,7 @@ test("Account tokens have generated names, creation dates and independent deleti
 			url: string;
 		};
 		createdIds.push(remote.id);
-		const importedHistory = await page.evaluate(
+		const importedState = await page.evaluate(
 			async ({ token, url }) => {
 				const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
 				const { openLix } = (await import(
@@ -233,14 +266,38 @@ test("Account tokens have generated names, creation dates and independent deleti
 					server: { url, headers: { Authorization: `Bearer ${token}` } },
 				});
 				try {
-					return (await hosted.execute("SELECT count(*) FROM lix_log()")).rows;
+					return {
+						files: (
+							await hosted.execute(
+								"SELECT path FROM lix_file WHERE path IN ('/.lix/plugins/plugin_markdown.lixplugin', '/private.txt', '/public.md', '/shared.txt') ORDER BY path",
+							)
+						).rows,
+						workingFiles: (
+							await hosted.execute(
+								"SELECT to_path FROM lix_diff('lix_file') WHERE to_path IN ('/.lix/plugins/plugin_markdown.lixplugin', '/private.txt', '/public.md', '/shared.txt') ORDER BY to_path",
+							)
+						).rows,
+					};
 				} finally {
 					await hosted.close();
 				}
 			},
 			{ token: first, url: remote.url },
 		);
-		expect(importedHistory).toEqual(snapshot.history);
+		// Hosting checkpoints only its plugin; imported files remain working changes.
+		expect(importedState).toEqual({
+			files: [
+				{ path: "/.lix/plugins/plugin_markdown.lixplugin" },
+				{ path: "/private.txt" },
+				{ path: "/public.md" },
+				{ path: "/shared.txt" },
+			],
+			workingFiles: [
+				{ to_path: "/private.txt" },
+				{ to_path: "/public.md" },
+				{ to_path: "/shared.txt" },
+			],
+		});
 		const publication = await request.post(
 			`/api/repositories/${remote.id}/share?path=/shared.txt`,
 			{ headers: { Authorization: `Bearer ${first}` } },

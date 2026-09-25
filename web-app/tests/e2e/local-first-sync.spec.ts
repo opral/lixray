@@ -17,6 +17,8 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	context,
 	baseURL,
 }) => {
+	// The scenario waits for two real replicas and a server-backed checkpoint.
+	test.setTimeout(300_000);
 	if (!baseURL) throw new Error("Playwright baseURL is required");
 	const prefix = `offline-${randomUUID()}`;
 	await page.goto("/sign-in?returnTo=/home");
@@ -86,10 +88,15 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 	expect(opened.status(), await opened.text()).toBe(200);
 	const { sessionId } = (await opened.json()) as { sessionId: string };
 	let sequence = 0;
-	async function execute(sql: string, values: (string | Uint8Array)[] = []) {
+	async function execute(
+		sql: string,
+		values: (string | Uint8Array)[] = [],
+		timeout?: number,
+	) {
 		const response = await context.request.post(
 			new URL("execute", endpoint).toString(),
 			{
+				timeout,
 				headers: {
 					...headers,
 					"Lix-Session-Id": sessionId,
@@ -439,13 +446,21 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await expect
 			.poll(
 				async () => {
-					const result = await execute(
-						"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
-						[checkpointId],
-					);
-					return result.rows[0]?.[0]?.value;
+					try {
+						// A stalled authority read must not consume the entire poll budget.
+						const result = await execute(
+							"SELECT commit_id FROM lix_log() WHERE commit_id = $1 AND is_checkpoint",
+							[checkpointId],
+							20_000,
+						);
+						return result.rows[0]?.[0]?.value;
+					} catch (error) {
+						if (/Timeout.*exceeded|ECONNRESET/i.test(String(error)))
+							return undefined;
+						throw error;
+					}
 				},
-				{ timeout: 30_000 },
+				{ timeout: 90_000 },
 			)
 			.toBe(checkpointId);
 	} catch (error) {

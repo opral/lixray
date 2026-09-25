@@ -10,6 +10,7 @@ import { handlePublishedEntity, type EntityKind } from "./published-entity.ts";
 import { deleteHostedRepository } from "./repository-delete.ts";
 import { handleFileSharing } from "./repository-file-sharing.ts";
 import { createHostedRepository } from "./repository-create.ts";
+import { installMarkdownPlugin } from "./markdown-plugin.ts";
 import { validateMcpJwtClaims } from "../mcp/auth.ts";
 import { jwtVerify, type JWTPayload } from "jose";
 import {
@@ -85,6 +86,7 @@ import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
 export { validateMcpJwtClaims } from "../mcp/auth.ts";
 
 export interface WorkerEnv {
+	PORT?: string;
 	SUPABASE_URL?: string;
 	SUPABASE_PUBLISHABLE_KEY?: string;
 	/** Server-only credential for registering protocol-created repository ownership. */
@@ -151,6 +153,7 @@ interface HandleRequestOptions {
 	lixSummaries?: ReadonlyArray<LixSummary>;
 	fallback?: (request: Request, env: WorkerEnv) => Promise<Response>;
 	fetch?: typeof fetch;
+	installMarkdownPlugin?: typeof installMarkdownPlugin;
 	executionContext?: RequestExecutionContext;
 	recordMcpLixConnection?: RecordMcpLixConnection;
 	captureSignup?: typeof captureUserSignedUp;
@@ -260,6 +263,9 @@ const NAMESPACE_PROFILE_ACTIVITY_REFRESH_PATH =
 	/^\/profile\/([^/]+)\/activity\/refresh$/;
 const UUID_PATTERN =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+// Private host setup uses Lix's seeded active system account. A syntactically
+// valid but unregistered UUID cannot open a Lix session.
+const REPOSITORY_PROVISIONER_ID = "00000000-0000-7000-8000-000000000001";
 const TRUSTED_IDEMPOTENCY_PRINCIPAL_HEADER = "X-Lixray-Idempotency-Principal";
 // Keep server-owned public reads attributed to Lix's built-in anonymous
 // account. Protocol principals are persisted as lix_account IDs, so an
@@ -413,6 +419,44 @@ export async function handleRequest(
 		);
 	}
 
+	const provisionMarkdownMatch =
+		/^\/internal\/repositories\/([0-9a-f-]{36})\/plugins\/markdown$/.exec(
+			url.pathname,
+		);
+	if (provisionMarkdownMatch) {
+		if (request.method !== "POST")
+			return new Response("Method not allowed\n", { status: 405 });
+		if (!UUID_PATTERN.test(provisionMarkdownMatch[1]!))
+			return new Response("Invalid repository ID\n", { status: 400 });
+		if (
+			!env.LIXRAY_INTERNAL_TOKEN ||
+			request.headers.get("authorization") !==
+				`Bearer ${env.LIXRAY_INTERNAL_TOKEN}`
+		)
+			return new Response("Unauthorized\n", { status: 401 });
+		try {
+			await (options.installMarkdownPlugin ?? installMarkdownPlugin)(
+				new Request(
+					new URL(url.pathname, `http://127.0.0.1:${env.PORT ?? 8080}`),
+					{ method: "POST" },
+				),
+				env,
+				{ userId: REPOSITORY_PROVISIONER_ID },
+				provisionMarkdownMatch[1]!,
+				options.fetch,
+			);
+			return new Response(null, { status: 204 });
+		} catch (error) {
+			console.error("Provisioned repository Markdown plugin install failed", {
+				repositoryId: provisionMarkdownMatch[1],
+				error,
+			});
+			return new Response("Markdown plugin installation failed\n", {
+				status: 503,
+			});
+		}
+	}
+
 	if (url.pathname === "/api/published/entity") {
 		return handlePublishedEntity(
 			request,
@@ -486,7 +530,13 @@ export async function handleRequest(
 		if (auth.auth.isDemo)
 			return new Response("Sign in to create a repository", { status: 403 });
 		return withRemoteLixCors(
-			await createHostedRepository(request, env, auth.auth, options.fetch),
+			await createHostedRepository(
+				request,
+				env,
+				auth.auth,
+				options.fetch,
+				options.installMarkdownPlugin,
+			),
 			request,
 		);
 	}

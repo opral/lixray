@@ -1,13 +1,7 @@
 import { withSpan } from "../telemetry.ts";
 import { entityRouteBase, entityRoutePath } from "../lib/entity-url.ts";
-import {
-	FILE_CHANGES_SQL,
-	READ_FILES_SQL,
-	readFileContent,
-	escapeLike,
-	normalizeFilePath,
-	type FileRead,
-} from "./file-tools.ts";
+import { FILE_CHANGES_SQL } from "./file-diff-query.ts";
+import { readFileContent } from "./file-conflict-content.ts";
 import { base64ToBytes, bytesToBase64 } from "../lib/base64.ts";
 import {
 	destinationFromParams,
@@ -723,87 +717,6 @@ export class LixService {
 		};
 	}
 
-	/** Files by path prefix and name, with IDs and both URL forms. */
-	async listFiles(
-		contextToken: string,
-		filter: { directory?: string; name?: string },
-		origin = "https://lixray.com",
-	): Promise<{
-		context: string;
-		commitId: string;
-		files: Array<{
-			id: string;
-			path: string;
-			url: string;
-			display_url: string;
-		}>;
-		truncated: boolean;
-	}> {
-		const context = await this.readContext(contextToken);
-		const conditions: string[] = [];
-		const params: WireValue[] = [];
-		if (filter.directory) {
-			const directory = filter.directory.trim().replace(/\/+$/, "");
-			if (!directory.startsWith("/"))
-				throw createLixError(
-					"invalid_request",
-					"directory must be an absolute path such as /gtm.",
-				);
-			params.push({ kind: "text", value: `${escapeLike(directory)}/%` });
-			conditions.push(`path LIKE $${params.length} ESCAPE '\\'`);
-		}
-		if (filter.name) {
-			params.push({
-				kind: "text",
-				value: `%${escapeLike(filter.name.trim().toLowerCase())}%`,
-			});
-			conditions.push(`LOWER(name) LIKE $${params.length} ESCAPE '\\'`);
-		}
-		const where = conditions.length ? ` WHERE ${conditions.join(" AND ")}` : "";
-		const [response, commitId, url] = await Promise.all([
-			this.client.execute(context.lixId, context.branchId, {
-				sql: `SELECT id, path FROM lix_file${where} ORDER BY path LIMIT ${LIST_FILES_LIMIT + 1}`,
-				params,
-			}),
-			this.commitId(context.lixId, context.branchId),
-			this.entityUrl(context, origin),
-		]);
-		const rows = readIdPathRows(response);
-		return {
-			context: contextToken,
-			commitId,
-			files: rows
-				.slice(0, LIST_FILES_LIMIT)
-				.map((file) => ({ ...file, ...url("file", file) })),
-			truncated: rows.length > LIST_FILES_LIMIT,
-		};
-	}
-
-	/** Files by absolute path: bytes, metadata, and the commit the read reflects. */
-	async readFiles(
-		contextToken: string,
-		paths: readonly string[],
-		origin = "https://lixray.com",
-	): Promise<ReadFilesResult> {
-		const context = await this.readContext(contextToken);
-		const normalized = paths.map(normalizeFilePathOrThrow);
-		const [snapshot, url] = await Promise.all([
-			this.client.transaction(context.lixId, context.branchId, async (tx) => ({
-				files: await this.fileRows(context, normalized, tx),
-				commitId: await this.commitId(context.lixId, context.branchId, tx),
-			})),
-			this.entityUrl(context, origin),
-		]);
-		const { files, commitId } = snapshot.value;
-		const found = new Set(files.map((file) => file.path));
-		return {
-			context: contextToken,
-			commitId,
-			files: files.map((file) => ({ ...file, ...url("file", file) })),
-			missing: normalized.filter((path) => !found.has(path)),
-		};
-	}
-
 	/**
 	 * The files that changed between two commits, with both sides' bytes.
 	 *
@@ -1005,7 +918,7 @@ export class LixService {
 					"invalid_request",
 					`last_seen_commit_id could not be compared with the branch head: ${message}`,
 					{
-						hint: "Pass the commit_id read_files returned, or commit.after from an earlier execute_sql result.",
+						hint: "Pass the commit_id returned by open_lix, or commit.after from an earlier execute_sql result.",
 					},
 				);
 			}
@@ -1079,61 +992,6 @@ export class LixService {
 			}
 		}
 		return [...conflicts.values()];
-	}
-
-	private async fileRows(
-		context: LixContext,
-		paths: readonly string[],
-		tx?: TransactionClient,
-	): Promise<Array<ReadFile>> {
-		if (paths.length === 0) return [];
-		const response = await (
-			tx?.execute ??
-			((request) =>
-				this.client.execute(context.lixId, context.branchId, request))
-		)({
-			sql: READ_FILES_SQL(paths.length),
-			params: paths.map((path): WireValue => ({ kind: "text", value: path })),
-		});
-		const columns = {
-			id: response.columns.indexOf("id"),
-			path: response.columns.indexOf("path"),
-			content: response.columns.indexOf("content"),
-			metadata: response.columns.indexOf("lixcol_metadata"),
-		};
-		const byPath = new Map<string, ReadFile>();
-		for (const row of response.rows) {
-			const id = row[columns.id];
-			const path = row[columns.path];
-			const content = row[columns.content];
-			const metadata = row[columns.metadata];
-			if (
-				id?.kind !== "text" ||
-				path?.kind !== "text" ||
-				content?.kind !== "blob"
-			)
-				throw createLixError(
-					"upstream_error",
-					"Lix returned an invalid file row.",
-				);
-			byPath.set(path.value, {
-				id: id.value,
-				path: path.value,
-				...readFileContent(base64ToBytes(content.base64)),
-				lixcol_metadata:
-					metadata?.kind === "json" &&
-					metadata.value !== null &&
-					typeof metadata.value === "object" &&
-					!Array.isArray(metadata.value)
-						? (metadata.value as Record<string, unknown>)
-						: null,
-			});
-		}
-		// Result order follows the request.
-		return paths.flatMap((path) => {
-			const file = byPath.get(path);
-			return file ? [file] : [];
-		});
 	}
 
 	/** Canonical URLs for this context's Lix and branch. */
@@ -1432,9 +1290,6 @@ function finiteTimestamp(value: unknown): number | undefined {
 		: undefined;
 }
 
-/** Files listed per call before `truncated` says to narrow the filter. */
-const LIST_FILES_LIMIT = 1000;
-
 /** The batch committed; only the checkpoint after it did not happen. */
 export const BATCH_CHECKPOINT_WARNING =
 	"Saved; checkpoint unavailable. Do not repeat the batch.";
@@ -1639,48 +1494,6 @@ function isBytesOrNull(
 	value: WireValue | undefined,
 ): value is { kind: "blob"; base64: string } | { kind: "null"; value?: null } {
 	return value?.kind === "blob" || value?.kind === "null";
-}
-
-export type ReadFile = {
-	id: string;
-	path: string;
-	lixcol_metadata: Record<string, unknown> | null;
-} & FileRead;
-
-export type ReadFilesResult = {
-	context: string;
-	commitId: string;
-	files: Array<ReadFile & { url: string; display_url: string }>;
-	missing: string[];
-};
-
-function normalizeFilePathOrThrow(path: string): string {
-	try {
-		return normalizeFilePath(path);
-	} catch (caught) {
-		throw createLixError(
-			"invalid_request",
-			caught instanceof Error ? caught.message : String(caught),
-		);
-	}
-}
-
-function readIdPathRows(
-	response: StatementResponse,
-): Array<{ id: string; path: string }> {
-	const idColumn = response.columns.indexOf("id");
-	const pathColumn = response.columns.indexOf("path");
-	return response.rows.map((row) => {
-		const id = row[idColumn];
-		const path = row[pathColumn];
-		if (
-			id?.kind !== "text" ||
-			!ENTITY_UUID_PATTERN.test(id.value) ||
-			path?.kind !== "text"
-		)
-			throw createLixError("upstream_error", "Lix returned an invalid file.");
-		return { id: id.value, path: path.value };
-	});
 }
 
 function wireNonNegativeInt(value: WireValue | undefined): number | undefined {

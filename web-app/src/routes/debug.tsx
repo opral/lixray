@@ -1,5 +1,4 @@
 import { openLix, type Lix } from "@lix-js/sdk";
-import "@opral/atelier/style.css";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AppTitlebar, AppTitlebarBrand } from "~/components/app-titlebar";

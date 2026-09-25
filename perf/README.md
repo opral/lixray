@@ -209,7 +209,7 @@ across cohorts; copying a baseline's physical store into a storage-layout
 candidate would test compatibility with the old layout instead of the
 candidate's native layout.
 
-For the local Compose MinIO stack, a stopped template can be copied with `mc`
+For the local Compose MinIO stack, a stopped template can be copied with AWS CLI
 (replace both IDs for every repetition):
 
 ```sh
@@ -223,10 +223,9 @@ LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   --samples 1
 docker compose stop -t 30 lix-server
 docker compose run --rm --no-deps --entrypoint /bin/sh minio-init -c \
-  'mc alias set local http://minio:9000 lixray lixray-local-secret &&
-   mc mirror \
-     local/lixray/local/perf/11111111-1111-4111-8111-111111111111/ \
-     local/lixray/local/perf/22222222-2222-4222-8222-222222222222/'
+  'aws --endpoint-url http://minio:9000 s3 sync \
+     s3://lixray/local/perf/11111111-1111-4111-8111-111111111111/ \
+     s3://lixray/local/perf/22222222-2222-4222-8222-222222222222/'
 pnpm perf:up
 LIXRAY_INTERNAL_TOKEN=lixray-local-internal-token \
   pnpm perf:run -- \
