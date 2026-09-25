@@ -359,9 +359,10 @@ test("Account tokens have generated names, creation dates and independent deleti
 					exact: true,
 				}),
 			).toBeVisible({ timeout: 60_000 });
-			await expect(reader.locator(".atelier-file-view")).toHaveAttribute(
-				"data-read-only",
-				"true",
+			await expect(reader.getByText("Public · read-only")).toBeVisible();
+			await expect(reader.locator(".ProseMirror")).toHaveAttribute(
+				"contenteditable",
+				"false",
 			);
 			const unpublish = await request.delete(
 				`/api/repositories/${remote.id}/share?path=/public.md`,

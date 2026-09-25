@@ -1,7 +1,8 @@
 import { expect, test } from "@playwright/test";
+import { entityRoutePath } from "../../src/lib/entity-url";
 const lixId = "11111111-1111-4111-8111-111111111111";
 const markdown =
-	"# Public file works\n\n![Public image](./public.svg)\n![Private image](./private.svg)";
+	"# Public file works\n\n![Public image](./public.svg)\n![Private image](./private.svg)\n\n[Next public file](./next.md#setup) · [Docs](/docs)";
 
 // The browser runs the real local SDK and Atelier. Download responses model
 // the host API; server authorization and SDK transport are covered separately.
@@ -14,13 +15,22 @@ test("Atelier renders downloaded bytes in an isolated local Lix", async ({
 		if (new URL(req.url()).pathname.startsWith("/lix/"))
 			protocolRequests.push(req.url());
 	});
+	await page.route("**/@opral/fixture/file/**", (route) =>
+		route.fulfill({
+			contentType: "text/html",
+			body: '<!doctype html><html><body><div id="root"></div><script type="module" src="/published-fixture.tsx"></script></body></html>',
+		}),
+	);
 	await page.route("**/api/published/entity?*", async (route) => {
 		const path = new URL(route.request().url()).searchParams.get("path");
 		await route.fulfill(
-			path === "/public.svg"
+			path === "/public.svg" || path === "/next.md"
 				? {
 						json: {
-							id: "44444444-4444-4444-8444-444444444444",
+							id:
+								path === "/public.svg"
+									? "44444444-4444-4444-8444-444444444444"
+									: "55555555-5555-4555-8555-555555555555",
 							lixId,
 							path,
 							kind: "file",
@@ -42,15 +52,24 @@ test("Atelier renders downloaded bytes in an isolated local Lix", async ({
 				body: '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><rect width="16" height="16" fill="red"/></svg>',
 				contentType: "application/octet-stream",
 			});
+		else if (path === "/next.md")
+			await route.fulfill({
+				body: "# Next file\n\n## Setup\n\nPublished destination.",
+				contentType: "application/octet-stream",
+			});
 		else await route.fulfill({ status: 404 });
 	});
 	await page.goto("/published.html");
 	await expect(
 		page.getByRole("heading", { name: "Public file works", exact: true }),
 	).toBeVisible({ timeout: 90_000 });
-	await expect(page.locator(".atelier-file-view")).toHaveAttribute(
-		"data-read-only",
-		"true",
+	await expect(
+		page.getByRole("button", { name: "Toggle left panel" }),
+	).toBeVisible();
+	await expect(page.getByText("Public · read-only")).toBeVisible();
+	await expect(page.locator(".ProseMirror")).toHaveAttribute(
+		"contenteditable",
+		"false",
 	);
 	await expect(page.getByRole("link", { name: "Download" })).toBeVisible();
 	await expect
@@ -88,6 +107,26 @@ test("Atelier renders downloaded bytes in an isolated local Lix", async ({
 	await expect(
 		page.getByRole("heading", { name: "Public file works", exact: true }),
 	).toBeVisible();
+	const linkedUrl = new URL(
+		entityRoutePath(
+			"opral",
+			"fixture",
+			"file",
+			"55555555-5555-4555-8555-555555555555",
+			"/next.md",
+		),
+		page.url(),
+	).href;
+	await page.getByRole("link", { name: "Next public file" }).click();
+	await expect(page).toHaveURL(`${linkedUrl}#setup`);
+	await expect(page.getByRole("heading", { name: "Next file" })).toBeVisible();
+	await page.goBack();
+	await expect(page).toHaveURL(/\/published\.html$/);
+	await expect(
+		page.getByRole("heading", { name: "Public file works" }),
+	).toBeVisible();
+	await page.getByRole("link", { name: "Docs" }).click();
+	await expect(page).toHaveURL(/\/docs$/);
 });
 
 for (const status of [426, 503, 404]) {
@@ -109,3 +148,22 @@ for (const status of [426, 503, 404]) {
 			await expect(page.getByText(/no longer public/)).toHaveCount(0);
 	});
 }
+
+test("a crafted link fallback cannot redirect outside the site", async ({
+	page,
+}) => {
+	await page.route("**/api/published/entity?*", (route) =>
+		route.fulfill({ status: 404 }),
+	);
+	await page.route("**/api/published/lix/*/file?*", (route) =>
+		route.fulfill({
+			body: "# Public",
+			contentType: "application/octet-stream",
+		}),
+	);
+	await page.goto(
+		"/published.html#published-file=%2Fmissing&fallback=%2F%5Cevil.com",
+	);
+	await expect(page.getByText(/linked file is unavailable/)).toBeVisible();
+	await expect(page).toHaveURL(/\/published\.html#published-file=/);
+});
