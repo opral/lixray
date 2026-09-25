@@ -106,18 +106,26 @@ run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile"
 	"--build-arg", "VITE_SUPABASE_KEY=ci-public-placeholder",
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
 for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
-	const syncEnv = {
-		...(await stackEnv(`${project}-${scenario}`)),
-		LIXRAY_WEB_IMAGE: webImage,
-		LIXRAY_SERVER_IMAGE: serverImage,
-		LIXRAY_INTERNAL_TOKEN: "lixray-local-internal-token",
-		PLAYWRIGHT_SYNC_LOCAL: "1",
-	};
-	syncEnv.LIXRAY_LIX_SERVICE_URL = `http://127.0.0.1:${syncEnv.LIXRAY_SERVER_PORT}`;
-	try {
-		run(`Built-image browser integration: ${scenario}`, "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "tests/e2e/sync-preview.spec.ts", "--grep", `@${scenario}`], syncEnv);
-	} finally {
-		run("Stop disposable integration services", "docker", ["compose", "-f", "compose.yml", "-f", ".github/compose-sync-ci.yml", "down", "--volumes"], syncEnv);
+	// Chromium can lose loopback requests when Docker changes the host network.
+	// Retry with fresh repository state so a partial first run cannot affect it.
+	for (let attempt = 0; attempt < 2; attempt++) {
+		const syncEnv = {
+			...(await stackEnv(`${project}-${scenario}-${attempt}`)),
+			LIXRAY_WEB_IMAGE: webImage,
+			LIXRAY_SERVER_IMAGE: serverImage,
+			LIXRAY_INTERNAL_TOKEN: "lixray-local-internal-token",
+			PLAYWRIGHT_SYNC_LOCAL: "1",
+		};
+		syncEnv.LIXRAY_LIX_SERVICE_URL = `http://127.0.0.1:${syncEnv.LIXRAY_SERVER_PORT}`;
+		try {
+			run(`Built-image browser integration: ${scenario}`, "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "tests/e2e/sync-preview.spec.ts", "--grep", `@${scenario}`], syncEnv);
+			break;
+		} catch (error) {
+			if (attempt === 1) throw error;
+			console.warn(`Retrying ${scenario} on a fresh disposable stack after ${error.message}`);
+		} finally {
+			run("Stop disposable integration services", "docker", ["compose", "-f", "compose.yml", "-f", ".github/compose-sync-ci.yml", "down", "--volumes"], syncEnv);
+		}
 	}
 }
 console.log("\nLocal CI acceptance passed. GitHub provenance, other OS runners, and production promotion remain remote gates.");
