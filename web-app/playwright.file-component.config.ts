@@ -6,6 +6,10 @@ export default defineConfig({
 	timeout: 30_000,
 	fullyParallel: true,
 	workers: 2,
+	// The development server serves many small modules during a fresh browser
+	// load. Chromium can transiently cancel those requests with
+	// ERR_NETWORK_CHANGED on shared CI hosts; retry the affected test once.
+	retries: process.env.CI ? 1 : 0,
 	use: { baseURL: `http://127.0.0.1:${port}`, trace: "retain-on-failure" },
 	webServer: {
 		command: "pnpm exec vite --config tests/file-component/vite.config.ts",
