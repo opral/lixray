@@ -173,6 +173,12 @@ test("Account tokens have generated names, creation dates and independent deleti
 						"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
 						["/api-token.txt", new TextEncoder().encode("API token works")],
 					);
+					const snapshot = new Uint8Array(
+						await new Response(remote.exportSnapshot()).arrayBuffer(),
+					);
+					if (new TextDecoder().decode(snapshot.subarray(0, 7)) !== "LIXSNAP") {
+						throw new Error("Authenticated remote snapshot export was invalid");
+					}
 				} finally {
 					await remote.close();
 				}
