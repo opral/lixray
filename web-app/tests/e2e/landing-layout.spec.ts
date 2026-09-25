@@ -10,6 +10,16 @@ for (const width of [1440, 390, 320]) {
 			await expect(
 				page.getByRole("heading", { name: "Simple to use repository." }),
 			).toBeVisible();
+			await expect(page.getByRole("banner")).toBeVisible();
+			await expect(
+				page.getByRole("navigation", { name: "Primary navigation" }),
+			).toBeVisible();
+			await expect(page.getByRole("contentinfo")).toBeVisible();
+			await expect(
+				page.getByRole("navigation", { name: "Footer" }).getByRole("link", {
+					name: "Privacy",
+				}),
+			).toHaveAttribute("href", "/privacy");
 			await expect(
 				page.getByRole("img", {
 					name: /Claude proposes changes to a repository, checks pass, and the changes are accepted/,

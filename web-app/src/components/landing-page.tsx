@@ -1,3 +1,4 @@
+import { Link } from "@tanstack/react-router";
 import {
 	CircleCheck,
 	Folder,
@@ -7,7 +8,7 @@ import {
 	Table2,
 	UsersRound,
 } from "lucide-react";
-import { useRepositoryCta } from "~/components/site-header";
+import { SiteHeader, useRepositoryCta } from "~/components/site-header";
 import { WhyRepositoryIllustration } from "~/components/why-repository-illustration";
 
 const iconPath = (name: string) => "/landing/" + name + ".svg";
@@ -231,9 +232,10 @@ export function LandingPage() {
 				fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
 			}}
 		>
+			<SiteHeader />
 			<main>
 				<section
-					className="mx-auto w-full max-w-[800px] px-8 pt-[88px] pb-12"
+					className="mx-auto w-full max-w-[800px] px-8 pt-12 pb-12 sm:pt-14"
 					aria-labelledby="landing-title"
 				>
 					<h1
@@ -364,6 +366,42 @@ export function LandingPage() {
 					</p>
 				</section>
 			</main>
+			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
+				<span className="inline-flex items-center gap-2">
+					<img className="size-4" src="/lixray-mark.svg" alt="" />
+					<span className="font-semibold text-fg-muted">LixRay</span>
+				</span>
+				<a
+					className="no-underline hover:text-fg-muted"
+					href="https://opral.com"
+					target="_blank"
+					rel="noreferrer"
+				>
+					© 2026 Opral
+				</a>
+				<nav className="flex flex-wrap items-center gap-4" aria-label="Footer">
+					<Link className="no-underline hover:text-fg-muted" to="/docs">
+						Docs
+					</Link>
+					<Link className="no-underline hover:text-fg-muted" to="/privacy">
+						Privacy
+					</Link>
+					<Link className="no-underline hover:text-fg-muted" to="/terms">
+						Terms
+					</Link>
+					<Link className="no-underline hover:text-fg-muted" to="/support">
+						Support
+					</Link>
+					<a
+						className="font-semibold text-fg-muted no-underline"
+						href="https://github.com/opral"
+						target="_blank"
+						rel="noreferrer"
+					>
+						GitHub ↗
+					</a>
+				</nav>
+			</footer>
 		</div>
 	);
 }

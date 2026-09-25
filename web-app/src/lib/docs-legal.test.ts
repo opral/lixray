@@ -109,6 +109,7 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 	assert.match(docsRoute, /slug === "support".*to="\/support"/s);
 
 	for (const file of [
+		"landing-page.tsx",
 		"legal-page.tsx",
 		"docs-page.tsx",
 		"vs-github-page.tsx",
