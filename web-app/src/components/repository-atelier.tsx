@@ -656,9 +656,7 @@ export function RepositoryAtelier({
 							source: "ancestor",
 							canUnpublish: false,
 							inheritedFrom:
-								ancestor.path === "/"
-									? "the published root folder"
-									: `the published folder ${ancestor.path}`,
+								ancestor.path === "/" ? "the root folder" : ancestor.path,
 						};
 					}
 					return { status: "private", canPublish: true };
