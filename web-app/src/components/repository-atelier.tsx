@@ -95,6 +95,7 @@ import {
 	type RepositoryLixSession,
 } from "~/lib/repository-lix-session";
 import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
+import { createRepositoryDebugRemote } from "~/lib/repository-debug-remote";
 import {
 	formatRepositoryOpenError,
 	isRepositoryStorageInUse,
@@ -1197,8 +1198,9 @@ export function RepositoryAtelier({
 	useEffect(() => {
 		let disposed = false;
 		let activeLix: RepositoryLixSession | null = null;
-		let debugRemoteLix: ReturnType<typeof openRepositoryRemoteLix> | null =
-			null;
+		let debugRemoteSession: ReturnType<
+			typeof createRepositoryDebugRemote
+		> | null = null;
 		const openController = new AbortController();
 		resetRepositoryOpenPerformance();
 		setShellProps(null);
@@ -1288,30 +1290,22 @@ export function RepositoryAtelier({
 						},
 					});
 					setBranchSession(repositoryBranchSession);
-					const getDebugRemoteLix = async () => {
-						debugRemoteLix ??= openRepositoryRemoteLix({
-							namespace,
-							repositorySlug,
-							repositoryId,
-							getAccessToken,
-							refreshAccessToken,
-							allowAnonymous: isReadOnly,
-							publicPath: isReadOnly ? publicPath : undefined,
-							authIdentity: atelierAccountId,
-						});
-						const remote = await debugRemoteLix;
-						const activeBranchId = session.activeBranchSnapshot();
-						if ((await remote.activeBranchId()) !== activeBranchId) {
-							await remote.switchBranch({ branchId: activeBranchId });
-						}
-						return remote;
-					};
-					const getDebugRemoteSnapshot = async () =>
-						new Response((await getDebugRemoteLix()).exportSnapshot(), {
-							headers: {
-								"Content-Type": "application/vnd.lix.snapshot",
-							},
-						}).blob();
+					debugRemoteSession = createRepositoryDebugRemote(
+						() =>
+							openRepositoryRemoteLix({
+								namespace,
+								repositorySlug,
+								repositoryId,
+								getAccessToken,
+								refreshAccessToken,
+								allowAnonymous: isReadOnly,
+								publicPath: isReadOnly ? publicPath : undefined,
+								authIdentity: atelierAccountId,
+							}),
+						() => session.activeBranchSnapshot(),
+					);
+					const getDebugRemoteLix = () => debugRemoteSession!.selectedBranch();
+					const getDebugRemoteSnapshot = () => debugRemoteSession!.snapshot();
 					const atelierProps: AtelierProps = {
 						// Atelier owns the shell, built-in extensions, and document views.
 						// Scope its shared Lix handle once so every initial SQL read joins
@@ -1444,9 +1438,9 @@ export function RepositoryAtelier({
 			const session = activeLix;
 			activeLix = null;
 			activeLixRef.current = null;
-			const remote = debugRemoteLix;
-			debugRemoteLix = null;
-			if (remote) void remote.then((lix) => lix.close()).catch(() => undefined);
+			const remote = debugRemoteSession;
+			debugRemoteSession = null;
+			if (remote) void remote.close();
 			if (session) void session.close();
 		};
 	}, [
