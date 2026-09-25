@@ -160,7 +160,12 @@ if (buildNative) {
 
 async function preparedBrowserMatches(revision) {
 	const marker = await readBuildMarker(browserMarker);
-	return marker?.sourceRevision === revision && (await browserFilesExist());
+	return (
+		marker?.sourceRevision === revision &&
+		(marker.source !== "calling-workflow" ||
+			process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1") &&
+		(await browserFilesExist())
+	);
 }
 
 async function browserFilesExist() {
