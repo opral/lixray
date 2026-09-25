@@ -51,8 +51,8 @@ test("Account tokens have generated names, creation dates and independent deleti
 			return ((await response.json()) as { id: string }).id;
 		}
 		return {
-			lixId: await create("API token test"),
-			otherId: await create("Other API token test"),
+			lixId: await create(`API token test ${crypto.randomUUID()}`),
+			otherId: await create(`Other API token test ${crypto.randomUUID()}`),
 			namespace: data[0].namespace_handle,
 		};
 	});
