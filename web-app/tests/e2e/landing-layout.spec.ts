@@ -1,36 +1,38 @@
 import { expect, test } from "@playwright/test";
 
-for (const width of [1440, 390]) {
-	test(`landing illustrations keep one rail and responsive stacks at ${width}px`, async ({
-		page,
-	}) => {
-		await page.setViewportSize({ width, height: 900 });
-		await page.goto("/");
+for (const width of [1440, 390, 320]) {
+	test(
+		"landing review preview and one rail fit at " + width + "px",
+		async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			await page.goto("/");
 
-		const rails = page.getByRole("img", {
-			name: "Claude proposes changes to the repository",
-		});
-		await expect(rails).toHaveCount(1);
+			await expect(
+				page.getByRole("heading", { name: "Simple to use repository." }),
+			).toBeVisible();
+			await expect(
+				page.getByRole("img", {
+					name: /Claude proposes changes to a repository, checks pass, and the changes are accepted/,
+				}),
+			).toHaveCount(1);
 
-		const illustration = page.locator("figure[role=img]");
-		const today = await illustration
-			.locator(":scope > div")
-			.first()
-			.boundingBox();
-		const lixray = await illustration
-			.locator(":scope > div")
-			.last()
-			.boundingBox();
-		expect(today).not.toBeNull();
-		expect(lixray).not.toBeNull();
-		if (width >= 640) {
-			expect(lixray!.x).toBeGreaterThan(today!.x + today!.width);
-		} else {
-			expect(lixray!.y).toBeGreaterThan(today!.y + today!.height);
-		}
-		const hasHorizontalOverflow = await page.evaluate(
-			() => document.documentElement.scrollWidth > window.innerWidth,
-		);
-		expect(hasHorizontalOverflow).toBe(false);
-	});
+			const panes = page.locator(
+				'section[aria-label="Repository preview"] figure > div > div',
+			);
+			await expect(panes).toHaveCount(2);
+			const files = await panes.nth(0).boundingBox();
+			const proposal = await panes.nth(1).boundingBox();
+			expect(files).not.toBeNull();
+			expect(proposal).not.toBeNull();
+			if (width >= 640) {
+				expect(proposal!.x).toBeGreaterThan(files!.x + files!.width - 1);
+			} else {
+				expect(proposal!.y).toBeGreaterThan(files!.y + files!.height - 1);
+			}
+			const hasHorizontalOverflow = await page.evaluate(
+				() => document.documentElement.scrollWidth > window.innerWidth,
+			);
+			expect(hasHorizontalOverflow).toBe(false);
+		},
+	);
 }

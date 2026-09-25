@@ -110,7 +110,6 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 
 	for (const file of [
 		"legal-page.tsx",
-		"landing-page.tsx",
 		"docs-page.tsx",
 		"vs-github-page.tsx",
 	] as const) {

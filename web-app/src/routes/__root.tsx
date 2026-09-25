@@ -18,9 +18,9 @@ import pwaIcons from "../pwa-icons.json";
 import atelierCss from "@opral/atelier/style.css?url";
 import appCss from "../styles.css?url";
 
-const title = "LixRay — All your work. In one repository.";
+const title = "LixRay — Simple to use repository.";
 const description =
-	"Files and application data share one version history. Agents and services can propose changes for checks and review.";
+	"Store any file, from documents and spreadsheets to video, alongside tables like customers and orders. Branch, diff, merge, and roll back both.";
 // Absolute URL: link-preview crawlers do not resolve relative image paths.
 const ogImage = "https://lixray.com/og.png";
 
