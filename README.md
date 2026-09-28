@@ -125,6 +125,26 @@ Run the frontend source checks locally with `pnpm run ci`. Pull-request CI build
 the production Railway bundle once through `web-app/Dockerfile`, so the
 frontend lane does not repeat that production build.
 
+For agent work, run the local PR acceptance in an isolated worktree after
+committing the candidate. The artifact check runs first and rejects a pinned
+Lix browser SDK whose producer workflow has not finished successfully. This
+prevents a green local run from relying on an artifact that production will
+later reject. Node 24, pnpm 10.13.1, Docker with Buildx, the authenticated
+GitHub CLI (`gh`), and the local Supabase CLI are required.
+
+```sh
+pnpm ci:local --check-only  # Fast cross-repository artifact gate
+pnpm ci:local               # Source, tooling, database, browser, and image checks
+```
+
+The full command runs the four built-image sync scenarios in separate
+disposable Compose projects. It builds a local web image with placeholder
+Supabase build settings and resolves or builds the pinned Lix server image
+locally. It does not publish images, migrate a linked production database, or
+promote Railway services; those remain GitHub release gates. The independent
+Gitleaks secret scan also remains a required GitHub check because it scans a
+clean repository mirror with fixed configuration.
+
 The same acceptance path used by CI is available locally:
 
 ```sh
@@ -261,7 +281,8 @@ PRs run fast formatting and focused tests immediately, without SDK preparation,
 Docker, or Railway. Type checks and SDK-dependent tests resolve the pinned Lix
 browser artifact independently. Relevant integration changes run ordinary
 Supabase/Compose tests and isolated built-image browser scenarios in parallel.
-The stable `CI` check requires every selected lane to pass, including on drafts.
+The stable `CI` check requires every selected lane to pass for ready PRs. Drafts
+defer validation unless they request a preview with the `preview` label.
 
 Lix owns Rust compilation. LixRay resolves existing SDK/server artifacts once;
 missing artifacts fail promptly with a producer link. There is no waiting job

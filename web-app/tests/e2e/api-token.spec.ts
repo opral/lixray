@@ -173,6 +173,12 @@ test("Account tokens have generated names, creation dates and independent deleti
 						"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
 						["/api-token.txt", new TextEncoder().encode("API token works")],
 					);
+					const snapshot = new Uint8Array(
+						await new Response(remote.exportSnapshot()).arrayBuffer(),
+					);
+					if (new TextDecoder().decode(snapshot.subarray(0, 7)) !== "LIXSNAP") {
+						throw new Error("Authenticated remote snapshot export was invalid");
+					}
 				} finally {
 					await remote.close();
 				}
@@ -353,9 +359,10 @@ test("Account tokens have generated names, creation dates and independent deleti
 					exact: true,
 				}),
 			).toBeVisible({ timeout: 60_000 });
-			await expect(reader.locator(".atelier-file-view")).toHaveAttribute(
-				"data-read-only",
-				"true",
+			await expect(reader.getByText("Public · read-only")).toBeVisible();
+			await expect(reader.locator(".ProseMirror")).toHaveAttribute(
+				"contenteditable",
+				"false",
 			);
 			const unpublish = await request.delete(
 				`/api/repositories/${remote.id}/share?path=/public.md`,

@@ -1,10 +1,10 @@
 import { entityRoutePath, resolvePublishedEntity } from "~/lib/entity-url";
-import { AtelierFile } from "@opral/atelier";
+import { Atelier } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
 import { openPublishedLix, publishedResponseError } from "~/lib/published-lix";
 import type { Lix } from "@lix-js/sdk";
 import { Download, Folder, LockOpen } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { Button } from "~/components/ui/button";
 
 export type PublishedResource = {
@@ -29,8 +29,8 @@ type PublishedDirectoryResponse = {
 };
 
 /**
- * Authorized downloads populate a local in-memory Lix. Atelier renders it
- * through the same file component used by the repository workspace.
+ * Authorized downloads populate a disposable in-memory Lix. The published
+ * file opens in Atelier's read-only workspace shell.
  */
 export function PublishedResourceView({
 	repositoryId,
@@ -39,7 +39,16 @@ export function PublishedResourceView({
 	repositoryName,
 	resource,
 }: PublishedResourceViewProps) {
-	return (
+	return resource.kind === "file" ? (
+		<PublishedFile
+			key={`${repositoryId}:${resource.id}:${resource.path}`}
+			repositoryId={repositoryId}
+			namespace={namespace}
+			repositorySlug={repositorySlug}
+			repositoryName={repositoryName}
+			resource={resource}
+		/>
+	) : (
 		<main className="min-h-screen bg-panel font-sans text-fg">
 			<header className="flex h-[82px] items-center gap-3 border-b border-border px-6">
 				<a
@@ -58,22 +67,12 @@ export function PublishedResourceView({
 					Public · read-only
 				</span>
 			</header>
-			{resource.kind === "directory" ? (
-				<PublishedDirectory
-					repositoryId={repositoryId}
-					namespace={namespace}
-					repositorySlug={repositorySlug}
-					resource={resource}
-				/>
-			) : (
-				<PublishedFile
-					key={`${repositoryId}:${resource.path}`}
-					repositoryId={repositoryId}
-					namespace={namespace}
-					repositorySlug={repositorySlug}
-					resource={resource}
-				/>
-			)}
+			<PublishedDirectory
+				repositoryId={repositoryId}
+				namespace={namespace}
+				repositorySlug={repositorySlug}
+				resource={resource}
+			/>
 		</main>
 	);
 }
@@ -151,12 +150,74 @@ function PublishedDirectory({
 	);
 }
 
-function PublishedFile(
-	props: Omit<PublishedResourceViewProps, "repositoryName">,
-) {
+function PublishedFile(props: PublishedResourceViewProps) {
 	const { repositoryId, namespace, repositorySlug, resource } = props;
 	const [lix, setLix] = useState<Lix | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	// A hash link survives opening in a new tab. Resolve its path through the
+	// publication API before navigating to the target's stable entity URL.
+	useEffect(() => {
+		let abort = new AbortController();
+		const followLink = () => {
+			abort.abort();
+			abort = new AbortController();
+			const controller = abort;
+			const link = new URLSearchParams(window.location.hash.slice(1));
+			const path = link.get("published-file");
+			if (!path) return;
+			void resolvePublishedEntity({
+				namespace,
+				repository: repositorySlug,
+				kind: "file",
+				path,
+				signal: controller.signal,
+			})
+				.then((entity) => {
+					if (controller.signal.aborted) return;
+					if (!entity) {
+						const fallback = link.get("fallback");
+						if (fallback?.startsWith("/") && !fallback.startsWith("//")) {
+							const destination = new URL(fallback, window.location.origin);
+							if (destination.origin === window.location.origin) {
+								window.location.replace(destination.href);
+								return;
+							}
+						}
+					}
+					if (!entity || entity.lixId !== repositoryId)
+						throw new Error(
+							"This linked file is unavailable or is no longer public.",
+						);
+					const destination = new URL(
+						entityRoutePath(
+							namespace,
+							repositorySlug,
+							"file",
+							entity.id,
+							entity.path,
+						),
+						window.location.origin,
+					);
+					const fragment = link.get("fragment");
+					if (fragment) destination.hash = fragment;
+					window.location.replace(destination.href);
+				})
+				.catch((caught: unknown) => {
+					if (!controller.signal.aborted)
+						setError(
+							caught instanceof Error
+								? caught.message
+								: "Unable to open this file.",
+						);
+				});
+		};
+		followLink();
+		window.addEventListener("hashchange", followLink);
+		return () => {
+			abort.abort();
+			window.removeEventListener("hashchange", followLink);
+		};
+	}, [repositoryId, namespace, repositorySlug]);
 	useEffect(() => {
 		const abort = new AbortController();
 		let owned: Lix | undefined;
@@ -207,23 +268,57 @@ function PublishedFile(
 	return <PublishedFileView {...props} lix={lix} fileId={resource.id} />;
 }
 
-/** Rendering owns no protocol requests or client lifetime. */
+/** The shell sees only the authorized file and separately authorized assets. */
 export function PublishedFileView({
 	lix,
 	fileId,
-	repositoryId,
 	namespace,
 	repositorySlug,
+	repositoryName,
 	resource,
-}: Omit<PublishedResourceViewProps, "repositoryName"> & {
+}: PublishedResourceViewProps & {
 	lix: Lix;
 	fileId: string;
 }) {
-	const navigationAbort = useRef<AbortController | null>(null);
-	useEffect(
-		() => () => navigationAbort.current?.abort(),
-		[repositoryId, resource.path],
-	);
+	// The live Markdown editor retains source hrefs. Rewrite local links before
+	// its click handler runs so every target goes through publication resolution.
+	const routePublishedLink = (event: MouseEvent<HTMLDivElement>) => {
+		const anchor =
+			event.target instanceof Element
+				? event.target.closest(".ProseMirror a[href]")
+				: null;
+		if (!(anchor instanceof HTMLAnchorElement)) return;
+		const href = anchor.getAttribute("href");
+		if (!href || /^[#?]/.test(href)) return;
+		// Absolute URLs already have a destination. Root-relative links are
+		// checked as published files first, then fall back to the app route.
+		if (/^(?:[a-z][a-z\d+.-]*:|\/\/)/i.test(href)) return;
+		let destination: URL;
+		try {
+			destination = new URL(
+				href,
+				new URL(resource.path, window.location.origin),
+			);
+		} catch {
+			return;
+		}
+		if (destination.origin !== window.location.origin) return;
+		try {
+			const link = new URLSearchParams({
+				"published-file": decodeURIComponent(destination.pathname),
+			});
+			if (destination.hash) link.set("fragment", destination.hash.slice(1));
+			if (href.startsWith("/"))
+				link.set(
+					"fallback",
+					`${destination.pathname}${destination.search}${destination.hash}`,
+				);
+			anchor.href = `#${link}`;
+		} catch {
+			return;
+		}
+		event.stopPropagation();
+	};
 	const [bytes, setBytes] = useState<Uint8Array | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const objectUrl = useMemo(() => {
@@ -263,73 +358,53 @@ export function PublishedFileView({
 	}, [lix, fileId]);
 
 	return (
-		<section className="mx-auto flex w-[min(960px,calc(100%-48px))] flex-col py-8">
-			<div className="mb-5 flex items-center gap-3">
-				<img
-					src={fileIconUrl(fileName(resource.path))}
-					alt=""
-					className="size-5"
-				/>
-				<h1 className="min-w-0 truncate text-[18px] font-semibold">
-					{fileName(resource.path)}
-				</h1>
-				<span className="flex-1" />
-				{objectUrl ? (
-					<Button asChild variant="outline" size="sm">
-						<a href={objectUrl} download={fileName(resource.path)}>
-							<Download className="size-4" />
-							Download
-						</a>
-					</Button>
-				) : null}
-			</div>
-			{error ? <PublishedError>{error}</PublishedError> : null}
-			<AtelierFile
+		<div
+			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
+			onClickCapture={routePublishedLink}
+			onAuxClickCapture={routePublishedLink}
+		>
+			<Atelier
 				lix={lix}
-				fileId={fileId}
-				readOnly
-				className="min-h-[60vh]"
-				onOpenFile={(path: string) => {
-					navigationAbort.current?.abort();
-					const abort = new AbortController();
-					navigationAbort.current = abort;
-					void resolvePublishedEntity({
-						namespace,
-						repository: repositorySlug,
-						kind: "file",
-						path,
-						signal: abort.signal,
-					})
-						.then((entity) => {
-							if (!entity) throw new Error("This file is no longer available.");
-							if (!abort.signal.aborted && entity.lixId === repositoryId)
-								window.location.assign(
-									entityRoutePath(
-										namespace,
-										repositorySlug,
-										"file",
-										entity.id,
-										entity.path,
-									),
-								);
-						})
-						.catch((caught: unknown) => {
-							if (!abort.signal.aborted)
-								setError(
-									caught instanceof Error
-										? caught.message
-										: "Unable to open this file.",
-								);
-						});
+				location={{ path: resource.path, fileId }}
+				navigation={{
+					href: (location) =>
+						"path" in location
+							? `#published-file=${encodeURIComponent(location.path)}`
+							: "#",
 				}}
-				fallback={
-					<p>
-						Preview is not available for this file type. Use Download to open
-						it.
-					</p>
-				}
+				readOnly
+				defaultOpenPanels={[]}
+				slots={{
+					navbarBrand: (
+						<a
+							href={`/@${namespace}/${repositorySlug}`}
+							className="truncate font-semibold"
+						>
+							{repositoryName}
+						</a>
+					),
+					navbarEnd: (
+						<div className="flex items-center gap-2">
+							<span className="rounded-full border border-border px-2 py-1 text-xs text-fg-subtle">
+								Public · read-only
+							</span>
+							{objectUrl ? (
+								<Button asChild variant="outline" size="sm">
+									<a href={objectUrl} download={fileName(resource.path)}>
+										<Download className="size-4" /> Download
+									</a>
+								</Button>
+							) : null}
+						</div>
+					),
+				}}
 			/>
-		</section>
+			{error ? (
+				<div className="absolute bottom-4 left-4">
+					<PublishedError>{error}</PublishedError>
+				</div>
+			) : null}
+		</div>
 	);
 }
 

@@ -168,6 +168,7 @@ function atelierPeerSatisfiesVendoredSdk(peerRange, version) {
 			candidate[2] >= minimum[2]
 		);
 	}
+	// Atelier may leave its range open upward: it follows newer Lix releases.
 	const minimumOnly = /^>=(\d+)\.(\d+)\.(\d+)$/.exec(peerRange);
 	if (minimumOnly) {
 		return compareSemver(candidate, minimumOnly.slice(1).map(Number)) >= 0;

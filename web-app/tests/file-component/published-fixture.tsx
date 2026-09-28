@@ -1,6 +1,10 @@
 import { createRoot } from "react-dom/client";
 import { PublishedResourceView } from "../../src/components/published-resource-view";
+import { parseEntityUrlSplat } from "../../src/lib/entity-url";
 import "./fixture.css";
+const linked =
+	parseEntityUrlSplat(location.pathname.split("/file/")[1])?.id ===
+	"55555555-5555-4555-8555-555555555555";
 createRoot(document.getElementById("root")!).render(
 	<PublishedResourceView
 		repositoryId="11111111-1111-4111-8111-111111111111"
@@ -8,8 +12,10 @@ createRoot(document.getElementById("root")!).render(
 		repositorySlug="fixture"
 		repositoryName="Fixture"
 		resource={{
-			id: "22222222-2222-4222-8222-222222222222",
-			path: "/public.md",
+			id: linked
+				? "55555555-5555-4555-8555-555555555555"
+				: "22222222-2222-4222-8222-222222222222",
+			path: linked ? "/next.md" : "/public.md",
 			kind: "file",
 		}}
 	/>,

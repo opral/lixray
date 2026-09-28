@@ -66,20 +66,6 @@ await requireDirectory(
 console.log(`[lix-sdk] Selected vendored Lix ${sourceRevision}.`);
 
 let browserReady = await preparedBrowserMatches(sourceRevision);
-if (
-	!browserReady &&
-	process.env.LIXRAY_SKIP_VENDORED_LIX_WASM === "1" &&
-	(await browserFilesExist())
-) {
-	console.log(
-		"[lix-sdk] Adopting the browser SDK supplied by the calling CI job.",
-	);
-	await writeBuildMarker(browserMarker, {
-		source: "calling-workflow",
-		sourceRevision,
-	});
-	browserReady = true;
-}
 
 if (browserReady) {
 	console.log(
@@ -160,7 +146,11 @@ if (buildNative) {
 
 async function preparedBrowserMatches(revision) {
 	const marker = await readBuildMarker(browserMarker);
-	return marker?.sourceRevision === revision && (await browserFilesExist());
+	return (
+		marker?.sourceRevision === revision &&
+		marker.source === "lix-ci-artifact" &&
+		(await browserFilesExist())
+	);
 }
 
 async function browserFilesExist() {
