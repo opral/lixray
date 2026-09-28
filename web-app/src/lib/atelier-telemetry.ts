@@ -18,6 +18,8 @@ interface AtelierTelemetryContext {
 		before: string;
 		after: string;
 		fileExtension: string;
+		clientBeforeFileCount: number;
+		clientAfterFileCount: number;
 	}) => Promise<void>;
 	reportInventory?: (input: {
 		repositoryId: string;
@@ -115,12 +117,16 @@ export function createAtelierTelemetryHandler(
 								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
 								[after],
 							);
-							if (Number(afterResult.rows[0]?.count) < 1) return;
+							const afterFileCount = Number(afterResult.rows[0]?.count);
+							if (!Number.isSafeInteger(afterFileCount) || afterFileCount < 1)
+								return;
 							await context.reportFirstFile!({
 								repositoryId: context.repositoryId!,
 								before,
 								after,
 								fileExtension: fileExtensionProperty(event.filePath),
+								clientBeforeFileCount: 0,
+								clientAfterFileCount: afterFileCount,
 							});
 						} catch (error) {
 							console.warn("Failed to report first-file milestone", error);

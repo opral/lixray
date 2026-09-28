@@ -1196,6 +1196,8 @@ export function RepositoryAtelier({
 
 	useEffect(() => {
 		let disposed = false;
+		let firstFileRetryTimer: ReturnType<typeof setTimeout> | undefined;
+		let firstFileRetryDelayMs = 30_000;
 		let activeLix: RepositoryLixSession | null = null;
 		let debugRemoteLix: ReturnType<typeof openRepositoryRemoteLix> | null =
 			null;
@@ -1256,6 +1258,89 @@ export function RepositoryAtelier({
 						);
 					}
 					setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+					const pendingFirstFileKey = `lixray:first_file_pending:${repositoryId}`;
+					type FirstFileReport = {
+						repositoryId: string;
+						before: string;
+						after: string;
+						fileExtension: string;
+						clientBeforeFileCount: number;
+						clientAfterFileCount: number;
+					};
+					const savePendingFirstFile = (report: FirstFileReport) => {
+						try {
+							window.localStorage.setItem(
+								pendingFirstFileKey,
+								JSON.stringify(report),
+							);
+						} catch {
+							/* A private session can still retry while this tab remains open. */
+						}
+					};
+					const clearPendingFirstFile = (report: FirstFileReport) => {
+						try {
+							const pending = window.localStorage.getItem(pendingFirstFileKey);
+							if (
+								pending &&
+								(JSON.parse(pending) as FirstFileReport).after === report.after
+							)
+								window.localStorage.removeItem(pendingFirstFileKey);
+						} catch {
+							/* Storage is optional. */
+						}
+					};
+					const reportFirstFile = async (
+						firstFile: FirstFileReport,
+					): Promise<void> => {
+						try {
+							const token = await getAccessToken();
+							if (!token)
+								throw new Error("First-file telemetry needs a session");
+							const response = await fetch("/api/telemetry/first-file", {
+								method: "POST",
+								headers: {
+									Authorization: `Bearer ${token}`,
+									"Content-Type": "application/json",
+								},
+								body: JSON.stringify(firstFile),
+							});
+							if (response.status === 202) {
+								savePendingFirstFile(firstFile);
+							} else if (response.ok) {
+								clearPendingFirstFile(firstFile);
+								if (firstFileRetryTimer) {
+									clearTimeout(firstFileRetryTimer);
+									firstFileRetryTimer = undefined;
+								}
+								firstFileRetryDelayMs = 30_000;
+								return;
+							} else {
+								throw new Error(
+									`First-file telemetry failed (${response.status})`,
+								);
+							}
+						} catch (error) {
+							savePendingFirstFile(firstFile);
+							console.warn("Failed to report first-file milestone", error);
+						}
+						if (!disposed && !firstFileRetryTimer) {
+							firstFileRetryTimer = setTimeout(() => {
+								firstFileRetryTimer = undefined;
+								void reportFirstFile(firstFile);
+							}, firstFileRetryDelayMs);
+							firstFileRetryDelayMs = Math.min(
+								firstFileRetryDelayMs * 2,
+								300_000,
+							);
+						}
+					};
+					try {
+						const pending = window.localStorage.getItem(pendingFirstFileKey);
+						if (pending)
+							void reportFirstFile(JSON.parse(pending) as FirstFileReport);
+					} catch {
+						/* Invalid or unavailable storage does not block the editor. */
+					}
 					const reportInventory = async (inventory: {
 						repositoryId: string;
 						commitId: string;
@@ -1287,22 +1372,7 @@ export function RepositoryAtelier({
 								lix: session.lix,
 								repositoryId,
 								organizationId: namespaceId,
-								reportFirstFile: async (firstFile) => {
-									const token = await getAccessToken();
-									if (!token) return;
-									const response = await fetch("/api/telemetry/first-file", {
-										method: "POST",
-										headers: {
-											Authorization: `Bearer ${token}`,
-											"Content-Type": "application/json",
-										},
-										body: JSON.stringify(firstFile),
-									});
-									if (!response.ok)
-										throw new Error(
-											`First-file telemetry failed (${response.status})`,
-										);
-								},
+								reportFirstFile,
 								reportInventory,
 							},
 						},
@@ -1489,6 +1559,7 @@ export function RepositoryAtelier({
 
 		return () => {
 			disposed = true;
+			if (firstFileRetryTimer) clearTimeout(firstFileRetryTimer);
 			openController.abort();
 			const session = activeLix;
 			activeLix = null;

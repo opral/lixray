@@ -44,6 +44,20 @@ export async function addedFirstFile(
 	return path?.kind === "text" && path.value ? path.value : null;
 }
 
+/** Offline browser proof is accepted only while the server still has no user files. */
+export async function serverHasNoUserFiles(
+	reader: SnapshotReader,
+	lixId: string,
+): Promise<boolean> {
+	const result = await reader.execute(lixId, {
+		sql: "SELECT COUNT(*) AS file_count FROM lix_file WHERE path NOT LIKE '/.lix/%'",
+	});
+	const count = result.rows[0]?.[0];
+	if (count?.kind !== "int" || !Number.isSafeInteger(count.value))
+		throw new Error("Invalid current file inventory result");
+	return count.value === 0;
+}
+
 export async function captureFirstFileAdded(
 	env: {
 		POSTHOG_PROJECT_TOKEN?: string;
@@ -60,6 +74,7 @@ export async function captureFirstFileAdded(
 		fileExtension: string;
 		surface: "web" | "mcp";
 		isDemo?: boolean;
+		verification?: "server_commit" | "browser_commit";
 	},
 	createClient: (
 		token: string,
@@ -90,6 +105,7 @@ export async function captureFirstFileAdded(
 				lix_id: input.repositoryId,
 				file_extension: input.fileExtension,
 				telemetry_schema_version: 2,
+				verification: input.verification ?? "server_commit",
 				surface: input.surface,
 				environment: "production",
 			},

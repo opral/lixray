@@ -9,9 +9,10 @@
    carries `surface=web|mcp|server` instead.
 3. Event names are declared once in
    `web-app/src/lib/telemetry-events.ts`. Emitters do not invent strings.
-4. Durable business facts are emitted by the backend after authoritative
-   state changes. Browser callbacks may request capture, but are not the source
-   of truth.
+4. Durable business facts are emitted by the backend after state changes.
+   Browser callbacks may supply a commit-local observation when the server's
+   partial replica cannot reconstruct that commit; the `verification` property
+   records which source verified the transition.
 5. PostHog-owned `$*` events keep their official names. OpenTelemetry spans
    keep their vendor-neutral `lix.*` names.
 6. Failures are `$exception`, PostHog Logs, or spans. They are not product
@@ -69,6 +70,14 @@ UUID is the repository ID, so repeated delivery across clients resolves to the
 same milestone. Earlier captures used a browser-local marker or an MCP
 request-local marker and overcounted; filter to `telemetry_schema_version=2`
 for activation analysis. This remains product analytics, not a billing ledger.
+When the server reports `LIX_SYNC_HISTORY_REQUIRED` for a browser write, the
+browser's local Lix supplies its before/after user-file counts. The backend
+accepts that candidate only for an authorized repository whose server replica
+still has zero user files, and emits `verification=browser_commit`; normal
+server checks emit `verification=server_commit`. If the server already has user
+files but still lacks the historical payload, the browser retains the candidate
+and retries while open and on a later repository open. The PostHog UUID keeps
+these retries idempotent.
 
 `repository_inventory_snapshot` measures the live files at a specific commit,
 using `OCTET_LENGTH(content)` for logical content bytes. It does not measure

@@ -85,6 +85,7 @@ import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
 import {
 	addedFirstFile,
 	captureFirstFileAdded,
+	serverHasNoUserFiles,
 } from "./first-file-telemetry.ts";
 import {
 	captureRepositoryInventory,
@@ -1321,6 +1322,8 @@ async function handleFirstFileTelemetry(
 		before: string;
 		after: string;
 		fileExtension: string;
+		clientBeforeFileCount: number;
+		clientAfterFileCount: number;
 	};
 	try {
 		const body = (await request.json()) as Record<string, unknown>;
@@ -1333,7 +1336,11 @@ async function handleFirstFileTelemetry(
 			typeof body.after !== "string" ||
 			!body.after ||
 			typeof body.fileExtension !== "string" ||
-			!/^\([a-z]+\)$|^[a-z0-9+_-]{1,20}$/.test(body.fileExtension)
+			!/^\([a-z]+\)$|^[a-z0-9+_-]{1,20}$/.test(body.fileExtension) ||
+			body.clientBeforeFileCount !== 0 ||
+			typeof body.clientAfterFileCount !== "number" ||
+			!Number.isSafeInteger(body.clientAfterFileCount) ||
+			body.clientAfterFileCount < 1
 		)
 			return json(
 				{ error: "Invalid first-file telemetry context" },
@@ -1344,6 +1351,8 @@ async function handleFirstFileTelemetry(
 			before: body.before,
 			after: body.after,
 			fileExtension: body.fileExtension,
+			clientBeforeFileCount: body.clientBeforeFileCount,
+			clientAfterFileCount: body.clientAfterFileCount,
 		};
 	} catch {
 		return json(
@@ -1375,12 +1384,41 @@ async function handleFirstFileTelemetry(
 			fileExtension: getFileExtension(firstPath),
 			surface: "web",
 			isDemo: authenticated.auth.isDemo,
+			verification: "server_commit",
 		});
 		return json(
 			{ captured: true },
 			{ headers: { "cache-control": "no-store" } },
 		);
 	} catch (error) {
+		if (isLixError(error) && error.code === "LIX_SYNC_HISTORY_REQUIRED") {
+			try {
+				if (!(await serverHasNoUserFiles(client, input.repositoryId))) {
+					return json(
+						{ captured: false, retry: true },
+						{ status: 202, headers: { "cache-control": "no-store" } },
+					);
+				}
+				await captureFirstFileAdded(env, {
+					userId: authenticated.auth.userId,
+					repositoryId: input.repositoryId,
+					fileExtension: input.fileExtension,
+					surface: "web",
+					isDemo: authenticated.auth.isDemo,
+					verification: "browser_commit",
+				});
+				return json(
+					{ captured: true, verification: "browser_commit" },
+					{ headers: { "cache-control": "no-store" } },
+				);
+			} catch (captureError) {
+				console.warn(
+					"Failed to capture browser-verified first-file milestone",
+					captureError,
+				);
+				return json({ captured: false }, { status: 502 });
+			}
+		}
 		console.warn("Failed to verify first-file milestone", error);
 		return json({ captured: false }, { status: 502 });
 	} finally {

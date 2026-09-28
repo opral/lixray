@@ -135,6 +135,8 @@ void test("first-file milestone uses the commit's empty-to-nonempty transition",
 			before: "empty",
 			after: "with-file",
 			fileExtension: "md",
+			clientBeforeFileCount: 0,
+			clientAfterFileCount: 1,
 		},
 	]);
 });
