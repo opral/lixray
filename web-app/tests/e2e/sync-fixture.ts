@@ -15,6 +15,7 @@ import { provisionRepositories } from "../../scripts/provision-repositories.mjs"
 import {
 	createMergeReplayTracker,
 	createRetainedBodyRecoveryTracker,
+	createTransientPushRecoveryTracker,
 	isRetainedBodyUpload,
 	isRetryableMergeConflict,
 } from "./retained-body-recovery";
@@ -322,14 +323,13 @@ export async function createSyncFixture({
 		}
 		const syncFailures: string[] = [];
 		const syncFailureDetails: string[] = [];
-		const recoveredTransientPushFailures: string[] = [];
 		const pendingSyncFailureDetails = new Set<Promise<void>>();
 		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
+		const transientPushRecovery = createTransientPushRecoveryTracker();
 		const runtimeFailures: string[] = [];
-		const transientPushConsoleFailures: string[] = [];
 		const offlineContexts = new WeakSet<BrowserContext>();
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
@@ -737,15 +737,9 @@ export async function createSyncFixture({
 					(offlineConsoleRequests.consume(message.location().url) ||
 						offlineContexts.has(page.context()));
 				const transientPushNoise =
-					scenario === "conflicts" &&
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 503/i.test(message.text()) &&
 					message.location().url.endsWith("/sync/push");
-				if (transientPushNoise) {
-					transientPushConsoleFailures.push(
-						`${label} console: ${message.text()}`,
-					);
-				}
 				if (
 					message.type() === "error" &&
 					!expectedCasNoise &&
@@ -840,11 +834,18 @@ export async function createSyncFixture({
 					status: response.status(),
 					body: response.request().postDataBuffer(),
 				});
+				const pendingTransientPush = transientPushRecovery.observe({
+					method: response.request().method(),
+					url,
+					status: response.status(),
+					body: response.request().postDataBuffer(),
+				});
 				// Push has no idempotency key, so its only 409 mapping is the expected
 				// ref-CAS race. Convergence below proves that reconciliation completed.
 				if (
 					response.status() >= 400 &&
 					!pendingRetainedBodyReplay &&
+					pendingTransientPush === null &&
 					!(response.status() === 409 && url.endsWith("/sync/push"))
 				) {
 					const failure = `${response.status()} ${url}`;
@@ -855,18 +856,6 @@ export async function createSyncFixture({
 							.text()
 							.then((body) => {
 								syncFailureDetails.push(`${failure}: ${body.slice(0, 2_000)}`);
-								// This scenario verifies authority and all four replicas after
-								// each offline conflict. A temporary storage 503 that the client
-								// recovers from is diagnostic evidence, not failed convergence.
-								if (
-									scenario === "conflicts" &&
-									response.status() === 503 &&
-									/"code"\s*:\s*"LIX_STORAGE_IO_UNAVAILABLE"/.test(body)
-								) {
-									const index = syncFailures.indexOf(failure);
-									if (index >= 0) syncFailures.splice(index, 1);
-									recoveredTransientPushFailures.push(failure);
-								}
 							})
 							.catch((error: unknown) => {
 								syncFailureDetails.push(
@@ -912,6 +901,28 @@ export async function createSyncFixture({
 							pendingMergeClassifications.delete(classification),
 						);
 					}
+				}
+				if (pendingTransientPush !== null) {
+					const detail = response
+						.text()
+						.then((body) => {
+							syncFailureDetails.push(`503 ${url}: ${body.slice(0, 2_000)}`);
+							try {
+								transientPushRecovery.classify(
+									pendingTransientPush,
+									JSON.parse(body),
+								);
+							} catch {
+								// An unreadable error body stays an unresolved failure.
+							}
+						})
+						.catch((error: unknown) => {
+							syncFailureDetails.push(
+								`503 ${url}: unreadable response: ${String(error)}`,
+							);
+						});
+					pendingSyncFailureDetails.add(detail);
+					void detail.finally(() => pendingSyncFailureDetails.delete(detail));
 				}
 			});
 		};
@@ -2069,13 +2080,9 @@ export async function createSyncFixture({
 				...syncFailures,
 				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
+				...transientPushRecovery.failures(),
 			];
-			const unresolvedRuntimeFailures = [
-				...runtimeFailures,
-				...transientPushConsoleFailures.slice(
-					recoveredTransientPushFailures.length,
-				),
-			];
+			const unresolvedRuntimeFailures = runtimeFailures;
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
 					{
@@ -2083,7 +2090,7 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						syncFailureDetails,
-						recoveredTransientPushFailures,
+						recoveredTransientPushFailures: transientPushRecovery.recovered(),
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
 						replayedMergeConflicts: mergeReplay.recovered(),

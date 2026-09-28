@@ -3,12 +3,58 @@ import test from "node:test";
 import {
 	createMergeReplayTracker,
 	createRetainedBodyRecoveryTracker,
+	createTransientPushRecoveryTracker,
 } from "./retained-body-recovery.ts";
 
 const url = "https://example.test/lix/v1/repository/sync/retained-bodies";
 const body = Buffer.from('{"request":{"attemptId":"a"},"bodies":[1]}');
 const conflict = { method: "POST", url, body, status: 409 };
 const success = { ...conflict, status: 200 };
+
+void test("only a later byte-identical push recovers a typed storage 503", () => {
+	const tracker = createTransientPushRecoveryTracker();
+	const pushUrl = "https://example.test/lix/v1/repository/sync/push";
+	const failedPush = { method: "POST", url: pushUrl, body, status: 503 };
+	const failure = tracker.observe(failedPush);
+	assert.equal(failure, 1);
+	assert.deepEqual(tracker.failures(), [`503 ${pushUrl}`]);
+	tracker.observe({ ...failedPush, status: 200 });
+	assert.deepEqual(tracker.failures(), [`503 ${pushUrl}`]);
+	tracker.classify(failure!, { error: { code: "LIX_STORAGE_IO_UNAVAILABLE" } });
+	assert.deepEqual(tracker.failures(), []);
+	assert.equal(tracker.recovered(), 1);
+});
+
+void test("push storage failures stay visible without exact successful replay", () => {
+	const pushUrl = "https://example.test/lix/v1/repository/sync/push";
+	const failedPush = { method: "POST", url: pushUrl, body, status: 503 };
+	for (const replay of [
+		{ ...failedPush, status: 200, body: Buffer.from("different") },
+		{ ...failedPush, status: 200, url: pushUrl.replace("repository", "other") },
+		{ ...failedPush, status: 200, method: "GET" },
+		{ ...failedPush, status: 201 },
+	]) {
+		const tracker = createTransientPushRecoveryTracker();
+		const failure = tracker.observe(failedPush);
+		tracker.classify(failure!, {
+			error: { code: "LIX_STORAGE_IO_UNAVAILABLE" },
+		});
+		tracker.observe(replay);
+		assert.deepEqual(tracker.failures(), [`503 ${pushUrl}`]);
+	}
+});
+
+void test("push recovery requires the typed code and success after failure", () => {
+	const tracker = createTransientPushRecoveryTracker();
+	const pushUrl = "https://example.test/lix/v1/repository/sync/push";
+	const failedPush = { method: "POST", url: pushUrl, body, status: 503 };
+	tracker.observe({ ...failedPush, status: 200 });
+	const failure = tracker.observe(failedPush);
+	tracker.classify(failure!, { error: { code: "LIX_STORAGE_FENCED" } });
+	tracker.observe({ ...failedPush, status: 200 });
+	assert.deepEqual(tracker.failures(), [`503 ${pushUrl}`]);
+	assert.equal(tracker.recovered(), 0);
+});
 
 void test("only a later byte-identical successful wave resolves a recorded failure", () => {
 	const tracker = createRetainedBodyRecoveryTracker();

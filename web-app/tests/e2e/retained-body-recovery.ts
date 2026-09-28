@@ -174,3 +174,76 @@ export function createMergeReplayTracker() {
 		recovered: () => recoveredAttempts,
 	};
 }
+
+/** A storage-unavailable push is recovered only by a later byte-identical push. */
+export function createTransientPushRecoveryTracker() {
+	let sequence = 0;
+	const pending = new Map<
+		number,
+		{ key: string; url: string; retryable: boolean }
+	>();
+	const successes: Array<{ key: string; sequence: number }> = [];
+	const requestKey = (response: ObservedResponse): string | null => {
+		if (response.method !== "POST" || !response.body?.byteLength) return null;
+		let url: URL;
+		try {
+			url = new URL(response.url);
+		} catch {
+			return null;
+		}
+		if (
+			!/^\/lix\/v1\/[^/]+\/sync\/push$/.test(url.pathname) ||
+			url.search ||
+			url.hash ||
+			!["http:", "https:"].includes(url.protocol)
+		)
+			return null;
+		return JSON.stringify([
+			response.url,
+			Buffer.from(response.body).toString("base64"),
+		]);
+	};
+	return {
+		/** Returns the failure sequence when this 503 can be classified by its body. */
+		observe(response: ObservedResponse): number | null {
+			const key = requestKey(response);
+			if (!key) return null;
+			const current = ++sequence;
+			if (response.status === 200) successes.push({ key, sequence: current });
+			if (response.status !== 503) return null;
+			pending.set(current, { key, url: response.url, retryable: false });
+			return current;
+		},
+		classify(sequence: number, body: unknown): void {
+			const failure = pending.get(sequence);
+			if (!failure) return;
+			failure.retryable =
+				typeof body === "object" &&
+				body !== null &&
+				"error" in body &&
+				typeof body.error === "object" &&
+				body.error !== null &&
+				"code" in body.error &&
+				body.error.code === "LIX_STORAGE_IO_UNAVAILABLE";
+		},
+		failures: () =>
+			[...pending].flatMap(([failureSequence, failure]) =>
+				failure.retryable &&
+				successes.some(
+					(success) =>
+						success.key === failure.key && success.sequence > failureSequence,
+				)
+					? []
+					: [`503 ${failure.url}`],
+			),
+		recovered: () =>
+			[...pending].filter(
+				([failureSequence, failure]) =>
+					failure.retryable &&
+					successes.some(
+						(success) =>
+							success.key === failure.key && success.sequence > failureSequence,
+					),
+			).length,
+	};
+}
