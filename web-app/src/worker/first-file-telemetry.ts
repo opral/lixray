@@ -25,7 +25,7 @@ export async function addedFirstFile(
 		return null;
 	const countAt = async (commitId: string): Promise<number> => {
 		const result = await reader.execute(lixId, {
-			sql: "SELECT COUNT(*) AS file_count FROM lix_as_of('lix_file', $1)",
+			sql: "SELECT COUNT(*) AS file_count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
 			params: [{ kind: "text", value: commitId }],
 		});
 		const value = result.rows[0]?.[0];
@@ -37,7 +37,7 @@ export async function addedFirstFile(
 	const before = await countAt(commit.before);
 	if (before !== 0) return null;
 	const after = await reader.execute(lixId, {
-		sql: "SELECT path FROM lix_as_of('lix_file', $1) ORDER BY path LIMIT 1",
+		sql: "SELECT path FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%' ORDER BY path LIMIT 1",
 		params: [{ kind: "text", value: commit.after }],
 	});
 	const path = after.rows[0]?.[0];

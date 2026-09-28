@@ -1256,6 +1256,28 @@ export function RepositoryAtelier({
 						);
 					}
 					setRepositoryDefaultBranchId(session.defaultBranchSnapshot());
+					const reportInventory = async (inventory: {
+						repositoryId: string;
+						commitId: string;
+					}) => {
+						const token = await getAccessToken();
+						if (!token) return;
+						const response = await fetch(
+							"/api/telemetry/repository-inventory",
+							{
+								method: "POST",
+								headers: {
+									Authorization: `Bearer ${token}`,
+									"Content-Type": "application/json",
+								},
+								body: JSON.stringify(inventory),
+							},
+						);
+						if (!response.ok)
+							throw new Error(
+								`Inventory telemetry failed (${response.status})`,
+							);
+					};
 
 					// Initialize telemetry handler with repository context
 					atelierTelemetryHandlerRef.current = createAtelierTelemetryHandler(
@@ -1281,9 +1303,20 @@ export function RepositoryAtelier({
 											`First-file telemetry failed (${response.status})`,
 										);
 								},
+								reportInventory,
 							},
 						},
 					);
+					void session.lix
+						.execute("SELECT lix_active_branch_commit_id() AS commit_id")
+						.then(async (result) => {
+							const commitId = result.rows[0]?.commit_id;
+							if (typeof commitId !== "string") return;
+							await reportInventory({ repositoryId, commitId });
+						})
+						.catch((error: unknown) =>
+							console.warn("Failed to report repository inventory", error),
+						);
 
 					const repositoryBranchSession = createRepositoryBranchSession({
 						session,

@@ -86,6 +86,10 @@ import {
 	addedFirstFile,
 	captureFirstFileAdded,
 } from "./first-file-telemetry.ts";
+import {
+	captureRepositoryInventory,
+	readRepositoryInventory,
+} from "./repository-inventory-telemetry.ts";
 
 export { validateMcpJwtClaims } from "../mcp/auth.ts";
 
@@ -372,6 +376,9 @@ export async function handleRequest(
 	}
 	if (url.pathname === "/api/telemetry/first-file") {
 		return handleFirstFileTelemetry(request, env, options);
+	}
+	if (url.pathname === "/api/telemetry/repository-inventory") {
+		return handleRepositoryInventoryTelemetry(request, env, options);
 	}
 
 	if (url.pathname === BROWSER_OTLP_PATH) {
@@ -781,9 +788,33 @@ export async function handleRequest(
 				startTime: Date.now(),
 				lixId: undefined as string | undefined,
 			};
-			const pendingFirstFileCaptures: Array<Promise<void>> = [];
+			const pendingTelemetryCaptures: Array<Promise<void>> = [];
 
 			const onToolCall = (observation: McpToolCallObservation): void => {
+				if (
+					observation.outcome === "success" &&
+					observation.lixId &&
+					observation.inventoryCommitId
+				) {
+					const repositoryId = observation.lixId;
+					const commitId = observation.inventoryCommitId;
+					pendingTelemetryCaptures.push(
+						readRepositoryInventory(client, repositoryId, commitId)
+							.then((inventory) =>
+								captureRepositoryInventory(env, {
+									userId: authResult.auth.userId,
+									repositoryId,
+									commitId,
+									surface: "mcp",
+									isDemo: authResult.auth.isDemo,
+									inventory,
+								}),
+							)
+							.catch((error: unknown) =>
+								console.warn("Failed to capture repository inventory", error),
+							),
+					);
+				}
 				if (lixrTelemetry && observation.outcome === "success") {
 					const sqlAnalysis = observation.executeInput
 						? analyzeSqlOperation(observation.executeInput)
@@ -841,7 +872,25 @@ export async function handleRequest(
 						(observation.toolName === "write_files" ||
 							observation.toolName === "execute_sql")
 					) {
-						pendingFirstFileCaptures.push(
+						const repositoryId = observation.lixId;
+						const commitId = observation.commit.after;
+						pendingTelemetryCaptures.push(
+							readRepositoryInventory(client, repositoryId, commitId)
+								.then((inventory) =>
+									captureRepositoryInventory(env, {
+										userId: authResult.auth.userId,
+										repositoryId,
+										commitId,
+										surface: "mcp",
+										isDemo: authResult.auth.isDemo,
+										inventory,
+									}),
+								)
+								.catch((error: unknown) =>
+									console.warn("Failed to capture repository inventory", error),
+								),
+						);
+						pendingTelemetryCaptures.push(
 							addedFirstFile(client, observation.lixId, observation.commit)
 								.then(async (firstPath) => {
 									if (!firstPath) return;
@@ -901,7 +950,7 @@ export async function handleRequest(
 				await withSpan("mcp.connection_records", () =>
 					Promise.allSettled(pendingConnectionRecords),
 				);
-				await Promise.allSettled(pendingFirstFileCaptures);
+				await Promise.allSettled(pendingTelemetryCaptures);
 				try {
 					if (lixrTelemetry) {
 						if (importSession.fileWrites.size > 0) {
@@ -1333,6 +1382,68 @@ async function handleFirstFileTelemetry(
 		);
 	} catch (error) {
 		console.warn("Failed to verify first-file milestone", error);
+		return json({ captured: false }, { status: 502 });
+	} finally {
+		await client.close();
+	}
+}
+
+async function handleRepositoryInventoryTelemetry(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	if (request.method !== "POST")
+		return new Response("Method not allowed\n", { status: 405 });
+	const authenticated = await (
+		options.authenticate ?? authenticateWithSupabase
+	)(request, env);
+	if (!authenticated.ok) return authenticated.response;
+	let repositoryId: string;
+	let commitId: string;
+	try {
+		const body = (await request.json()) as Record<string, unknown>;
+		if (
+			!body ||
+			typeof body.repositoryId !== "string" ||
+			!UUID_PATTERN.test(body.repositoryId) ||
+			typeof body.commitId !== "string" ||
+			!body.commitId ||
+			body.commitId.length > 256
+		)
+			return json({ error: "Invalid inventory context" }, { status: 400 });
+		repositoryId = body.repositoryId;
+		commitId = body.commitId;
+	} catch {
+		return json({ error: "Invalid inventory context" }, { status: 400 });
+	}
+	const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+	const client = new WorkerLixRuntimeClient(
+		env,
+		authenticated.auth,
+		async (lixId, auth) => authorizeLix(lixId, auth, env),
+		{ signal: request.signal, lixFetch: options.lixFetch },
+	);
+	try {
+		const inventory = await readRepositoryInventory(
+			client,
+			repositoryId,
+			commitId,
+		);
+		await captureRepositoryInventory(env, {
+			userId: authenticated.auth.userId,
+			repositoryId,
+			commitId,
+			surface: "web",
+			isDemo: authenticated.auth.isDemo,
+			inventory,
+		});
+		return json(
+			{ captured: true },
+			{ headers: { "cache-control": "no-store" } },
+		);
+	} catch (error) {
+		console.warn("Failed to capture repository inventory", error);
 		return json({ captured: false }, { status: 502 });
 	} finally {
 		await client.close();

@@ -132,6 +132,7 @@ export interface McpToolCallObservation {
 	errorCode?: string;
 	lixId?: string;
 	commit?: CommitSpan | null;
+	inventoryCommitId?: string;
 	executeInput?: McpExecuteInputObservation;
 	executeOutput?: McpExecuteOutputObservation;
 	fileContentCharCount?: number;
@@ -1682,6 +1683,9 @@ function registerTool(
 					surfaceVersion,
 					...(lixId ? { lixId } : {}),
 					...(raw.commit ? { commit: raw.commit as CommitSpan } : {}),
+					...(name === "open_lix" && typeof raw.commit_id === "string"
+						? { inventoryCommitId: raw.commit_id }
+						: {}),
 					...(executeInput ? { executeInput } : {}),
 					...(executeOutput ? { executeOutput } : {}),
 					...(rawStatements ? { rawStatements } : {}),

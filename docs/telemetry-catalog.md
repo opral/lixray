@@ -35,6 +35,7 @@ needed for joins and group analytics, but names and content are not.
 | ------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- |
 | `user_signed_up`          | Auth backend confirms a newly created account | `auth_provider`, `signup_source`, `email`, `name`                                                       | web, mcp |
 | `first_file_added`        | A committed write changes a repository from zero files to one or more files | `repository_id`, `lix_id`, `file_extension`, `telemetry_schema_version=2` | web, mcp |
+| `repository_inventory_snapshot` | A repository is opened or a committed file change is observed | `repository_id`, `snapshot_date`, total and user/`.lix` file counts and content bytes, total and user/`.lix` file-size buckets, total and user/`.lix` extension counts and bytes, `telemetry_schema_version=1` | web, mcp |
 | `file_written`            | MCP write is verified                         | safe size/hash verification fields, `repository_id`, `organization_id`, `lix_id`                        | mcp      |
 | `import_completed`        | MCP bulk import completes                     | counts, `duration_ms`, `repository_id`, `lix_id`                                                        | mcp      |
 | `oauth_consent_resolved`  | OAuth decision succeeds                       | `decision`, `client_name`, `redirect_host`                                                              | web      |
@@ -68,6 +69,21 @@ UUID is the repository ID, so repeated delivery across clients resolves to the
 same milestone. Earlier captures used a browser-local marker or an MCP
 request-local marker and overcounted; filter to `telemetry_schema_version=2`
 for activation analysis. This remains product analytics, not a billing ledger.
+
+`repository_inventory_snapshot` measures the live files at a specific commit,
+using `OCTET_LENGTH(content)` for logical content bytes. It does not measure
+database storage, compression, or history. Paths under `/.lix/` are
+classified separately; overall totals include them, and `user_*` properties
+exclude them. The event UUID is derived from the
+repository, commit, and UTC date: a repeated open of the same commit on the
+same day deduplicates, while a return on a later day is another observation.
+For daily growth curves, select the last snapshot per repository per day before
+aggregating; do not sum snapshots or treat event count as repository count.
+Each extension breakdown includes only counts and bytes for up to 20 common
+extensions in that path class, with the remaining extensions grouped as
+`(other)`. File paths and contents are never sent to PostHog. Empty
+repositories may have a zero-file baseline; filter to activated repositories
+when measuring value.
 
 ## PostHog and OpenTelemetry signal families
 

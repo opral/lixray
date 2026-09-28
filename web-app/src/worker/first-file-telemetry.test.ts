@@ -16,6 +16,7 @@ void test("first-file detection requires a committed zero-to-nonempty transition
 			request: { sql: string; params?: Array<{ value: string }> },
 		) => {
 			const commit = request.params?.[0]?.value ?? "";
+			assert.match(request.sql, /path NOT LIKE '\/\.lix\/%'/);
 			calls.push(commit);
 			return (
 				request.sql.includes("COUNT")

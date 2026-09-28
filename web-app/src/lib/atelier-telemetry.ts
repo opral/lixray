@@ -19,6 +19,10 @@ interface AtelierTelemetryContext {
 		after: string;
 		fileExtension: string;
 	}) => Promise<void>;
+	reportInventory?: (input: {
+		repositoryId: string;
+		commitId: string;
+	}) => Promise<void>;
 }
 
 export function createAtelierTelemetryHandler(
@@ -68,6 +72,16 @@ export function createAtelierTelemetryHandler(
 				});
 				break;
 			case "document_modified": {
+				if (context.repositoryId && context.reportInventory && event.commit) {
+					void context
+						.reportInventory({
+							repositoryId: context.repositoryId,
+							commitId: event.commit.after,
+						})
+						.catch((error: unknown) =>
+							console.warn("Failed to report repository inventory", error),
+						);
+				}
 				const capturedAt = now();
 				const lastCapturedAt = lastModificationByPath.get(event.filePath);
 				if (
@@ -93,12 +107,12 @@ export function createAtelierTelemetryHandler(
 					void (async () => {
 						try {
 							const beforeResult = await context.lix!.execute(
-								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1)",
+								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
 								[before],
 							);
 							if (Number(beforeResult.rows[0]?.count) !== 0) return;
 							const afterResult = await context.lix!.execute(
-								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1)",
+								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
 								[after],
 							);
 							if (Number(afterResult.rows[0]?.count) < 1) return;
