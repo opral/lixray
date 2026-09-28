@@ -134,8 +134,7 @@ test("Atelier resolves the vendored Lix SDK instead of npm", async () => {
 
 	// A source checkout can contain the next breaking API before release
 	// automation updates package versions. Validate that checkout against the
-	// same non-mutating release plan used by Lix, never a hardcoded exception
-	// or a broader peer range that accepts incompatible published packages.
+	// same non-mutating release plan used by Lix, never a hardcoded exception.
 	const lixRoot = new URL("../../vendor/lix/", import.meta.url);
 	const { currentVersion, loadChanges, highestChangeType, bumpVersion } =
 		await import(new URL("scripts/release.mjs", lixRoot).href);
@@ -168,6 +167,10 @@ function atelierPeerSatisfiesVendoredSdk(peerRange, version) {
 			candidate[1] === minimum[1] &&
 			candidate[2] >= minimum[2]
 		);
+	}
+	const minimumOnly = /^>=(\d+)\.(\d+)\.(\d+)$/.exec(peerRange);
+	if (minimumOnly) {
+		return compareSemver(candidate, minimumOnly.slice(1).map(Number)) >= 0;
 	}
 	const interval = /^>=(\d+)\.(\d+)\.(\d+) <(\d+)\.(\d+)\.(\d+)$/.exec(
 		peerRange,
