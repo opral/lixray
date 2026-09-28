@@ -19,6 +19,7 @@ import {
 	isRetryableMergeConflict,
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
+import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
 
 import {
 	installSyncDiagnostics,
@@ -322,14 +323,18 @@ export async function createSyncFixture({
 		}
 		const syncFailures: string[] = [];
 		const syncFailureDetails: string[] = [];
-		const recoveredTransientPushFailures: string[] = [];
+		const transientPushRecovery = createTransientPushRecoveryTracker();
 		const pendingSyncFailureDetails = new Set<Promise<void>>();
 		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
-		const transientPushConsoleFailures: string[] = [];
+		const transientPushConsoleFailures: Array<{
+			source: string;
+			url: string;
+			message: string;
+		}> = [];
 		const offlineContexts = new WeakSet<BrowserContext>();
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
@@ -737,14 +742,18 @@ export async function createSyncFixture({
 					(offlineConsoleRequests.consume(message.location().url) ||
 						offlineContexts.has(page.context()));
 				const transientPushNoise =
-					scenario === "conflicts" &&
+					(scenario === "editing" ||
+						scenario === "history" ||
+						scenario === "conflicts") &&
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 503/i.test(message.text()) &&
 					message.location().url.endsWith("/sync/push");
 				if (transientPushNoise) {
-					transientPushConsoleFailures.push(
-						`${label} console: ${message.text()}`,
-					);
+					transientPushConsoleFailures.push({
+						source: label,
+						url: message.location().url,
+						message: `${label} console: ${message.text()}`,
+					});
 				}
 				if (
 					message.type() === "error" &&
@@ -784,6 +793,16 @@ export async function createSyncFixture({
 			page.on("response", (response) => {
 				const url = response.url();
 				if (!/\/lix\/v1\/[^/]+\/sync\//.test(url)) return;
+				const pushObservation = url.endsWith("/sync/push")
+					? transientPushRecovery.observe({
+							source: label,
+							replicaId: response.request().headers()["lix-replica-id"] ?? null,
+							method: response.request().method(),
+							url,
+							status: response.status(),
+							body: response.request().postDataBuffer(),
+						})
+					: undefined;
 				if (
 					response.request().method() === "GET" &&
 					/\/sync\/blob(?:\?|$)/.test(url) &&
@@ -849,24 +868,23 @@ export async function createSyncFixture({
 				) {
 					const failure = `${response.status()} ${url}`;
 					const failureRecorded = !pendingMergeReplay;
-					if (failureRecorded) syncFailures.push(failure);
+					if (
+						failureRecorded &&
+						(!pushObservation || pushObservation.status !== 503)
+					)
+						syncFailures.push(failure);
 					if (failureRecorded && url.endsWith("/sync/push")) {
 						const detail = response
 							.text()
 							.then((body) => {
 								syncFailureDetails.push(`${failure}: ${body.slice(0, 2_000)}`);
-								// This scenario verifies authority and all four replicas after
-								// each offline conflict. A temporary storage 503 that the client
-								// recovers from is diagnostic evidence, not failed convergence.
 								if (
-									scenario === "conflicts" &&
-									response.status() === 503 &&
-									/"code"\s*:\s*"LIX_STORAGE_IO_UNAVAILABLE"/.test(body)
-								) {
-									const index = syncFailures.indexOf(failure);
-									if (index >= 0) syncFailures.splice(index, 1);
-									recoveredTransientPushFailures.push(failure);
-								}
+									pushObservation?.status === 503 &&
+									(scenario === "editing" ||
+										scenario === "history" ||
+										scenario === "conflicts")
+								)
+									transientPushRecovery.classify(pushObservation, body);
 							})
 							.catch((error: unknown) => {
 								syncFailureDetails.push(
@@ -2065,16 +2083,33 @@ export async function createSyncFixture({
 					contentType: "application/json",
 				});
 			}
+			const recoveredPushes = transientPushRecovery.recovered();
+			const recoveredConsoleCounts = new Map<string, number>();
+			for (const push of recoveredPushes) {
+				const key = JSON.stringify([push.source, push.url]);
+				recoveredConsoleCounts.set(
+					key,
+					(recoveredConsoleCounts.get(key) ?? 0) + 1,
+				);
+			}
+			const unresolvedConsoleFailures = transientPushConsoleFailures
+				.filter((failure) => {
+					const key = JSON.stringify([failure.source, failure.url]);
+					const recovered = recoveredConsoleCounts.get(key) ?? 0;
+					if (recovered === 0) return true;
+					recoveredConsoleCounts.set(key, recovered - 1);
+					return false;
+				})
+				.map((failure) => failure.message);
 			const unresolvedSyncFailures = [
 				...syncFailures,
+				...transientPushRecovery.failures(),
 				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
 			];
 			const unresolvedRuntimeFailures = [
 				...runtimeFailures,
-				...transientPushConsoleFailures.slice(
-					recoveredTransientPushFailures.length,
-				),
+				...unresolvedConsoleFailures,
 			];
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
@@ -2083,7 +2118,9 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						syncFailureDetails,
-						recoveredTransientPushFailures,
+						recoveredTransientPushFailures: recoveredPushes.map(
+							(push) => `${push.status} ${push.url}`,
+						),
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
 						replayedMergeConflicts: mergeReplay.recovered(),
