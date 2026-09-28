@@ -8,6 +8,42 @@ import {
 
 const REPOSITORY_ID = "11111111-1111-4111-8111-111111111111";
 
+void test("deferred history uses live inventory only for the requested head", async () => {
+	const deferred = Object.assign(new Error("history deferred"), {
+		code: "LIX_SYNC_HISTORY_REQUIRED",
+	});
+	let head = "commit-1";
+	const calls: string[] = [];
+	const reader = {
+		execute: async (_repositoryId: string, request: { sql: string }) => {
+			calls.push(request.sql);
+			if (request.sql.includes("lix_as_of")) throw deferred;
+			if (request.sql.includes("lix_active_branch_commit_id"))
+				return { rows: [[{ kind: "text", value: head }]] } as never;
+			return {
+				rows: [
+					[
+						{ kind: "text", value: "/notes.md" },
+						{ kind: "int", value: 5 },
+					],
+				],
+			} as never;
+		},
+	};
+	const inventory = await readRepositoryInventory(
+		reader,
+		REPOSITORY_ID,
+		"commit-1",
+	);
+	assert.equal(inventory.user_content_bytes, 5);
+	assert.equal(calls.length, 3);
+	head = "commit-2";
+	await assert.rejects(
+		readRepositoryInventory(reader, REPOSITORY_ID, "commit-1"),
+		(error: unknown) => error === deferred,
+	);
+});
+
 void test("internal .lix paths are classified and still included in totals", async () => {
 	const inventory = await readRepositoryInventory(
 		{

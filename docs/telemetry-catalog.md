@@ -84,6 +84,10 @@ extensions in that path class, with the remaining extensions grouped as
 `(other)`. File paths and contents are never sent to PostHog. Empty
 repositories may have a zero-file baseline; filter to activated repositories
 when measuring value.
+If a partial replica cannot reconstruct an older commit because sync history
+payloads are deferred, the server uses the live file view only when its head is
+the requested commit. Otherwise it skips that observation until a later open;
+it never attributes a different commit's inventory to the requested commit.
 
 ## PostHog and OpenTelemetry signal families
 

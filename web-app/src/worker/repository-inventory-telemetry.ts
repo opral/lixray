@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { PostHog, type EventMessage } from "posthog-node";
 import type { ExecuteRequest, ExecuteResponse } from "../mcp/lix-service.ts";
+import { isLixError } from "../mcp/lix-service.ts";
 import { PRODUCT_EVENTS } from "../lib/telemetry-events.ts";
 import {
 	isDemoEnvironment,
@@ -14,6 +15,8 @@ type Reader = {
 
 const INVENTORY_SQL =
 	"SELECT path, OCTET_LENGTH(content) AS content_bytes FROM lix_as_of('lix_file', $1)";
+const CURRENT_INVENTORY_SQL =
+	"SELECT path, OCTET_LENGTH(content) AS content_bytes FROM lix_file";
 const SIZE_BUCKETS = [1_024, 10_240, 102_400, 1_048_576] as const;
 const MAX_EXTENSIONS = 20;
 
@@ -45,10 +48,27 @@ export async function readRepositoryInventory(
 	repositoryId: string,
 	commitId: string,
 ): Promise<RepositoryInventory> {
-	const result = await reader.execute(repositoryId, {
-		sql: INVENTORY_SQL,
-		params: [{ kind: "text", value: commitId }],
-	});
+	let result: ExecuteResponse;
+	try {
+		result = await reader.execute(repositoryId, {
+			sql: INVENTORY_SQL,
+			params: [{ kind: "text", value: commitId }],
+		});
+	} catch (error) {
+		if (!isLixError(error) || error.code !== "LIX_SYNC_HISTORY_REQUIRED")
+			throw error;
+		// A partial replica can have the live head without the older payloads
+		// required by lix_as_of. Only use the live view when it is the exact commit.
+		const head = await reader.execute(repositoryId, {
+			sql: "SELECT lix_active_branch_commit_id() AS commit_id",
+		});
+		const currentCommit = head.rows[0]?.[0];
+		if (currentCommit?.kind !== "text" || currentCommit.value !== commitId)
+			throw error;
+		result = await reader.execute(repositoryId, {
+			sql: CURRENT_INVENTORY_SQL,
+		});
+	}
 	const inventory: RepositoryInventory = {
 		file_count: 0,
 		total_content_bytes: 0,

@@ -37,7 +37,7 @@ import {
 	type ProfileRepositorySource,
 } from "../lib/profile-activity-aggregate.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import { LixService, type LixSummary } from "../mcp/lix-service.ts";
+import { LixService, isLixError, type LixSummary } from "../mcp/lix-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -1443,6 +1443,12 @@ async function handleRepositoryInventoryTelemetry(
 			{ headers: { "cache-control": "no-store" } },
 		);
 	} catch (error) {
+		if (isLixError(error) && error.code === "LIX_SYNC_HISTORY_REQUIRED") {
+			return json(
+				{ captured: false, reason: "snapshot_unavailable" },
+				{ headers: { "cache-control": "no-store" } },
+			);
+		}
 		console.warn("Failed to capture repository inventory", error);
 		return json({ captured: false }, { status: 502 });
 	} finally {
