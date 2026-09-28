@@ -13,6 +13,18 @@ interface AtelierTelemetryContext {
 	lix?: Lix;
 	repositoryId?: string;
 	organizationId?: string;
+	reportFirstFile?: (input: {
+		repositoryId: string;
+		before: string;
+		after: string;
+		fileExtension: string;
+		clientBeforeFileCount: number;
+		clientAfterFileCount: number;
+	}) => Promise<void>;
+	reportInventory?: (input: {
+		repositoryId: string;
+		commitId: string;
+	}) => Promise<void>;
 }
 
 export function createAtelierTelemetryHandler(
@@ -62,6 +74,16 @@ export function createAtelierTelemetryHandler(
 				});
 				break;
 			case "document_modified": {
+				if (context.repositoryId && context.reportInventory && event.commit) {
+					void context
+						.reportInventory({
+							repositoryId: context.repositoryId,
+							commitId: event.commit.after,
+						})
+						.catch((error: unknown) =>
+							console.warn("Failed to report repository inventory", error),
+						);
+				}
 				const capturedAt = now();
 				const lastCapturedAt = lastModificationByPath.get(event.filePath);
 				if (
@@ -76,40 +98,40 @@ export function createAtelierTelemetryHandler(
 					modified_by: event.modifiedBy,
 				});
 
-				// Track first_file_added once for repositories.
-				if (context.lix && context.repositoryId && context.organizationId) {
-					const firstFileKey = `lixray.first-file.${context.repositoryId}`;
-					const hasTrackedFirstFile =
-						typeof window !== "undefined"
-							? window.localStorage.getItem(firstFileKey)
-							: null;
-
-					if (!hasTrackedFirstFile) {
-						void (async () => {
-							try {
-								// Check if this is the first file in the repository
-								const result = await context.lix!.execute(
-									"SELECT COUNT(*) as count FROM lix_file",
-									[],
-								);
-								const fileCount = Number(result.rows[0]?.count ?? 0);
-
-								// If there's exactly 1 file, this is the first one
-								if (fileCount === 1) {
-									capture(PRODUCT_EVENTS.firstFileAdded, {
-										repository_id: context.repositoryId!,
-										organization_id: context.organizationId!,
-										file_extension: fileExtensionProperty(event.filePath),
-									});
-									if (typeof window !== "undefined") {
-										window.localStorage.setItem(firstFileKey, "true");
-									}
-								}
-							} catch (error) {
-								console.warn("Failed to check first file status", error);
-							}
-						})();
-					}
+				// Use the write's commit, not the current working state or localStorage.
+				if (
+					context.lix &&
+					context.repositoryId &&
+					context.reportFirstFile &&
+					event.commit
+				) {
+					const { before, after } = event.commit;
+					void (async () => {
+						try {
+							const beforeResult = await context.lix!.execute(
+								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
+								[before],
+							);
+							if (Number(beforeResult.rows[0]?.count) !== 0) return;
+							const afterResult = await context.lix!.execute(
+								"SELECT COUNT(*) AS count FROM lix_as_of('lix_file', $1) WHERE path NOT LIKE '/.lix/%'",
+								[after],
+							);
+							const afterFileCount = Number(afterResult.rows[0]?.count);
+							if (!Number.isSafeInteger(afterFileCount) || afterFileCount < 1)
+								return;
+							await context.reportFirstFile!({
+								repositoryId: context.repositoryId!,
+								before,
+								after,
+								fileExtension: fileExtensionProperty(event.filePath),
+								clientBeforeFileCount: 0,
+								clientAfterFileCount: afterFileCount,
+							});
+						} catch (error) {
+							console.warn("Failed to report first-file milestone", error);
+						}
+					})();
 				}
 				break;
 			}

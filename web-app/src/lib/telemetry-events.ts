@@ -22,6 +22,7 @@ export const PRODUCT_EVENTS = {
 	organizationCreated: "organization_created",
 	organizationRenamed: "organization_renamed",
 	repositoryCreated: "repository_created",
+	repositoryInventorySnapshot: "repository_inventory_snapshot",
 	repositoryDeleted: "repository_deleted",
 	repositoryRenamed: "repository_renamed",
 	resourcePublished: "resource_published",

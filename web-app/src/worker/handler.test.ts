@@ -679,6 +679,68 @@ void test("signup telemetry requires an authenticated browser session", async ()
 	assert.equal(response.status, 401);
 });
 
+void test("first-file telemetry accepts a locally observed offline transition only while the server has zero user files", async () => {
+	const request = () =>
+		new Request("https://example.test/api/telemetry/first-file", {
+			method: "POST",
+			body: JSON.stringify({
+				repositoryId: LIX_A,
+				before: "before",
+				after: "after",
+				fileExtension: "md",
+				clientBeforeFileCount: 0,
+				clientAfterFileCount: 1,
+			}),
+		});
+	let currentFileCount = 0;
+	const protocolCalls: string[] = [];
+	const options = {
+		authenticate: authenticated(),
+		authorizeLix: resolved(LIX_A),
+		lixFetch: async (_lixId: string, incoming: Request): Promise<Response> => {
+			const path = new URL(incoming.url).pathname;
+			protocolCalls.push(`${incoming.method} ${path}`);
+			if (path === `/lix/v1/${LIX_A}/`)
+				return Response.json({
+					protocolVersion: compatibility.serverProtocolVersion,
+					activeBranchId: "main",
+					activeAccountId: "00000000-0000-7000-8000-000000000002",
+					sessionId: "first-file-telemetry-test",
+				});
+			if (path === `/lix/v1/${LIX_A}/session` && incoming.method === "DELETE")
+				return new Response(null, { status: 204 });
+			const body = (await incoming.json()) as { sql: string };
+			if (body.sql.includes("lix_as_of"))
+				return Response.json(
+					{
+						error: {
+							code: "LIX_SYNC_HISTORY_REQUIRED",
+							message: "history deferred",
+						},
+					},
+					{ status: 400 },
+				);
+			assert.match(body.sql, /FROM lix_file WHERE path NOT LIKE/);
+			return Response.json({
+				columns: [{ name: "file_count", type: "integer" }],
+				rows: [[{ kind: "int", value: currentFileCount }]],
+				rowsAffected: 0,
+				notices: [],
+			});
+		},
+	};
+	const captured = await handleRequest(request(), env({}), options);
+	assert.equal(captured.status, 200, JSON.stringify(protocolCalls));
+	assert.deepEqual(await captured.json(), {
+		captured: true,
+		verification: "browser_commit",
+	});
+	currentFileCount = 2;
+	const deferred = await handleRequest(request(), env({}), options);
+	assert.equal(deferred.status, 202);
+	assert.deepEqual(await deferred.json(), { captured: false, retry: true });
+});
+
 void test("non-/v1 routes delegate to the frontend fallback", async () => {
 	const response = await handleRequest(
 		new Request("https://example.test/"),

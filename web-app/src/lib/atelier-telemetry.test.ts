@@ -81,14 +81,15 @@ void test("normalizes file extensions without retaining names", () => {
 	assert.equal(fileExtensionProperty("/private/file.we!rd"), "werd");
 });
 
-void test("first_file_added fires once when repository gets its first file", async () => {
+void test("first-file milestone uses the commit's empty-to-nonempty transition", async () => {
 	const captured: Array<{
 		event: string;
 		properties: Record<string, unknown>;
 	}> = [];
+	const reported: Array<Record<string, unknown>> = [];
 	const mockLix = {
-		execute: async () => ({
-			rows: [{ count: 1 }],
+		execute: async (_sql: string, params: string[]) => ({
+			rows: [{ count: params[0] === "empty" ? 0 : 1 }],
 		}),
 	};
 	const handler = createAtelierTelemetryHandler(
@@ -100,7 +101,11 @@ void test("first_file_added fires once when repository gets its first file", asy
 				lix: mockLix as never,
 				repositoryId: "repo-123",
 				organizationId: "org-456",
+				reportFirstFile: async (input) => {
+					reported.push(input);
+				},
 			},
+			modificationThrottleMs: 0,
 		},
 	);
 
@@ -108,20 +113,32 @@ void test("first_file_added fires once when repository gets its first file", asy
 		type: "document_modified",
 		filePath: "/first-file.md",
 		modifiedBy: "user",
+		commit: { before: "empty", after: "with-file" },
+	});
+	handler({
+		type: "document_modified",
+		filePath: "/first-file.md",
+		modifiedBy: "user",
+		commit: { before: "with-file", after: "later" },
 	});
 
 	// Wait for async check to complete
 	await new Promise((resolve) => setTimeout(resolve, 10));
 
-	const firstFileEvent = captured.find(
-		(event) => event.event === "first_file_added",
+	assert.equal(
+		captured.filter((event) => event.event === "first_file_added").length,
+		0,
 	);
-	assert.ok(firstFileEvent, "first_file_added event should be captured");
-	assert.deepEqual(firstFileEvent?.properties, {
-		repository_id: "repo-123",
-		organization_id: "org-456",
-		file_extension: "md",
-	});
+	assert.deepEqual(reported, [
+		{
+			repositoryId: "repo-123",
+			before: "empty",
+			after: "with-file",
+			fileExtension: "md",
+			clientBeforeFileCount: 0,
+			clientAfterFileCount: 1,
+		},
+	]);
 });
 
 void test("document loaded records measured latency without document identity", () => {

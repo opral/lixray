@@ -37,7 +37,7 @@ import {
 	type ProfileRepositorySource,
 } from "../lib/profile-activity-aggregate.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
-import { LixService, type LixSummary } from "../mcp/lix-service.ts";
+import { LixService, isLixError, type LixSummary } from "../mcp/lix-service.ts";
 import {
 	handleMcpTransport,
 	MCP_DOCUMENTATION_PATH,
@@ -82,6 +82,15 @@ import {
 	PublicProfileActivityCache,
 } from "./profile-activity-cache.ts";
 import { handleOtlpTelemetry } from "./otlp-telemetry.ts";
+import {
+	addedFirstFile,
+	captureFirstFileAdded,
+	serverHasNoUserFiles,
+} from "./first-file-telemetry.ts";
+import {
+	captureRepositoryInventory,
+	readRepositoryInventory,
+} from "./repository-inventory-telemetry.ts";
 
 export { validateMcpJwtClaims } from "../mcp/auth.ts";
 
@@ -365,6 +374,12 @@ export async function handleRequest(
 
 	if (url.pathname === "/api/telemetry/otlp/v1/traces") {
 		return handleOtlpTelemetry(request, env);
+	}
+	if (url.pathname === "/api/telemetry/first-file") {
+		return handleFirstFileTelemetry(request, env, options);
+	}
+	if (url.pathname === "/api/telemetry/repository-inventory") {
+		return handleRepositoryInventoryTelemetry(request, env, options);
 	}
 
 	if (url.pathname === BROWSER_OTLP_PATH) {
@@ -768,15 +783,39 @@ export async function handleRequest(
 
 			const importSession = {
 				fileWrites: new Set<string>(),
-				firstFileAdded: false,
 				totalChars: 0,
 				totalBytes: 0,
 				toolCallCount: 0,
 				startTime: Date.now(),
 				lixId: undefined as string | undefined,
 			};
+			const pendingTelemetryCaptures: Array<Promise<void>> = [];
 
 			const onToolCall = (observation: McpToolCallObservation): void => {
+				if (
+					observation.outcome === "success" &&
+					observation.lixId &&
+					observation.inventoryCommitId
+				) {
+					const repositoryId = observation.lixId;
+					const commitId = observation.inventoryCommitId;
+					pendingTelemetryCaptures.push(
+						readRepositoryInventory(client, repositoryId, commitId)
+							.then((inventory) =>
+								captureRepositoryInventory(env, {
+									userId: authResult.auth.userId,
+									repositoryId,
+									commitId,
+									surface: "mcp",
+									isDemo: authResult.auth.isDemo,
+									inventory,
+								}),
+							)
+							.catch((error: unknown) =>
+								console.warn("Failed to capture repository inventory", error),
+							),
+					);
+				}
 				if (lixrTelemetry && observation.outcome === "success") {
 					const sqlAnalysis = observation.executeInput
 						? analyzeSqlOperation(observation.executeInput)
@@ -826,12 +865,48 @@ export async function handleRequest(
 							};
 
 							lixrTelemetry.captureFileWritten(writeProps);
-
-							if (!importSession.firstFileAdded) {
-								importSession.firstFileAdded = true;
-								lixrTelemetry.captureFirstFileAdded(writeProps);
-							}
 						}
+					}
+					if (
+						observation.lixId &&
+						observation.commit &&
+						(observation.toolName === "write_files" ||
+							observation.toolName === "execute_sql")
+					) {
+						const repositoryId = observation.lixId;
+						const commitId = observation.commit.after;
+						pendingTelemetryCaptures.push(
+							readRepositoryInventory(client, repositoryId, commitId)
+								.then((inventory) =>
+									captureRepositoryInventory(env, {
+										userId: authResult.auth.userId,
+										repositoryId,
+										commitId,
+										surface: "mcp",
+										isDemo: authResult.auth.isDemo,
+										inventory,
+									}),
+								)
+								.catch((error: unknown) =>
+									console.warn("Failed to capture repository inventory", error),
+								),
+						);
+						pendingTelemetryCaptures.push(
+							addedFirstFile(client, observation.lixId, observation.commit)
+								.then(async (firstPath) => {
+									if (!firstPath) return;
+									await captureFirstFileAdded(env, {
+										userId: authResult.auth.userId,
+										repositoryId: observation.lixId!,
+										fileExtension: getFileExtension(firstPath),
+										surface: "mcp",
+										isDemo: authResult.auth.isDemo,
+									});
+								})
+								.catch((error: unknown) =>
+									console.warn("Failed to capture first-file milestone", error),
+								),
+						);
 					}
 
 					// Add file content size to observation for $mcp_tool_call eventProperties
@@ -876,6 +951,7 @@ export async function handleRequest(
 				await withSpan("mcp.connection_records", () =>
 					Promise.allSettled(pendingConnectionRecords),
 				);
+				await Promise.allSettled(pendingTelemetryCaptures);
 				try {
 					if (lixrTelemetry) {
 						if (importSession.fileWrites.size > 0) {
@@ -1228,6 +1304,194 @@ async function handleSignupTelemetry(
 		{ captured: result === "captured" },
 		{ headers: { "cache-control": "no-store" } },
 	);
+}
+
+async function handleFirstFileTelemetry(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	if (request.method !== "POST")
+		return new Response("Method not allowed\n", { status: 405 });
+	const authenticated = await (
+		options.authenticate ?? authenticateWithSupabase
+	)(request, env);
+	if (!authenticated.ok) return authenticated.response;
+	let input: {
+		repositoryId: string;
+		before: string;
+		after: string;
+		fileExtension: string;
+		clientBeforeFileCount: number;
+		clientAfterFileCount: number;
+	};
+	try {
+		const body = (await request.json()) as Record<string, unknown>;
+		if (
+			!body ||
+			typeof body.repositoryId !== "string" ||
+			!UUID_PATTERN.test(body.repositoryId) ||
+			typeof body.before !== "string" ||
+			!body.before ||
+			typeof body.after !== "string" ||
+			!body.after ||
+			typeof body.fileExtension !== "string" ||
+			!/^\([a-z]+\)$|^[a-z0-9+_-]{1,20}$/.test(body.fileExtension) ||
+			body.clientBeforeFileCount !== 0 ||
+			typeof body.clientAfterFileCount !== "number" ||
+			!Number.isSafeInteger(body.clientAfterFileCount) ||
+			body.clientAfterFileCount < 1
+		)
+			return json(
+				{ error: "Invalid first-file telemetry context" },
+				{ status: 400 },
+			);
+		input = {
+			repositoryId: body.repositoryId,
+			before: body.before,
+			after: body.after,
+			fileExtension: body.fileExtension,
+			clientBeforeFileCount: body.clientBeforeFileCount,
+			clientAfterFileCount: body.clientAfterFileCount,
+		};
+	} catch {
+		return json(
+			{ error: "Invalid first-file telemetry context" },
+			{ status: 400 },
+		);
+	}
+	const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+	const client = new WorkerLixRuntimeClient(
+		env,
+		authenticated.auth,
+		async (lixId, auth) => authorizeLix(lixId, auth, env),
+		{
+			signal: request.signal,
+			lixFetch: options.lixFetch,
+		},
+	);
+	try {
+		const firstPath = await addedFirstFile(client, input.repositoryId, input);
+		if (!firstPath) {
+			return json(
+				{ captured: false },
+				{ headers: { "cache-control": "no-store" } },
+			);
+		}
+		await captureFirstFileAdded(env, {
+			userId: authenticated.auth.userId,
+			repositoryId: input.repositoryId,
+			fileExtension: getFileExtension(firstPath),
+			surface: "web",
+			isDemo: authenticated.auth.isDemo,
+			verification: "server_commit",
+		});
+		return json(
+			{ captured: true },
+			{ headers: { "cache-control": "no-store" } },
+		);
+	} catch (error) {
+		if (isLixError(error) && error.code === "LIX_SYNC_HISTORY_REQUIRED") {
+			try {
+				if (!(await serverHasNoUserFiles(client, input.repositoryId))) {
+					return json(
+						{ captured: false, retry: true },
+						{ status: 202, headers: { "cache-control": "no-store" } },
+					);
+				}
+				await captureFirstFileAdded(env, {
+					userId: authenticated.auth.userId,
+					repositoryId: input.repositoryId,
+					fileExtension: input.fileExtension,
+					surface: "web",
+					isDemo: authenticated.auth.isDemo,
+					verification: "browser_commit",
+				});
+				return json(
+					{ captured: true, verification: "browser_commit" },
+					{ headers: { "cache-control": "no-store" } },
+				);
+			} catch (captureError) {
+				console.warn(
+					"Failed to capture browser-verified first-file milestone",
+					captureError,
+				);
+				return json({ captured: false }, { status: 502 });
+			}
+		}
+		console.warn("Failed to verify first-file milestone", error);
+		return json({ captured: false }, { status: 502 });
+	} finally {
+		await client.close();
+	}
+}
+
+async function handleRepositoryInventoryTelemetry(
+	request: Request,
+	env: WorkerEnv,
+	options: HandleRequestOptions,
+): Promise<Response> {
+	if (request.method !== "POST")
+		return new Response("Method not allowed\n", { status: 405 });
+	const authenticated = await (
+		options.authenticate ?? authenticateWithSupabase
+	)(request, env);
+	if (!authenticated.ok) return authenticated.response;
+	let repositoryId: string;
+	let commitId: string;
+	try {
+		const body = (await request.json()) as Record<string, unknown>;
+		if (
+			!body ||
+			typeof body.repositoryId !== "string" ||
+			!UUID_PATTERN.test(body.repositoryId) ||
+			typeof body.commitId !== "string" ||
+			!body.commitId ||
+			body.commitId.length > 256
+		)
+			return json({ error: "Invalid inventory context" }, { status: 400 });
+		repositoryId = body.repositoryId;
+		commitId = body.commitId;
+	} catch {
+		return json({ error: "Invalid inventory context" }, { status: 400 });
+	}
+	const authorizeLix = options.authorizeLix ?? authorizeLixWithSupabase;
+	const client = new WorkerLixRuntimeClient(
+		env,
+		authenticated.auth,
+		async (lixId, auth) => authorizeLix(lixId, auth, env),
+		{ signal: request.signal, lixFetch: options.lixFetch },
+	);
+	try {
+		const inventory = await readRepositoryInventory(
+			client,
+			repositoryId,
+			commitId,
+		);
+		await captureRepositoryInventory(env, {
+			userId: authenticated.auth.userId,
+			repositoryId,
+			commitId,
+			surface: "web",
+			isDemo: authenticated.auth.isDemo,
+			inventory,
+		});
+		return json(
+			{ captured: true },
+			{ headers: { "cache-control": "no-store" } },
+		);
+	} catch (error) {
+		if (isLixError(error) && error.code === "LIX_SYNC_HISTORY_REQUIRED") {
+			return json(
+				{ captured: false, reason: "snapshot_unavailable" },
+				{ headers: { "cache-control": "no-store" } },
+			);
+		}
+		console.warn("Failed to capture repository inventory", error);
+		return json({ captured: false }, { status: 502 });
+	} finally {
+		await client.close();
+	}
 }
 
 async function measureServerTiming<T>(

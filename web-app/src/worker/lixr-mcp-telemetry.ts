@@ -43,20 +43,6 @@ export interface LixrMcpTelemetrySession {
 		organization_id?: string;
 	}): void;
 
-	captureFirstFileAdded(properties: {
-		file_extension: string;
-		char_count: number;
-		byte_count: number;
-		content_sha256: string;
-		is_bulk: boolean;
-		source: "mcp" | "ui" | "onboarding_injected";
-		verified: boolean;
-		hash_match: boolean;
-		lix_id?: string;
-		repository_id?: string;
-		organization_id?: string;
-	}): void;
-
 	captureImportCompleted(properties: {
 		file_count: number;
 		char_count: number;
@@ -153,14 +139,6 @@ export function createLixrMcpTelemetrySession(
 	return {
 		captureFileWritten(properties) {
 			captureEvent(PRODUCT_EVENTS.fileWritten, properties, properties.lix_id);
-		},
-
-		captureFirstFileAdded(properties) {
-			captureEvent(
-				PRODUCT_EVENTS.firstFileAdded,
-				properties,
-				properties.lix_id,
-			);
 		},
 
 		captureImportCompleted(properties) {
