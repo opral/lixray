@@ -80,6 +80,11 @@ test("Docker requires a prepared SDK rather than compiling Rust", () => {
 	assert.doesNotMatch(docker, /pnpm --dir web-app lix:build/);
 });
 
+test("prepared SDK handoff includes its hidden revision marker", () => {
+	assert.match(sdk, /name: vendored-lix-sdk[\s\S]*?include-hidden-files: true/);
+	assert.match(read("scripts/prepare-vendored-lix-sdk.mjs"), /\.lixray-browser-build\.json/);
+});
+
 test("the required aggregator checks out its script and ignores unrelated label cancellation", () => {
 	const aggregate = job("ci");
 	assert.ok(aggregate.indexOf("uses: actions/checkout@v4") < aggregate.indexOf("check-ci-results.mjs"));
