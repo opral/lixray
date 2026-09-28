@@ -71,46 +71,6 @@ void test("Lixr MCP telemetry captures file_written event", async () => {
 	assert.equal(event?.properties?.byte_count, 1024);
 });
 
-void test("Lixr MCP telemetry captures first_file_added event", async () => {
-	const captured: Array<EventMessage> = [];
-	const session = createLixrMcpTelemetrySession(
-		{
-			POSTHOG_PROJECT_TOKEN: "project-token",
-			POSTHOG_ENVIRONMENT: "production",
-		},
-		{ userId: "user-123", clientId: "oauth-client-456" },
-		{
-			createClient: () => ({
-				captureImmediate: async (event) => {
-					captured.push(structuredClone(event));
-				},
-				shutdown: async () => undefined,
-			}),
-		},
-	);
-	assert.ok(session);
-
-	session.captureFirstFileAdded({
-		file_extension: "md",
-		char_count: 100,
-		byte_count: 102,
-		content_sha256:
-			"def456abc123def456abc123def456abc123def456abc123def456abc123def4",
-		is_bulk: false,
-		source: "mcp",
-		verified: true,
-		hash_match: true,
-		lix_id: LIX_ID,
-		repository_id: LIX_ID,
-	});
-	await session.flush();
-
-	assert.equal(captured[0]?.event, "first_file_added");
-	assert.equal(captured[0]?.properties?.surface, "mcp");
-	assert.equal(captured[0]?.properties?.file_path, undefined);
-	assert.equal(captured[0]?.properties?.file_extension, "md");
-});
-
 void test("Lixr MCP telemetry captures import_completed event", async () => {
 	const captured: Array<EventMessage> = [];
 	const session = createLixrMcpTelemetrySession(

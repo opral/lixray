@@ -2868,6 +2868,10 @@ void test("tool span and summary wait for execute_sql preview and resource links
 		name: "open_lix",
 		arguments: { lix_ref: LIX_ID },
 	});
+	assert.equal(
+		calls.find((call) => call.toolName === "open_lix")?.inventoryCommitId,
+		(opened.structuredContent as { commit_id: string }).commit_id,
+	);
 	const token = (opened.structuredContent as { context: string }).context;
 	const preview = telemetryGate();
 	const links = telemetryGate();

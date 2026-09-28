@@ -9,9 +9,10 @@
    carries `surface=web|mcp|server` instead.
 3. Event names are declared once in
    `web-app/src/lib/telemetry-events.ts`. Emitters do not invent strings.
-4. Durable business facts are emitted by the backend after authoritative
-   state changes. Browser callbacks may request capture, but are not the source
-   of truth.
+4. Durable business facts are emitted by the backend after state changes.
+   Browser callbacks may supply a commit-local observation when the server's
+   partial replica cannot reconstruct that commit; the `verification` property
+   records which source verified the transition.
 5. PostHog-owned `$*` events keep their official names. OpenTelemetry spans
    keep their vendor-neutral `lix.*` names.
 6. Failures are `$exception`, PostHog Logs, or spans. They are not product
@@ -34,7 +35,8 @@ needed for joins and group analytics, but names and content are not.
 | Event                     | Owner / moment                                | Additional properties                                                                                   | Surface  |
 | ------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- |
 | `user_signed_up`          | Auth backend confirms a newly created account | `auth_provider`, `signup_source`, `email`, `name`                                                       | web, mcp |
-| `first_file_added`        | First verified file enters a repository       | `repository_id`, `organization_id`, `file_extension`; MCP also emits safe size/hash verification fields | web, mcp |
+| `first_file_added`        | A committed write changes a repository from zero files to one or more files | `repository_id`, `lix_id`, `file_extension`, `telemetry_schema_version=2` | web, mcp |
+| `repository_inventory_snapshot` | A repository is opened or a committed file change is observed | `repository_id`, `snapshot_date`, total and user/`.lix` file counts and content bytes, total and user/`.lix` file-size buckets, total and user/`.lix` extension counts and bytes, `telemetry_schema_version=1` | web, mcp |
 | `file_written`            | MCP write is verified                         | safe size/hash verification fields, `repository_id`, `organization_id`, `lix_id`                        | mcp      |
 | `import_completed`        | MCP bulk import completes                     | counts, `duration_ms`, `repository_id`, `lix_id`                                                        | mcp      |
 | `oauth_consent_resolved`  | OAuth decision succeeds                       | `decision`, `client_name`, `redirect_host`                                                              | web      |
@@ -62,9 +64,39 @@ the event. The event timestamp remains the auth account's `created_at` value.
 That closes the observed browser navigation/identity/deduplication leak while
 keeping web and MCP acquisition in one metric.
 
-`first_file_added` is still locally deduplicated on the web. It is suitable for
-directional activation analysis, but should move to an authoritative backend
-transition before it is used for billing or exact-once automation.
+`first_file_added` version 2 checks the committed before and after file inventory
+on the server, including writes through both Atelier and MCP. The PostHog event
+UUID is the repository ID, so repeated delivery across clients resolves to the
+same milestone. Earlier captures used a browser-local marker or an MCP
+request-local marker and overcounted; filter to `telemetry_schema_version=2`
+for activation analysis. This remains product analytics, not a billing ledger.
+When the server reports `LIX_SYNC_HISTORY_REQUIRED` for a browser write, the
+browser's local Lix supplies its before/after user-file counts. The backend
+accepts that candidate only for an authorized repository whose server replica
+still has zero user files, and emits `verification=browser_commit`; normal
+server checks emit `verification=server_commit`. If the server already has user
+files but still lacks the historical payload, the browser retains the candidate
+and retries while open and on a later repository open. The PostHog UUID keeps
+these retries idempotent.
+
+`repository_inventory_snapshot` measures the live files at a specific commit,
+using `OCTET_LENGTH(content)` for logical content bytes. It does not measure
+database storage, compression, or history. Paths under `/.lix/` are
+classified separately; overall totals include them, and `user_*` properties
+exclude them. The event UUID is derived from the
+repository, commit, and UTC date: a repeated open of the same commit on the
+same day deduplicates, while a return on a later day is another observation.
+For daily growth curves, select the last snapshot per repository per day before
+aggregating; do not sum snapshots or treat event count as repository count.
+Each extension breakdown includes only counts and bytes for up to 20 common
+extensions in that path class, with the remaining extensions grouped as
+`(other)`. File paths and contents are never sent to PostHog. Empty
+repositories may have a zero-file baseline; filter to activated repositories
+when measuring value.
+If a partial replica cannot reconstruct an older commit because sync history
+payloads are deferred, the server uses the live file view only when its head is
+the requested commit. Otherwise it skips that observation until a later open;
+it never attributes a different commit's inventory to the requested commit.
 
 ## PostHog and OpenTelemetry signal families
 
