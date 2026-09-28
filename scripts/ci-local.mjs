@@ -9,6 +9,50 @@ import { resolveLixServerImage } from "./resolve-lix-server.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const project = `lixray-ci-local-${process.pid}`;
+const databaseLeasePort = 55432;
+const databasePort = 54322;
+const databaseWaitMs = 10 * 60 * 1000;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function bindLocalPort(selected) {
+	const server = createServer();
+	await new Promise((resolve, reject) => {
+		server.once("error", reject);
+		server.listen(selected, "127.0.0.1", resolve);
+	});
+	return server;
+}
+
+async function acquireDatabaseLease() {
+	const deadline = Date.now() + databaseWaitMs;
+	while (true) {
+		try {
+			return await bindLocalPort(databaseLeasePort);
+		} catch (error) {
+			if (error.code !== "EADDRINUSE" || Date.now() >= deadline) {
+				throw new Error("Could not reserve the local CI database lease.", { cause: error });
+			}
+			await pause(2000);
+		}
+	}
+}
+
+async function waitForDatabasePort() {
+	const deadline = Date.now() + databaseWaitMs;
+	while (true) {
+		try {
+			const server = await bindLocalPort(databasePort);
+			await new Promise((resolve) => server.close(resolve));
+			return;
+		} catch (error) {
+			if (error.code !== "EADDRINUSE" || Date.now() >= deadline) {
+				throw new Error("Local CI database port 54322 did not become available.", { cause: error });
+			}
+			await pause(2000);
+		}
+	}
+}
+
 async function port() {
 	for (let attempt = 0; attempt < 20; attempt++) {
 		const selected = randomInt(50000, 60000);
@@ -82,12 +126,18 @@ run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published
 run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts"],
 	{ ...localEnv, LIXRAY_COMPONENT_PORT: await uniquePort() });
 
+const databaseLease = await acquireDatabaseLease();
 try {
+	await waitForDatabasePort();
 	run("Start local database", "pnpm", ["--dir", "database", "start:ci"]);
-	run("Database policies and functions", "pnpm", ["--dir", "database", "test"]);
-	run("Database OAuth lifecycle", "pnpm", ["--dir", "database", "test:oauth"]);
+	try {
+		run("Database policies and functions", "pnpm", ["--dir", "database", "test"]);
+		run("Database OAuth lifecycle", "pnpm", ["--dir", "database", "test:oauth"]);
+	} finally {
+		run("Stop local database", "pnpm", ["--dir", "database", "stop"]);
+	}
 } finally {
-	run("Stop local database", "pnpm", ["--dir", "database", "stop"]);
+	await new Promise((resolve) => databaseLease.close(resolve));
 }
 
 const { image: serverImage } = await resolveLixServerImage({ mode: "local", allowBuild: true });
