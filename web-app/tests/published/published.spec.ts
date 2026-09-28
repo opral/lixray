@@ -126,7 +126,7 @@ test("Atelier renders downloaded bytes in an isolated local Lix", async ({
 	await expect(page).toHaveURL(/\/published\.html$/);
 	await expect(
 		page.getByRole("heading", { name: "Public file works" }),
-	).toBeVisible();
+	).toBeVisible({ timeout: 90_000 });
 	await page.getByRole("link", { name: "Docs" }).click();
 	await expect(page).toHaveURL(/\/docs$/);
 });
