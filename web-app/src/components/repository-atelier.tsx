@@ -1265,6 +1265,22 @@ export function RepositoryAtelier({
 								lix: session.lix,
 								repositoryId,
 								organizationId: namespaceId,
+								reportFirstFile: async (firstFile) => {
+									const token = await getAccessToken();
+									if (!token) return;
+									const response = await fetch("/api/telemetry/first-file", {
+										method: "POST",
+										headers: {
+											Authorization: `Bearer ${token}`,
+											"Content-Type": "application/json",
+										},
+										body: JSON.stringify(firstFile),
+									});
+									if (!response.ok)
+										throw new Error(
+											`First-file telemetry failed (${response.status})`,
+										);
+								},
 							},
 						},
 					);

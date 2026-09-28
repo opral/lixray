@@ -34,7 +34,7 @@ needed for joins and group analytics, but names and content are not.
 | Event                     | Owner / moment                                | Additional properties                                                                                   | Surface  |
 | ------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------- | -------- |
 | `user_signed_up`          | Auth backend confirms a newly created account | `auth_provider`, `signup_source`, `email`, `name`                                                       | web, mcp |
-| `first_file_added`        | First verified file enters a repository       | `repository_id`, `organization_id`, `file_extension`; MCP also emits safe size/hash verification fields | web, mcp |
+| `first_file_added`        | A committed write changes a repository from zero files to one or more files | `repository_id`, `lix_id`, `file_extension`, `telemetry_schema_version=2` | web, mcp |
 | `file_written`            | MCP write is verified                         | safe size/hash verification fields, `repository_id`, `organization_id`, `lix_id`                        | mcp      |
 | `import_completed`        | MCP bulk import completes                     | counts, `duration_ms`, `repository_id`, `lix_id`                                                        | mcp      |
 | `oauth_consent_resolved`  | OAuth decision succeeds                       | `decision`, `client_name`, `redirect_host`                                                              | web      |
@@ -62,9 +62,12 @@ the event. The event timestamp remains the auth account's `created_at` value.
 That closes the observed browser navigation/identity/deduplication leak while
 keeping web and MCP acquisition in one metric.
 
-`first_file_added` is still locally deduplicated on the web. It is suitable for
-directional activation analysis, but should move to an authoritative backend
-transition before it is used for billing or exact-once automation.
+`first_file_added` version 2 checks the committed before and after file inventory
+on the server, including writes through both Atelier and MCP. The PostHog event
+UUID is the repository ID, so repeated delivery across clients resolves to the
+same milestone. Earlier captures used a browser-local marker or an MCP
+request-local marker and overcounted; filter to `telemetry_schema_version=2`
+for activation analysis. This remains product analytics, not a billing ledger.
 
 ## PostHog and OpenTelemetry signal families
 

@@ -32,6 +32,7 @@ import {
 	createLixError,
 	isLixError,
 	LixService,
+	type CommitSpan,
 	type DiffRef,
 	type ExecuteRequest,
 	type FileChange,
@@ -130,6 +131,7 @@ export interface McpToolCallObservation {
 	surfaceVersion: string;
 	errorCode?: string;
 	lixId?: string;
+	commit?: CommitSpan | null;
 	executeInput?: McpExecuteInputObservation;
 	executeOutput?: McpExecuteOutputObservation;
 	fileContentCharCount?: number;
@@ -1645,7 +1647,6 @@ function registerTool(
 						)
 					: undefined;
 				const lixId = await observationLixId(service, input, raw);
-
 				const structuredContent = {
 					...(raw as Record<string, unknown>),
 				};
@@ -1680,6 +1681,7 @@ function registerTool(
 					outcome: "success",
 					surfaceVersion,
 					...(lixId ? { lixId } : {}),
+					...(raw.commit ? { commit: raw.commit as CommitSpan } : {}),
 					...(executeInput ? { executeInput } : {}),
 					...(executeOutput ? { executeOutput } : {}),
 					...(rawStatements ? { rawStatements } : {}),
