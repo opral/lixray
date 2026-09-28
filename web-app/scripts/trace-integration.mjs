@@ -63,7 +63,7 @@ await withSpan("integration.mcp.tool", async () => {
 			});
 		});
 		const checkpoint = await client.execute(lixId, branch, {
-			sql: "SELECT commit_id FROM lix_create_checkpoint()",
+			sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
 		});
 		assert.ok(checkpoint.rows.length);
 	} finally {
