@@ -473,17 +473,16 @@ jobs:
             fi
           done
 
-      - name: Require an open PR before creating a preview
+      - name: Check whether the PR still needs a preview
         if: steps.credentials.outputs.available == 'true'
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: |
-          state="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq .state)"
-          test "$state" = open || { echo "PR is closed; preview creation is obsolete."; exit 1; }
+        run: bash .github/scripts/preview-pr-state.sh
 
       - name: Ensure CI-managed Railway PR environment
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         id: environment
         shell: bash
         env:
@@ -492,7 +491,7 @@ jobs:
 
       - name: Deploy tested images to preview
         id: promote
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         shell: bash
         env:
           RAILWAY_DEPLOY_POLICY: pr
@@ -503,7 +502,7 @@ jobs:
         run: .github/scripts/promote-production.sh
 
       - name: Publish preview URL
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         id: preview
         shell: bash
         env:
@@ -511,14 +510,14 @@ jobs:
         run: .github/scripts/manage-railway-preview.sh url
 
       - name: Provision disposable preview demo repositories
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
           RAILWAY_TARGET_ENVIRONMENT: ${{ steps.environment.outputs.environment_id }}
         run: .github/scripts/provision-preview-repositories.sh
 
       - name: Verify preview server protocol
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         shell: bash
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
@@ -556,13 +555,13 @@ jobs:
           jq -e '.error.code == "LIX_ERROR_PROTOCOL_SESSION_GONE"' "$response_body"
 
       - name: Smoke test deployed PWA assets
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         env:
           PREVIEW_URL: ${{ steps.preview.outputs.preview_url }}
         run: node .github/scripts/check-pwa-assets.mjs --url "$PREVIEW_URL"
 
       - name: Report preview statuses
-        if: steps.credentials.outputs.available == 'true'
+        if: steps.credentials.outputs.available == 'true' && steps.pr.outputs.open == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

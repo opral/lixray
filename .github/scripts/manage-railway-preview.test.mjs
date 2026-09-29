@@ -194,5 +194,16 @@ test("close and reconciliation cleanup share the deployment lock without cancell
   assert.match(cleanup, /manage-railway-preview.sh list-previews/);
   assert.match(cleanup, /manage-railway-preview.sh delete-if-closed/);
   assert.match(pr, /Retire preview if PR closed during deployment\n\s+if: always\(\)/);
-  assert.match(pr, /state=.*gh api[\s\S]*?test "\$state" = open[\s\S]*?manage-railway-preview.sh ensure/);
+  assert.match(pr, /id: pr[\s\S]*?run: bash \.github\/scripts\/preview-pr-state\.sh/);
+  for (const step of [
+    "Ensure CI-managed Railway PR environment",
+    "Deploy tested images to preview",
+    "Publish preview URL",
+    "Provision disposable preview demo repositories",
+    "Verify preview server protocol",
+    "Smoke test deployed PWA assets",
+    "Report preview statuses",
+  ]) {
+    assert.match(pr, new RegExp(`name: ${step}\\n\\s+(?:id: [^\\n]+\\n\\s+)?if: steps\\.credentials\\.outputs\\.available == 'true' && steps\\.pr\\.outputs\\.open == 'true'`));
+  }
 });
