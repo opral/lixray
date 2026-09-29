@@ -1024,7 +1024,7 @@ export class LixService {
 			const response = await this.client.execute(
 				context.lixId,
 				context.branchId,
-				{ sql: "SELECT commit_id FROM lix_create_checkpoint()" },
+				{ sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)" },
 			);
 			const commitId = response.rows[0]?.[0];
 			if (!commitId || commitId.kind !== "text") {

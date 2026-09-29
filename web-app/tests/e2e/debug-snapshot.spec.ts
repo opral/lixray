@@ -166,14 +166,18 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 					),
 				],
 			);
-			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+			await lix.execute(
+				"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
+			);
 			await lix.execute("UPDATE lix_file SET content = $1 WHERE path = $2", [
 				new TextEncoder().encode(
 					"company,website,company_size_min,company_size_max\r\nExample,https://example.com,51,200\r\n",
 				),
 				"/leads.csv",
 			]);
-			await lix.execute("SELECT commit_id FROM lix_create_checkpoint()");
+			await lix.execute(
+				"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
+			);
 			return Array.from(
 				new Uint8Array(await new Response(lix.exportSnapshot()).arrayBuffer()),
 			);

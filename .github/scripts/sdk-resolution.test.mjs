@@ -44,7 +44,7 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 		"fixture",
 	);
 	const output = join(root, "outputs");
-	const run = () =>
+	const run = (skip = "0") =>
 		spawnSync(
 			process.execPath,
 			[join(root, "scripts/prepare-vendored-lix-sdk.mjs"), "--resolve-only"],
@@ -54,7 +54,7 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 				env: {
 					...process.env,
 					LIXRAY_LIX_ARTIFACTS: "off",
-					LIXRAY_SKIP_VENDORED_LIX_WASM: "0",
+					LIXRAY_SKIP_VENDORED_LIX_WASM: skip,
 					GITHUB_OUTPUT: output,
 				},
 			},
@@ -79,10 +79,19 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 	);
 	writeFileSync(
 		join(sdk, "dist/.lixray-browser-build.json"),
-		JSON.stringify({ sourceRevision: git("rev-parse", "HEAD").trim() }),
+		JSON.stringify({ source: "calling-workflow", sourceRevision: git("rev-parse", "HEAD").trim() }),
 	);
 	writeFileSync(output, "");
-	result = run();
+	result = run("1");
+	assert.equal(result.status, 0, result.stderr);
+	assert.equal(readFileSync(output, "utf8"), "ready=false\n");
+	assert.doesNotMatch(result.stdout, /Adopting/);
+	writeFileSync(
+		join(sdk, "dist/.lixray-browser-build.json"),
+		JSON.stringify({ source: "lix-ci-artifact", sourceRevision: git("rev-parse", "HEAD").trim() }),
+	);
+	writeFileSync(output, "");
+	result = run("1");
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(readFileSync(output, "utf8"), "ready=true\n");
 	assert.doesNotMatch(result.stdout, /SOURCE BUILD/);

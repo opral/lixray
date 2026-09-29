@@ -53,7 +53,7 @@ void test("a write's receipt names a span, and the span says what changed", asyn
 		// A checkpoint made afterwards is its own commit and does not rewrite
 		// the receipt the write already returned.
 		const checkpoint = await lix.execute(
-			"SELECT commit_id FROM lix_create_checkpoint()",
+			"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
 		);
 		const actual = await lix.execute(
 			"SELECT commit_id FROM lix_branch WHERE id = lix_active_branch_id()",

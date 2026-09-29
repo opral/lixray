@@ -248,7 +248,9 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
-		if (request.sql === "SELECT commit_id FROM lix_create_checkpoint()") {
+		if (
+			request.sql === "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)"
+		) {
 			return {
 				columns: ["commit_id"],
 				rows: [[{ kind: "text" as const, value: "commit-1" }]],

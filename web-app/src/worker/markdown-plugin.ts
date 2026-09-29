@@ -61,7 +61,7 @@ export async function installMarkdownPlugin(
 		// working changes carried by an imported repository snapshot.
 		if (installed.rowsAffected > 0) {
 			await lix.execute(
-				"SELECT commit_id FROM lix_create_checkpoint(ARRAY(SELECT row_ref FROM lix_diff('lix_file') WHERE to_path = $1))",
+				"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL, ARRAY(SELECT row_ref FROM lix_diff('lix_file') WHERE to_path = $1))",
 				[MARKDOWN_PLUGIN_PATH],
 			);
 		}

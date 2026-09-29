@@ -17,7 +17,7 @@ jobs:
   resolve:
     name: Reuse tested SDK
     runs-on: ubuntu-slim
-    timeout-minutes: 10
+    timeout-minutes: 30
     outputs:
       ready: ${{ steps.resolve.outputs.ready }}
 
@@ -41,6 +41,7 @@ jobs:
         env:
           LIX_CI_ARTIFACT_GITHUB_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
           LIXRAY_LIX_ARTIFACTS: "only"
+          LIX_CI_ARTIFACT_WAIT_MS: "1200000"
         run: pnpm --dir web-app lix:build --resolve-only
 
       - name: Require the pinned SDK artifact
@@ -58,5 +59,6 @@ jobs:
             vendor/lix/packages/js-sdk/dist
             vendor/lix/packages/storage-opfs/dist
           if-no-files-found: error
+          include-hidden-files: true
           compression-level: 0
           retention-days: 1
