@@ -40,7 +40,7 @@ jobs:
       (github.event.action != 'labeled' || github.event.label.name == 'preview') &&
       (!github.event.pull_request.draft || contains(github.event.pull_request.labels.*.name, 'preview'))
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 35
     permissions:
       contents: read
       actions: read
@@ -73,6 +73,7 @@ jobs:
           contains(github.event.pull_request.labels.*.name, 'preview')
         env:
           GH_TOKEN: ${{ secrets.LIX_ACTIONS_READ_TOKEN || github.token }}
+          LIX_CI_PRODUCER_WAIT_MS: "1800000"
         run: node scripts/check-pinned-lix-ci.mjs
 
       - name: Validate PWA asset references
