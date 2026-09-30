@@ -199,6 +199,24 @@ const featureCopy = [
 	},
 ] as const;
 
+const connectedApps = [
+	{
+		title: "Internal apps",
+		description: "Dashboards, scripts, and apps that your team builds.",
+	},
+	{
+		title: "External apps",
+		description:
+			"Products from other companies, for example a translation app or a CRM.",
+	},
+	{
+		title: "AI agents",
+		description: "Claude, ChatGPT, Gemini, or the next model.",
+	},
+] as const;
+
+const mountConnectors = ["Google Drive", "Notion", "GitHub"] as const;
+
 const reviewBenefits = [
 	{
 		title: "Change proposals",
@@ -240,14 +258,13 @@ export function LandingPage() {
 				>
 					<h1
 						id="landing-title"
-						className="m-0 text-[clamp(48px,15vw,58px)] leading-[1.05] font-bold tracking-[-.04em] text-balance"
+						className="m-0 text-[clamp(38px,10vw,52px)] leading-[1.08] font-bold tracking-[-.04em] text-balance"
 					>
-						Simple to use repository.
+						A shared repository for your company’s data and AI agents.
 					</h1>
 					<p className="mt-7 mb-0 text-[19px] leading-[1.6] text-fg-muted text-pretty">
-						Store any file, from documents and spreadsheets to video, alongside
-						tables like customers and orders. Branch, diff, merge, and roll back
-						both.
+						Files and SQL tables with version control. Every agent edit is a
+						change you can review, merge, or roll back.
 					</p>
 					<div className="mt-7 flex flex-wrap items-center gap-2.5 text-[15px] text-fg-subtle">
 						<span>Works with</span>
@@ -315,13 +332,20 @@ export function LandingPage() {
 						id="why-title"
 						className="m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em] text-balance"
 					>
-						Why a repository?
+						Why a company repository?
 					</h2>
 					<p className="m-0 text-[18px] leading-[1.65] text-fg-muted">
-						Everything is in one place, and every change can be reviewed and
-						checked online before it’s accepted. Especially helpful if agents
-						make changes.
+						A company repository holds all company data: files, tables, and
+						history. Apps and agents connect to the repository. They do not keep
+						their own copy.
 					</p>
+					<ul className="m-0 flex list-none flex-col gap-3 p-0 text-[17px] leading-[1.55] text-fg-muted">
+						{connectedApps.map(({ title, description }) => (
+							<li key={title}>
+								<strong className="text-fg">{title}.</strong> {description}
+							</li>
+						))}
+					</ul>
 					<WhyRepositoryIllustration />
 					<div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-4">
 						{reviewBenefits.map(({ title, description, icon: Icon }) => (
@@ -344,26 +368,29 @@ export function LandingPage() {
 
 				<section
 					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-[140px]"
-					aria-labelledby="comparison-title"
+					aria-labelledby="mount-title"
 				>
 					<h2
-						id="comparison-title"
+						id="mount-title"
 						className="m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em]"
 					>
-						How it compares
+						Mount external data
 					</h2>
 					<p className="m-0 text-[18px] leading-[1.6] text-fg-muted">
-						<strong className="text-fg">GitHub</strong> has version control, but
-						can’t store tables and is hard to use.
+						LixRay will mount data from other tools into the repository. Apps
+						and agents then read it next to your own files and tables.
 					</p>
-					<p className="m-0 text-[18px] leading-[1.6] text-fg-muted">
-						<strong className="text-fg">Notion</strong> has tables, but no real
-						files. Uploads are attachments you can’t edit in place.
-					</p>
-					<p className="m-0 text-[18px] leading-[1.6] text-fg-muted">
-						<strong className="text-fg">Google Drive</strong> has files, but no
-						tables and no version control across them.
-					</p>
+					<ul className="m-0 flex list-none flex-wrap gap-2.5 p-0">
+						{mountConnectors.map((name) => (
+							<li
+								key={name}
+								className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[15px] font-semibold"
+							>
+								{name}
+								<span className="font-normal text-fg-subtle">Planned</span>
+							</li>
+						))}
+					</ul>
 				</section>
 			</main>
 			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">

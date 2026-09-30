@@ -1,5 +1,81 @@
 # LixRay
 
+**A shared repository for your company's data and AI agents.**
+
+Files and SQL tables with version control. Every agent edit is a change you can review, merge, or roll back. Claude, ChatGPT, Gemini, and Codex connect over MCP.
+
+## Why a company repository
+
+A company repository holds all company data: files, tables, and history. Apps and agents connect to the repository. They do not keep their own copy:
+
+- **Internal apps.** Dashboards, scripts, and apps that your team builds.
+- **External apps.** Products from other companies, for example a translation app or a CRM.
+- **AI agents.** Claude, ChatGPT, Gemini, or the next model.
+
+We learned this at [inlang](https://inlang.com), where Lix started. Inlang stores translations in the company's git repository, next to the source code. Inlang did not build its own storage, automation, or review. It uses what the company already has:
+
+- **Data.** Translations are files in the repository, next to the code that uses them.
+- **Automation.** The company's CI/CD checks and translates on each commit.
+- **Review.** Translation changes go through the same pull requests as code changes.
+
+## Mount external data (planned)
+
+LixRay will mount data from other tools into the repository. Apps and agents then read it next to your own files and tables.
+
+| Connector | Status |
+| --- | --- |
+| Google Drive | Planned |
+| Notion | Planned |
+| GitHub | Planned |
+
+## Connect an agent
+
+The MCP endpoint is `https://lixray.com/mcp`. It uses OAuth.
+
+Codex:
+
+```sh
+codex mcp add LixRay --url https://lixray.com/mcp --oauth-resource https://lixray.com
+codex mcp login LixRay
+```
+
+Other clients: add `https://lixray.com/mcp` as a remote MCP server.
+
+## Use the SDK
+
+```bash
+npm install @lix-js/sdk
+```
+
+Create an API token in a repository under **Settings → API tokens**, then connect:
+
+```ts
+import { openLix } from "@lix-js/sdk";
+
+const lix = await openLix({
+  server: {
+    mode: "remote",
+    url: `https://lixray.com/lix/${repositoryId}`,
+    headers: async () => ({
+      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+    }),
+  },
+});
+
+await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
+  "/notes/status.txt",
+  new TextEncoder().encode("ready"),
+]);
+```
+
+Or open a repository in memory to try the SDK without an account:
+
+```ts
+const lix = await openLix();
+```
+
+## Development
+
 LixRay is a collaborative repository app built from a TanStack Start control
 plane and the prebuilt Lix reference server. Supabase supports control-plane
 identity and metadata; SlateDB stores Lix repositories in S3-compatible object
