@@ -979,7 +979,8 @@ export function RepositoryAtelier({
 					// The same item under a new name (a page titled from untitled.md, a
 					// rename): the URL's slug follows, replaced rather than pushed, and
 					// with no marker — the route does not re-run for it.
-					if (routed && canonicalEntitySplat(current.splat, entity) === null) return;
+					if (routed && canonicalEntitySplat(current.splat, entity) === null)
+						return;
 					if (!routed) shellNavigationRef.current = `${kind}:${entity.id}`;
 					await navigationQueue.navigate(
 						entityRoutePath(
@@ -998,7 +999,7 @@ export function RepositoryAtelier({
 								params: {
 									namespace,
 									repository: repositorySlug,
-											_splat: entityUrlSplat(entity.id, entity.path),
+									_splat: entityUrlSplat(entity.id, entity.path),
 								},
 								search,
 								replace: routed,
@@ -1524,6 +1525,8 @@ export function RepositoryAtelier({
 						library: createLixrayLibraryOptions(
 							repositoryConnection,
 							hasAgentConnected,
+							canEdit ? stableTeamApiRef.current : null,
+							repositoryVisibility,
 						),
 						sessionStateStore: createRepositorySessionStateStore({
 							accountId: atelierAccountId,

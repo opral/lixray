@@ -330,14 +330,112 @@ export const createLixrayRepositoryExtensions = (
 	createLixraySettingsExtension(settingsApi),
 ];
 
+/** Opens a folder in the Library's Files section, in its primary tab. */
+function openLibraryFolder(
+	atelier: AtelierExtensionRuntime,
+	dirPath: string,
+	options: { newTab: boolean },
+) {
+	void atelier.views
+		.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+			state: libraryFolderState(dirPath),
+			...(options.newTab
+				? { newTab: true }
+				: { instanceId: LIBRARY_HOME_INSTANCE }),
+		})
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open folder", error);
+		});
+}
+
 /**
- * What LixRay adds to Atelier's Library: an empty repository greets with the
- * same onboarding the home always had — connect an agent, or start yourself.
+ * The Library's Home: the repository's README and its control plane —
+ * changes, database, connect an agent, invite, settings — without a file
+ * listing, which the Library's Files section is.
+ */
+function LibraryHome({
+	atelier,
+	connection,
+	hasAgentConnected,
+	teamApi,
+	visibility,
+}: {
+	atelier: AtelierExtensionRuntime;
+	connection: LixRepositoryConnection;
+	hasAgentConnected: AgentConnectionProbe;
+	teamApi: RepositoryTeamApi | null;
+	visibility: "private" | "public";
+}) {
+	const { folders: defaultFolders, setFolder } = useDefaultFolders(atelier);
+	return (
+		<StrictMode>
+			<DirectoryView
+				lix={atelier.lix}
+				diffSession={atelier.diff?.session ?? null}
+				onOpenHistory={() => openHistoryFromView(atelier)}
+				{...(atelier.diff
+					? {
+							onOpenDiffFile: (path: string) => atelier.diff?.openFile(path),
+						}
+					: {})}
+				dirPath="/"
+				isHome
+				summary
+				showHiddenFiles={
+					atelier.preferences.get(
+						ATELIER_BUILTIN_EXTENSION_IDS.files,
+						"showHiddenFiles",
+					) === true
+				}
+				defaultFolders={defaultFolders}
+				{...(atelier.readOnly ? {} : { onSetDefaultFolder: setFolder })}
+				readOnly={atelier.readOnly}
+				{...(atelier.documentLinks
+					? { documentLinks: atelier.documentLinks }
+					: {})}
+				connection={connection}
+				teamApi={teamApi}
+				hasAgentConnected={hasAgentConnected}
+				visibility={visibility}
+				onOpenFile={(path, options) => openFileFromView(atelier, path, options)}
+				onOpenDir={(path, options) => openLibraryFolder(atelier, path, options)}
+				onOpenPeople={() => openPeopleFromView(atelier)}
+				onOpenSettings={() => openSettingsFromView(atelier)}
+				onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+				{...(!atelier.readOnly && atelier.diff
+					? {
+							onOpenChangesReview: () =>
+								void atelier.diff?.open({
+									target: { working: true },
+									reveal: false,
+								}),
+						}
+					: {})}
+			/>
+		</StrictMode>
+	);
+}
+
+/**
+ * What LixRay adds to Atelier's Library: Home, the repository's README and
+ * control plane at the top of the Library, and — for a repository with
+ * nothing in it yet — the onboarding (connect an agent, or start yourself).
  */
 export const createLixrayLibraryOptions = (
 	connection: LixRepositoryConnection,
 	hasAgentConnected: AgentConnectionProbe,
+	teamApi: RepositoryTeamApi | null,
+	visibility: "private" | "public",
 ): AtelierLibraryOptions => ({
+	Home: ({ atelier }) => (
+		<LibraryHome
+			atelier={atelier}
+			connection={connection}
+			hasAgentConnected={hasAgentConnected}
+			teamApi={teamApi}
+			visibility={visibility}
+		/>
+	),
 	EmptyWorkspace: ({ atelier }) => (
 		<div className="grid flex-1 content-center py-6">
 			<GettingStarted
@@ -345,7 +443,9 @@ export const createLixrayLibraryOptions = (
 				hasAgentConnected={hasAgentConnected}
 				onCreateFile={(extension) => {
 					void createRepositoryFile(atelier.lix, "/", extension)
-						.then((path) => openFileFromView(atelier, path, { newTab: false, created: true }))
+						.then((path) =>
+							openFileFromView(atelier, path, { newTab: false, created: true }),
+						)
 						.catch((error: unknown) => {
 							console.error("repository-home: unable to create a file", error);
 						});

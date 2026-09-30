@@ -98,6 +98,11 @@ type DirectoryViewProps = {
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
+	/**
+	 * The Library's Home: the repository's README and its control plane, with
+	 * no listing of files — the Library's Files section is the listing.
+	 */
+	readonly summary?: boolean;
 	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
 	readonly showHiddenFiles?: boolean;
 	/**
@@ -172,6 +177,7 @@ export function DirectoryView({
 	onOpenDiffFile,
 	dirPath,
 	isHome,
+	summary = false,
 	showHiddenFiles = false,
 	defaultFolders = NO_DEFAULT_FOLDERS,
 	onSetDefaultFolder,
@@ -607,10 +613,38 @@ export function DirectoryView({
 		);
 	}
 
+	// Connect an agent and Invite: in the rail, and above the stats when
+	// the rail folds into the page on a narrow screen.
+	const teamSection = detailsEnabled ? (
+		<>
+			{hasAgentConnected ? (
+				<ConnectAgentButton
+					connection={connection}
+					hasAgentConnected={hasAgentConnected}
+					disabled={readOnly}
+					className={RAIL_CHIP_CLASS}
+				/>
+			) : null}
+			{onOpenPeople ? (
+				<InviteControl
+					teamApi={teamApi}
+					onOpenPeople={onOpenPeople}
+					disabled={readOnly || !teamApi}
+					className={RAIL_CHIP_CLASS}
+				/>
+			) : null}
+		</>
+	) : null;
+
 	return (
 		<div
 			ref={newButtonRef}
-			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
+			className={
+				summary
+					? // Embedded in the Library's Home, which scrolls and frames it.
+						"@container relative flex flex-col bg-panel font-sans text-fg"
+					: "@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
+			}
 			{...dragHandlers}
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
@@ -618,7 +652,9 @@ export function DirectoryView({
 				className={
 					// Reserve space for the outboard checkboxes and selection toolbar,
 					// including when the app shell makes this panel narrower.
-					isHome
+					summary
+						? "grid grid-cols-[minmax(0,1fr)_244px] gap-12 @max-[820px]:grid-cols-1 @max-[820px]:gap-8"
+						: isHome
 						? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
 						: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
 				}
@@ -631,14 +667,22 @@ export function DirectoryView({
 						showGettingStarted ? "grid min-w-0 content-center" : "min-w-0"
 					}
 				>
-					{showGettingStarted ? null : (
-						<div className="flex items-center gap-2 pb-5">
-							<Breadcrumb
-								dirPath={dirPath}
-								onNavigate={(path, event) =>
-									onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
-								}
-							/>
+					{showGettingStarted || summary ? null : (
+						<div
+							className={`flex items-center gap-2 ${summary ? "pb-6" : "pb-5"}`}
+						>
+							{summary ? (
+								<h1 className="m-0 min-w-0 truncate text-[22px] leading-8 font-semibold tracking-[-0.01em] text-fg">
+									Home
+								</h1>
+							) : (
+								<Breadcrumb
+									dirPath={dirPath}
+									onNavigate={(path, event) =>
+										onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
+									}
+								/>
+							)}
 							<span className="flex-1" />
 							<div
 								className={`flex shrink-0 items-center gap-2 transition-opacity${
@@ -692,7 +736,7 @@ export function DirectoryView({
 							hasAgentConnected={hasAgentConnected}
 							onCreateFile={(extension) => void createFile(extension)}
 						/>
-					) : (
+					) : summary ? null : (
 						<DirectoryFileList
 							key={`${dirPath}:${historicalCommitId ?? "live"}`}
 							lix={lix}
@@ -748,6 +792,39 @@ export function DirectoryView({
 							onOpenSqlExplorer={onOpenSqlExplorer}
 							onOpenChangesReview={onOpenChangesReview}
 							onOpenHistory={onOpenHistory}
+							teamSection={teamSection}
+							embedded={summary}
+						/>
+					) : null}
+					{summary &&
+					!showGettingStarted &&
+					!listing.readmePath &&
+					!readOnly &&
+					!viewingHistory ? (
+						<AddReadmeCard
+							onCreate={() =>
+								void (async () => {
+									try {
+										setActionError(null);
+										await lix.execute(
+											"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
+											[
+												"/README.md",
+												new TextEncoder().encode(
+													"# README\n\nWhat this repository is for, and how it is organised.\n",
+												),
+											],
+										);
+										onOpenFile("/README.md", { newTab: false });
+									} catch (error) {
+										console.error(
+											"repository-home: unable to create README",
+											error,
+										);
+										setActionError("Couldn’t create the README.");
+									}
+								})()
+							}
 						/>
 					) : null}
 					{listing.readmePath && readme !== null && !viewingHistory ? (
@@ -897,6 +974,7 @@ export function DirectoryView({
 				</main>
 				{isHome ? (
 					<RepositoryControlPlaneRail
+						embedded={summary}
 						reviewFocus={reviewFocus}
 						visibility={visibility}
 						fileCount={tree.files.length}
@@ -905,28 +983,7 @@ export function DirectoryView({
 						onOpenSqlExplorer={onOpenSqlExplorer}
 						onOpenChangesReview={onOpenChangesReview}
 						onOpenHistory={onOpenHistory}
-						teamSection={
-							detailsEnabled ? (
-								<>
-									{hasAgentConnected ? (
-										<ConnectAgentButton
-											connection={connection}
-											hasAgentConnected={hasAgentConnected}
-											disabled={readOnly}
-											className={RAIL_CHIP_CLASS}
-										/>
-									) : null}
-									{onOpenPeople ? (
-										<InviteControl
-											teamApi={teamApi}
-											onOpenPeople={onOpenPeople}
-											disabled={readOnly || !teamApi}
-											className={RAIL_CHIP_CLASS}
-										/>
-									) : null}
-								</>
-							) : null
-						}
+						teamSection={teamSection}
 					/>
 				) : null}
 			</div>
@@ -979,9 +1036,12 @@ function RepositoryControlPlaneRail({
 	onOpenChangesReview,
 	onOpenHistory,
 	teamSection,
+	embedded = false,
 }: {
 	/** Review focus: sections other than Changes recede with the page. */
 	readonly reviewFocus?: boolean;
+	/** In the Library's narrower column: folds into the page at 820px. */
+	readonly embedded?: boolean;
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
@@ -997,7 +1057,9 @@ function RepositoryControlPlaneRail({
 	return (
 		<aside
 			aria-label="Repository overview"
-			className="min-w-0 @max-[1100px]:hidden"
+			className={
+				embedded ? "min-w-0 @max-[820px]:hidden" : "min-w-0 @max-[1100px]:hidden"
+			}
 		>
 			{teamSection ? (
 				<section className={`border-b border-border pb-7${mutedSection}`}>
@@ -1054,7 +1116,7 @@ function RepositoryControlPlaneRail({
 			</section>
 
 			<section
-				className={`border-b border-border py-7 @max-[1100px]:border-t-0${mutedSection}`}
+				className={`border-b border-border py-7 ${embedded ? "@max-[820px]:border-t-0" : "@max-[1100px]:border-t-0"}${mutedSection}`}
 			>
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
@@ -1090,18 +1152,30 @@ function RepositoryNarrowStats({
 	onOpenSqlExplorer,
 	onOpenChangesReview,
 	onOpenHistory,
+	teamSection,
+	embedded = false,
 }: {
+	readonly embedded?: boolean;
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenSqlExplorer?: () => void;
 	readonly onOpenChangesReview?: () => void;
 	readonly onOpenHistory?: () => void;
+	readonly teamSection?: ReactNode;
 }) {
 	return (
 		<aside
 			aria-label="Repository statistics"
-			className="mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border px-3 pt-7 @max-[1100px]:grid @max-[640px]:grid-cols-1"
+			className={`mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border px-3 pt-7 @max-[640px]:grid-cols-1 ${
+				embedded ? "@max-[820px]:grid" : "@max-[1100px]:grid"
+			}`}
 		>
+			{teamSection ? (
+				<section className="col-span-full min-w-0">
+					<RailHeading>Team & agents</RailHeading>
+					<div className="mt-2.5 flex flex-wrap gap-2">{teamSection}</div>
+				</section>
+			) : null}
 			<section className="min-w-0">
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
@@ -1656,6 +1730,25 @@ function DropImportOverlay() {
 	return (
 		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-accent bg-panel/85 text-sm font-semibold text-fg-muted">
 			Drop files and folders to import
+		</div>
+	);
+}
+
+/** Home without a README: the one thing that would make it useful. */
+function AddReadmeCard({ onCreate }: { readonly onCreate: () => void }) {
+	return (
+		<div
+			data-testid="home-add-readme"
+			className="flex flex-col items-start gap-3 rounded-xl border border-dashed border-border px-6 py-8"
+		>
+			<p className="m-0 text-[14px] font-semibold text-fg">Add a README</p>
+			<p className="m-0 max-w-md text-[13px] leading-relaxed text-fg-subtle">
+				Say what this repository is for and how it is organised. Your team, and
+				the agents you connect, read it first.
+			</p>
+			<Button variant="outline" onClick={onCreate}>
+				Write README
+			</Button>
 		</div>
 	);
 }
