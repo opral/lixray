@@ -35,7 +35,7 @@ const MIGRATION_PHASES = ["partial_receipt"] as const;
 const PAYLOAD_FAILURE_REASONS = [
 	"selected_change_payload_unavailable",
 	"exact_owner_point_read_budget_exhausted",
-	"change_payload_not_selected_by_exact_recipe",
+	"selected_change_payload_recipe_mismatch",
 ] as const;
 const PAYLOAD_PHASES = [
 	"pre_request_catalog",

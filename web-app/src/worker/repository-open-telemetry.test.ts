@@ -211,7 +211,7 @@ void test("first-party exceptions preserve the fixed read fulfillment validation
 		diagnostic: {
 			lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
 			payloadPhase: "read_fulfillment_validation",
-			payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+			payloadFailureReason: "selected_change_payload_recipe_mismatch",
 			request: "private recipe data",
 		},
 	})!;
@@ -232,11 +232,11 @@ void test("first-party exceptions preserve the fixed read fulfillment validation
 	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
 	assert.equal(
 		properties.payloadFailureReason,
-		"change_payload_not_selected_by_exact_recipe",
+		"selected_change_payload_recipe_mismatch",
 	);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"Repository opening failed: change_payload_not_selected_by_exact_recipe",
+		"Repository opening failed: selected_change_payload_recipe_mismatch",
 	);
 	assert.doesNotMatch(JSON.stringify(payload), /private/);
 });

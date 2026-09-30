@@ -690,7 +690,7 @@ void test("read fulfillment rejection spans expose only the fixed validation rea
 				code: "LIX_READ_FULFILLMENT_INVALID",
 				details: {
 					payloadPhase: "read_fulfillment_validation",
-					payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+					payloadFailureReason: "selected_change_payload_recipe_mismatch",
 					request: "private scan recipe",
 				},
 			});
@@ -703,7 +703,7 @@ void test("read fulfillment rejection spans expose only the fixed validation rea
 	);
 	assert.equal(
 		finished.attributes["lix.payload.failure_reason"],
-		"change_payload_not_selected_by_exact_recipe",
+		"selected_change_payload_recipe_mismatch",
 	);
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
 });

@@ -578,7 +578,7 @@ void test("read fulfillment validation details reach PostHog without request con
 				{
 					key: "lix.payload.failure_reason",
 					value: {
-						stringValue: "change_payload_not_selected_by_exact_recipe",
+						stringValue: "selected_change_payload_recipe_mismatch",
 					},
 				},
 				{
@@ -604,11 +604,11 @@ void test("read fulfillment validation details reach PostHog without request con
 	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
 	assert.equal(
 		properties.payloadFailureReason,
-		"change_payload_not_selected_by_exact_recipe",
+		"selected_change_payload_recipe_mismatch",
 	);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_READ_FULFILLMENT_INVALID: change_payload_not_selected_by_exact_recipe",
+		"LIX_READ_FULFILLMENT_INVALID: selected_change_payload_recipe_mismatch",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /private/);
 });

@@ -114,13 +114,13 @@ void test("read fulfillment failures accept only the fixed validation diagnosis"
 		repositoryOpenDiagnostics({
 			details: {
 				payloadPhase: "read_fulfillment_validation",
-				payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+				payloadFailureReason: "selected_change_payload_recipe_mismatch",
 				request: "private recipe data",
 			},
 		}),
 		{
 			payloadPhase: "read_fulfillment_validation",
-			payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+			payloadFailureReason: "selected_change_payload_recipe_mismatch",
 		},
 	);
 	assert.deepEqual(
