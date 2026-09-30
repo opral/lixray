@@ -1092,13 +1092,14 @@ export function RepositoryAtelier({
 				event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library
 			) {
 				// The Library (and the Home it replaced) is the primary surface:
-				// open on a folder in Folders it claims the /folder URL; anywhere
-				// else — a kind, the Grid — it claims the repository root URL.
+				// in Files, inside a folder, it claims the /folder URL; anywhere
+				// else — a kind, the top of Files — the repository root URL.
 				const state = event.state;
 				const isLibrary =
 					event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library;
 				const dirPath = isLibrary
-					? state?.mode === "folders" && typeof state.dirPath === "string"
+					? (state?.kind === "files" || state?.mode === "folders") &&
+						typeof state.dirPath === "string"
 						? state.dirPath
 						: "/"
 					: state &&

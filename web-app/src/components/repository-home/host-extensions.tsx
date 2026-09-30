@@ -28,15 +28,15 @@ export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
 export const LIBRARY_HOME_INSTANCE = "main-home";
 
 /**
- * Library state for a folder URL: Folders mode at that folder. Kind is left
- * out on purpose, so the person's chosen kind survives a deep link; the
- * Library renames its own tab to match.
+ * Library state for a folder URL: Files, open at that folder. The root keeps
+ * whichever section the person chose and only leaves any folder; the Library
+ * renames its own tab to match.
  */
 export const libraryFolderState = (dirPath: string) => {
 	const path = canonicalDirectoryPath(dirPath);
 	return path === "/"
 		? { dirPath: "/" }
-		: { mode: "folders", dirPath: path };
+		: { kind: "files", mode: "folders", dirPath: path };
 };
 
 export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
