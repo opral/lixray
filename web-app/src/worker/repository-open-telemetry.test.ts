@@ -205,6 +205,42 @@ void test("first-party exception values preserve fixed pre-request catalog opera
 	assert.doesNotMatch(JSON.stringify(payload), /secret|schema bytes/);
 });
 
+void test("first-party exceptions preserve the fixed read fulfillment validation cause", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
+			payloadPhase: "read_fulfillment_validation",
+			payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+			request: "private recipe data",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
+	assert.equal(
+		properties.payloadFailureReason,
+		"change_payload_not_selected_by_exact_recipe",
+	);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"Repository opening failed: change_payload_not_selected_by_exact_recipe",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private/);
+});
+
 void test("diagnostics route authenticates, bounds input and checks repository access", async () => {
 	const { handleRequest } = await import("./handler.ts");
 	const request = (body: unknown) =>

@@ -560,6 +560,59 @@ void test("status-only admission failures reach PostHog with code, versions, HTT
 	assert.doesNotMatch(JSON.stringify(props), /must-not-project/);
 });
 
+void test("read fulfillment validation details reach PostHog without request content", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_READ_FULFILLMENT_INVALID" },
+				},
+				{
+					key: "lix.payload.phase",
+					value: { stringValue: "read_fulfillment_validation" },
+				},
+				{
+					key: "lix.payload.failure_reason",
+					value: {
+						stringValue: "change_payload_not_selected_by_exact_recipe",
+					},
+				},
+				{
+					key: "private.request",
+					value: { stringValue: "private scan recipe" },
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_READ_FULFILLMENT_INVALID");
+	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
+	assert.equal(
+		properties.payloadFailureReason,
+		"change_payload_not_selected_by_exact_recipe",
+	);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_READ_FULFILLMENT_INVALID: change_payload_not_selected_by_exact_recipe",
+	);
+	assert.doesNotMatch(JSON.stringify(properties), /private/);
+});
+
 void test("browser status-only engine failures use browser source and preserve resource revision", async () => {
 	const bytes = codec
 		.encode(

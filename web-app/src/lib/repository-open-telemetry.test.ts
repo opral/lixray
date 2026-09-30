@@ -109,6 +109,31 @@ void test("pre-request catalog operations accept only fixed phase and operation 
 	);
 });
 
+void test("read fulfillment failures accept only the fixed validation diagnosis", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadPhase: "read_fulfillment_validation",
+				payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+				request: "private recipe data",
+			},
+		}),
+		{
+			payloadPhase: "read_fulfillment_validation",
+			payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadPhase: "read_fulfillment_validation",
+				payloadFailureReason: "raw validator detail",
+			},
+		}),
+		{ payloadPhase: "read_fulfillment_validation" },
+	);
+});
+
 void test("opening diagnostics retain coordinates and exclude arbitrary private data", () => {
 	const id = "11111111-1111-4111-8111-111111111111";
 	assert.deepEqual(

@@ -682,6 +682,32 @@ void test("catalog scan failures spans preserve only the fixed boundary markers"
 	);
 });
 
+void test("read fulfillment rejection spans expose only the fixed validation reason", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private recipe payload"), {
+				code: "LIX_READ_FULFILLMENT_INVALID",
+				details: {
+					payloadPhase: "read_fulfillment_validation",
+					payloadFailureReason: "change_payload_not_selected_by_exact_recipe",
+					request: "private scan recipe",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["lix.payload.phase"],
+		"read_fulfillment_validation",
+	);
+	assert.equal(
+		finished.attributes["lix.payload.failure_reason"],
+		"change_payload_not_selected_by_exact_recipe",
+	);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
+});
+
 void test("owner point-read budget failure spans preserve only bounded counts", async () => {
 	exporter.reset();
 	await assert.rejects(
