@@ -18,16 +18,6 @@ We learned this at [inlang](https://inlang.com), where Lix started. Inlang store
 - **Automation.** The company's CI/CD checks and translates on each commit.
 - **Review.** Translation changes go through the same pull requests as code changes.
 
-## Mount external data (planned)
-
-LixRay will mount data from other tools into the repository. Apps and agents then read it next to your own files and tables.
-
-| Connector | Status |
-| --- | --- |
-| Google Drive | Planned |
-| Notion | Planned |
-| GitHub | Planned |
-
 ## Connect an agent
 
 The MCP endpoint is `https://lixray.com/mcp`. It uses OAuth.
@@ -73,6 +63,14 @@ Or open a repository in memory to try the SDK without an account:
 ```ts
 const lix = await openLix();
 ```
+
+## How it compares
+
+In the future, LixRay will mount external data, with Google Drive, Notion, and GitHub as sources.
+
+- **GitHub** has version control, but can't store tables and is hard to use.
+- **Notion** has tables, but no real files. Uploads are attachments you can't edit in place.
+- **Google Drive** has files, but no tables and no version control across them.
 
 ## Development
 
