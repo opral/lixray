@@ -133,6 +133,49 @@ void test("first-party exception values show bounded selected-payload diagnosis"
 	assert.doesNotMatch(JSON.stringify(payload), /private bytes/);
 });
 
+void test("first-party exception values preserve bounded owner point-read counts", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+			attempted: 65_537,
+			budget: 65_536,
+			privateValue: "secret",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		payloadFailureReason: string;
+		attempted: number;
+		budget: number;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(
+		properties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(properties.attempted, 65_537);
+	assert.equal(properties.budget, 65_536);
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: exact_owner_point_read_budget_exhausted",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /secret/);
+});
+
 void test("diagnostics route authenticates, bounds input and checks repository access", async () => {
 	const { handleRequest } = await import("./handler.ts");
 	const request = (body: unknown) =>

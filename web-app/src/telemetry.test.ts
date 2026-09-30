@@ -655,3 +655,28 @@ void test("payload failures spans preserve only bounded reason, status, and UUID
 	);
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|bytes/);
 });
+
+void test("owner point-read budget failure spans preserve only bounded counts", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private payload"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+					attempted: 65_537,
+					budget: 65_536,
+					privateValue: "secret",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["lix.payload.failure_reason"],
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(finished.attributes["lix.payload.attempted"], 65_537);
+	assert.equal(finished.attributes["lix.payload.budget"], 65_536);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});

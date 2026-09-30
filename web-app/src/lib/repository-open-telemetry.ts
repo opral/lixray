@@ -34,7 +34,9 @@ const MIGRATION_FAILURE_PATHS = [
 const MIGRATION_PHASES = ["partial_receipt"] as const;
 const PAYLOAD_FAILURE_REASONS = [
 	"selected_change_payload_unavailable",
+	"exact_owner_point_read_budget_exhausted",
 ] as const;
+const EXACT_OWNER_POINT_READ_BUDGET = 65_536;
 const MIGRATION_MISSING_FIELDS = [
 	"version",
 	"archivedBranchIds",
@@ -177,6 +179,19 @@ export function repositoryOpenDiagnostics(
 	)
 		result.payloadFailureReason = fields.payloadFailureReason;
 	if (
+		fields.payloadFailureReason === "exact_owner_point_read_budget_exhausted" &&
+		parseBoundedPayloadCount(
+			fields.attempted,
+			EXACT_OWNER_POINT_READ_BUDGET + 1,
+		) ===
+			EXACT_OWNER_POINT_READ_BUDGET + 1 &&
+		parseBoundedPayloadCount(fields.budget, EXACT_OWNER_POINT_READ_BUDGET) ===
+			EXACT_OWNER_POINT_READ_BUDGET
+	) {
+		result.attempted = EXACT_OWNER_POINT_READ_BUDGET + 1;
+		result.budget = EXACT_OWNER_POINT_READ_BUDGET;
+	}
+	if (
 		typeof fields.failureReason === "string" &&
 		MIGRATION_FAILURE_REASONS.includes(
 			fields.failureReason as (typeof MIGRATION_FAILURE_REASONS)[number],
@@ -249,6 +264,21 @@ export function repositoryOpenDiagnostics(
 			result[field] = value;
 	}
 	return result;
+}
+
+function parseBoundedPayloadCount(
+	value: unknown,
+	max: number,
+): number | undefined {
+	const parsed =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && /^\d{1,6}$/.test(value)
+				? Number(value)
+				: undefined;
+	return Number.isSafeInteger(parsed) && parsed! >= 0 && parsed! <= max
+		? parsed
+		: undefined;
 }
 
 /** Build a PostHog-safe exception value from an allowlisted migration cause. */

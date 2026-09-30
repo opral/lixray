@@ -720,6 +720,90 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
 });
 
+void test("owner point-read budget errors project only their bounded reason and counts", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_INTERNAL_ERROR" },
+				},
+				{
+					key: "lix.payload.failure_reason",
+					value: { stringValue: "exact_owner_point_read_budget_exhausted" },
+				},
+				{ key: "lix.payload.attempted", value: { intValue: 65_537 } },
+				{ key: "lix.payload.budget", value: { intValue: 65_536 } },
+				{ key: "private.payload", value: { stringValue: "secret bytes" } },
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(
+		properties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(properties.attempted, 65_537);
+	assert.equal(properties.budget, 65_536);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_INTERNAL_ERROR: exact_owner_point_read_budget_exhausted",
+	);
+	assert.doesNotMatch(JSON.stringify(properties), /secret bytes/);
+
+	const invalid = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.payload.failure_reason",
+					value: { stringValue: "exact_owner_point_read_budget_exhausted" },
+				},
+				{ key: "lix.payload.attempted", value: { intValue: 999_999 } },
+				{ key: "lix.payload.budget", value: { intValue: 65_536 } },
+			],
+		},
+	]);
+	let invalidBatch: CaptureBatch | undefined;
+	const invalidFetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			invalidBatch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(invalid), env, {
+				fetch: invalidFetcher,
+			})
+		).status,
+		200,
+	);
+	const invalidProperties = invalidBatch!.batch[0]!.properties;
+	assert.equal(
+		invalidProperties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(invalidProperties.attempted, undefined);
+	assert.equal(invalidProperties.budget, undefined);
+});
+
 void test("delivery failures identify the failed destination without exporting private transport errors", async () => {
 	const failures: object[] = [];
 	const response = await handleOtlpTelemetry(request(encode([span()])), env, {

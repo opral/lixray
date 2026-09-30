@@ -41,6 +41,33 @@ void test("payload provenance diagnostics accept only bounded structural states"
 		}),
 		{},
 	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+				attempted: 65_537,
+				budget: "65536",
+				secret: "private",
+			},
+		}),
+		{
+			payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+			attempted: 65_537,
+			budget: 65_536,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+				attempted: 65_538,
+				budget: 65_536,
+			},
+		}),
+		{
+			payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+		},
+	);
 });
 
 void test("opening diagnostics retain coordinates and exclude arbitrary private data", () => {
