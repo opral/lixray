@@ -582,6 +582,30 @@ void test("read fulfillment validation details reach PostHog without request con
 					},
 				},
 				{
+					key: "lix.payload.schema_kind",
+					value: { stringValue: "file_descriptor" },
+				},
+				{
+					key: "lix.payload.recipe_mask",
+					value: { intValue: 129 },
+				},
+				{
+					key: "lix.payload.recipe_count",
+					value: { doubleValue: 2 },
+				},
+				{
+					key: "lix.payload.required_input_count",
+					value: { intValue: 17 },
+				},
+				{
+					key: "lix.read.recipe_count",
+					value: { doubleValue: 2 },
+				},
+				{
+					key: "lix.read.recipe_mask",
+					value: { intValue: 129 },
+				},
+				{
 					key: "private.request",
 					value: { stringValue: "private scan recipe" },
 				},
@@ -606,11 +630,110 @@ void test("read fulfillment validation details reach PostHog without request con
 		properties.payloadFailureReason,
 		"selected_change_payload_recipe_mismatch",
 	);
+	assert.equal(properties.payloadSchemaKind, "file_descriptor");
+	assert.equal(properties.payloadRecipeMask, 129);
+	assert.equal(properties.payloadRecipeCount, 2);
+	assert.equal(properties.payloadRequiredInputCount, 17);
+	assert.equal(properties.nativeReadRecipeCount, 2);
+	assert.equal(properties.nativeReadRecipeMask, 129);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
 		"LIX_READ_FULFILLMENT_INVALID: selected_change_payload_recipe_mismatch",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /private/);
+});
+
+void test("WASM asset span attributes project only for the known SDK error code", async () => {
+	const body = encode([
+		{
+			...span("repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_WASM_ASSET_UNAVAILABLE" },
+				},
+				{
+					key: "lix.wasm_asset.phase",
+					value: { stringValue: "wasm_fetch" },
+				},
+				{
+					key: "lix.wasm_asset.cache_status",
+					value: { stringValue: "miss" },
+				},
+				{
+					key: "http.response.status_code",
+					value: { intValue: 404 },
+				},
+				{
+					key: "private.asset_url",
+					value: {
+						stringValue: "https://private.example/asset.wasm?token=secret",
+					},
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_WASM_ASSET_UNAVAILABLE");
+	assert.equal(properties.wasmAssetPhase, "wasm_fetch");
+	assert.equal(properties.wasmAssetCacheStatus, "miss");
+	assert.equal(properties.httpStatus, 404);
+	assert.doesNotMatch(JSON.stringify(properties), /private|secret/);
+
+	const untrusted = encode([
+		{
+			...span("repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_INTERNAL_ERROR" },
+				},
+				{
+					key: "lix.wasm_asset.phase",
+					value: { stringValue: "wasm_fetch" },
+				},
+				{
+					key: "lix.wasm_asset.cache_status",
+					value: { stringValue: "hit" },
+				},
+			],
+		},
+	]);
+	let untrustedBatch: CaptureBatch | undefined;
+	const untrustedFetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			untrustedBatch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(untrusted), env, {
+				fetch: untrustedFetcher,
+			})
+		).status,
+		200,
+	);
+	assert.equal(untrustedBatch!.batch[0]!.properties.wasmAssetPhase, undefined);
+	assert.equal(
+		untrustedBatch!.batch[0]!.properties.wasmAssetCacheStatus,
+		undefined,
+	);
 });
 
 void test("browser status-only engine failures use browser source and preserve resource revision", async () => {

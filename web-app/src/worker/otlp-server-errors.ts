@@ -37,11 +37,13 @@ function attributes(entries: OtlpAttribute[] = []): Record<string, string> {
 			const text =
 				value && Object.hasOwn(value, "stringValue")
 					? value.stringValue
-					: value && Object.hasOwn(value, "intValue")
-						? value.intValue?.toString()
-						: value && Object.hasOwn(value, "boolValue")
-							? value.boolValue?.toString()
-							: undefined;
+					: value && Object.hasOwn(value, "doubleValue")
+						? value.doubleValue?.toString()
+						: value && Object.hasOwn(value, "intValue")
+							? value.intValue?.toString()
+							: value && Object.hasOwn(value, "boolValue")
+								? value.boolValue?.toString()
+								: undefined;
 			return key && text !== undefined ? [[key, text]] : [];
 		}),
 	);
@@ -150,6 +152,14 @@ export async function serverErrorEvents(
 		["lix.payload.failure_reason", "payloadFailureReason"],
 		["lix.payload.phase", "payloadPhase"],
 		["lix.payload.operation", "payloadOperation"],
+		["lix.payload.schema_kind", "payloadSchemaKind"],
+		["lix.payload.recipe_count", "payloadRecipeCount"],
+		["lix.payload.recipe_mask", "payloadRecipeMask"],
+		["lix.payload.required_input_count", "payloadRequiredInputCount"],
+		["lix.read.recipe_count", "nativeReadRecipeCount"],
+		["lix.read.recipe_mask", "nativeReadRecipeMask"],
+		["lix.wasm_asset.phase", "phase"],
+		["lix.wasm_asset.cache_status", "cacheStatus"],
 		["lix.payload.attempted", "attempted"],
 		["lix.payload.budget", "budget"],
 		["lix.payload.change_id", "changeId"],

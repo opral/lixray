@@ -19,6 +19,7 @@
 	},
 	"include": [
 		"src",
+		"experiments",
 		"vite.config.ts",
 		"playwright.file-component.config.ts",
 		"playwright.published.config.ts",

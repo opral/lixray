@@ -1,0 +1,48 @@
+{
+  "generatedAt": "2026-09-30T20:57:31.413Z",
+  "previewOrigin": "http://127.0.0.1:8830",
+  "lixOrigin": "http://127.0.0.1:18309",
+  "results": [
+    {
+      "name": "clean IndexedDB state survives online page reload",
+      "status": "passed",
+      "repositoryId": "59c0797f-f6e5-4432-ab2b-e16bbf47b9e5",
+      "reloadContentBytes": 1024
+    },
+    {
+      "name": "pending IndexedDB edit survives reload and cache reset",
+      "status": "passed",
+      "repositoryId": "86fa6850-9bb2-43da-8804-9634f53c700c",
+      "operationId": "2627ed2a-3b0f-4bdc-96d4-f1e140d9fd95",
+      "pendingBytes": 1049
+    },
+    {
+      "name": "lost publish acknowledgement retries one authority commit",
+      "status": "passed",
+      "repositoryId": "5345c4cf-46be-4758-a6c8-b1573258243e",
+      "operationId": "0d118315-c1d7-471c-8664-6e90671d5a16",
+      "mutationAttempts": 2,
+      "authorityHistoryDelta": 1
+    },
+    {
+      "name": "server conflict preserves local text until explicit resolution",
+      "status": "passed",
+      "repositoryId": "4ce9657f-2d77-4df5-92c7-4d102639345c",
+      "localEditBytes": 1039,
+      "mergedBytes": 1068
+    },
+    {
+      "name": "shared IndexedDB rejects stale edits from a second tab",
+      "status": "passed",
+      "repositoryId": "be50dc76-565f-4b88-a2b2-8de5cd0b00a1",
+      "sharedPendingBytes": 1039
+    }
+  ],
+  "failures": [],
+  "notes": [
+    "Runs against the built loopback preview and the local native Lix server using fresh synthetic repositories.",
+    "Reload validation exercises actual browser IndexedDB persistence; it does not claim browser-process crash or profile-eviction survival.",
+    "Account and branch key separation are covered by the module unit tests; this script exercises file edit/reopen/sync behavior in the native fixture.",
+    "Credentials are the loopback prototype seed credentials and do not represent production authentication."
+  ]
+}

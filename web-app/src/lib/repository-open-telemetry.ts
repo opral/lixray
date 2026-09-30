@@ -36,14 +36,51 @@ const PAYLOAD_FAILURE_REASONS = [
 	"selected_change_payload_unavailable",
 	"exact_owner_point_read_budget_exhausted",
 	"selected_change_payload_recipe_mismatch",
+	"selected_change_payload_identity_or_lifetime_mismatch",
+	"selected_change_payload_locator_missing",
+	"selected_change_payload_source_mismatch",
+	"selected_change_payload_outside_descriptor_scope",
+	"read_fulfillment_resident_input_conflict",
+	"read_fulfillment_validation_failed",
+	"read_fulfillment_install_failed",
 ] as const;
 const PAYLOAD_PHASES = [
 	"pre_request_catalog",
 	"read_fulfillment_validation",
+	"read_fulfillment_install",
 ] as const;
 const PAYLOAD_OPERATIONS = [
 	"registered_schema_identity_scan",
 	"registered_schema_snapshot_load",
+] as const;
+const PAYLOAD_SCHEMA_KINDS = [
+	"file_descriptor",
+	"directory_descriptor",
+	"binary_blob_ref",
+	"plugin_registry",
+	"account",
+	"schema",
+	"key_value",
+	"other",
+] as const;
+const READ_FULFILLMENT_ERROR_CODE = "LIX_READ_FULFILLMENT_INVALID";
+const NATIVE_READ_RECIPE_MASKS = {
+	exact: 1,
+	scan: 2,
+	file_content: 4,
+	filesystem_metadata: 8,
+	filesystem_paths: 16,
+	collection_generation: 32,
+	packed_identity_membership: 64,
+	diff: 128,
+} as const;
+const WASM_ASSET_ERROR_CODE = "LIX_WASM_ASSET_UNAVAILABLE";
+const WASM_ASSET_PHASES = ["wasm_fetch", "wasm_compile"] as const;
+const WASM_ASSET_CACHE_STATUSES = [
+	"hit",
+	"miss",
+	"corrupt",
+	"unavailable",
 ] as const;
 const EXACT_OWNER_POINT_READ_BUDGET = 65_536;
 const MIGRATION_MISSING_FIELDS = [
@@ -138,6 +175,25 @@ export function repositoryOpenDiagnostics(
 	const details = candidate.details;
 	if (!details || typeof details !== "object") return result;
 	const fields = details as Record<string, unknown>;
+	if (candidate.code === WASM_ASSET_ERROR_CODE) {
+		// Accept both SDK error details and the already-normalized first-party
+		// diagnostic payload. Re-normalizing at the worker boundary must not
+		// discard these code-gated enums.
+		const phase = fields.phase ?? fields.wasmAssetPhase;
+		if (
+			typeof phase === "string" &&
+			WASM_ASSET_PHASES.includes(phase as (typeof WASM_ASSET_PHASES)[number])
+		)
+			result.wasmAssetPhase = phase;
+		const cacheStatus = fields.cacheStatus ?? fields.wasmAssetCacheStatus;
+		if (
+			typeof cacheStatus === "string" &&
+			WASM_ASSET_CACHE_STATUSES.includes(
+				cacheStatus as (typeof WASM_ASSET_CACHE_STATUSES)[number],
+			)
+		)
+			result.wasmAssetCacheStatus = cacheStatus;
+	}
 	for (const key of [
 		"retryable",
 		"admissionRetryExhausted",
@@ -201,6 +257,28 @@ export function repositoryOpenDiagnostics(
 		)
 	)
 		result.payloadOperation = fields.payloadOperation;
+	if (candidate.code === READ_FULFILLMENT_ERROR_CODE) {
+		if (
+			typeof fields.payloadSchemaKind === "string" &&
+			PAYLOAD_SCHEMA_KINDS.includes(
+				fields.payloadSchemaKind as (typeof PAYLOAD_SCHEMA_KINDS)[number],
+			)
+		)
+			result.payloadSchemaKind = fields.payloadSchemaKind;
+		const recipeMask = parseBoundedPayloadCount(fields.payloadRecipeMask, 255);
+		if (recipeMask !== undefined) result.payloadRecipeMask = recipeMask;
+		const recipeCount = parseBoundedPayloadCount(
+			fields.payloadRecipeCount,
+			4096,
+		);
+		if (recipeCount !== undefined) result.payloadRecipeCount = recipeCount;
+		const requiredInputCount = parseBoundedPayloadCount(
+			fields.payloadRequiredInputCount,
+			16_384,
+		);
+		if (requiredInputCount !== undefined)
+			result.payloadRequiredInputCount = requiredInputCount;
+	}
 	if (
 		fields.payloadFailureReason === "exact_owner_point_read_budget_exhausted" &&
 		parseBoundedPayloadCount(
@@ -213,6 +291,70 @@ export function repositoryOpenDiagnostics(
 	) {
 		result.attempted = EXACT_OWNER_POINT_READ_BUDGET + 1;
 		result.budget = EXACT_OWNER_POINT_READ_BUDGET;
+	}
+	if (
+		typeof candidate.code === "string" &&
+		/^LIX_[A-Z0-9_]{1,100}$/.test(candidate.code)
+	) {
+		const nativeMarker = fields.readFulfillment;
+		const interests =
+			nativeMarker && typeof nativeMarker === "object"
+				? (nativeMarker as Record<string, unknown>).interests
+				: undefined;
+		if (Array.isArray(interests)) {
+			const count = parseBoundedPayloadCount(
+				fields.nativeReadRecipeCount,
+				4096,
+			);
+			const mask = parseBoundedPayloadCount(fields.nativeReadRecipeMask, 255);
+			const derivedMask = interests.reduce<number | undefined>(
+				(current, interest) => {
+					if (
+						current === undefined ||
+						!interest ||
+						typeof interest !== "object"
+					)
+						return undefined;
+					const kind = (interest as Record<string, unknown>).kind;
+					if (
+						typeof kind !== "string" ||
+						!Object.hasOwn(NATIVE_READ_RECIPE_MASKS, kind)
+					)
+						return undefined;
+					return (
+						current |
+						NATIVE_READ_RECIPE_MASKS[
+							kind as keyof typeof NATIVE_READ_RECIPE_MASKS
+						]
+					);
+				},
+				0,
+			);
+			if (
+				count !== undefined &&
+				count >= 1 &&
+				count === interests.length &&
+				mask !== undefined &&
+				derivedMask !== undefined &&
+				mask === derivedMask
+			) {
+				result.nativeReadRecipeCount = count;
+				result.nativeReadRecipeMask = mask;
+			}
+		} else if (nativeMarker === undefined) {
+			// First-party reports carry already-normalized fields after the private
+			// marker has been dropped at the browser boundary. This fallback only
+			// admits bounded numbers and a validated LIX code.
+			const count = parseBoundedPayloadCount(
+				fields.nativeReadRecipeCount,
+				4096,
+			);
+			const mask = parseBoundedPayloadCount(fields.nativeReadRecipeMask, 255);
+			if (count !== undefined && count >= 1 && mask !== undefined) {
+				result.nativeReadRecipeCount = count;
+				result.nativeReadRecipeMask = mask;
+			}
+		}
 	}
 	if (
 		typeof fields.failureReason === "string" &&

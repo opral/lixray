@@ -76,6 +76,33 @@ void test("extracts HTTP status preserved in structured Lix error details", () =
 	);
 });
 
+void test("worker RPC WASM errors expose only code-gated asset diagnostics", () => {
+	const error = Object.assign(new Error("private compile cause"), {
+		name: "LixError",
+		code: "LIX_WASM_ASSET_UNAVAILABLE",
+		details: {
+			phase: "wasm_fetch",
+			cacheStatus: "miss",
+			httpStatus: 404,
+			url: "https://private.example/asset.wasm?token=secret",
+			body: "private response body",
+			cause: "private compile cause",
+		},
+	});
+	assert.deepEqual(lixErrorTelemetryProperties(error), {
+		error_kind: "LixError",
+		lix_error_code: "LIX_WASM_ASSET_UNAVAILABLE",
+		lix_error_status: 404,
+		httpStatus: 404,
+		wasmAssetPhase: "wasm_fetch",
+		wasmAssetCacheStatus: "miss",
+	});
+	assert.doesNotMatch(
+		JSON.stringify(lixErrorTelemetryProperties(error)),
+		/private|secret|asset\.wasm/,
+	);
+});
+
 void test("operational failures are captured as exceptions, not product events", async () => {
 	const sources = await Promise.all([
 		readFile(new URL("./repository-lix-session.ts", import.meta.url), "utf8"),

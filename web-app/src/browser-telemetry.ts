@@ -246,6 +246,11 @@ export function stampLixResource(
 		const decoded = traceRequestType.decode(request) as {
 			resourceSpans?: Array<{
 				resource?: { attributes?: Array<{ key: string; value?: unknown }> };
+				scopeSpans?: Array<{
+					spans?: Array<{
+						attributes?: Array<{ key: string; value?: unknown }>;
+					}>;
+				}>;
 			}>;
 		};
 		for (const resourceSpan of decoded.resourceSpans ?? []) {
@@ -254,6 +259,16 @@ export function stampLixResource(
 			setStringAttribute(attributes, "service.name", "lixray-web");
 			setStringAttribute(attributes, "service.version", SERVICE_VERSION);
 			setStringAttribute(attributes, "lix.id", repositoryId);
+			// Native SDK spans carry the database's embedded ID. Published routes
+			// may use a different public ID, which is the identity authorized by
+			// the gateway header and used by Lixray's route-level instrumentation.
+			// This telemetry callback is bound to one open repository session, so
+			// bind its spans to that same authorized route scope before export.
+			for (const scope of resourceSpan.scopeSpans ?? []) {
+				for (const span of scope.spans ?? []) {
+					setStringAttribute((span.attributes ??= []), "lix.id", repositoryId);
+				}
+			}
 		}
 		return traceRequestType.encode(decoded).finish();
 	} catch {
@@ -281,7 +296,11 @@ function setStringAttribute(
 	key: string,
 	value: string,
 ): void {
-	const existing = attributes.find((attribute) => attribute.key === key);
-	if (existing) existing.value = { stringValue: value };
-	else attributes.push({ key, value: { stringValue: value } });
+	let found = false;
+	for (const attribute of attributes) {
+		if (attribute.key !== key) continue;
+		attribute.value = { stringValue: value };
+		found = true;
+	}
+	if (!found) attributes.push({ key, value: { stringValue: value } });
 }

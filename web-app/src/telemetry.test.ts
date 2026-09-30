@@ -541,6 +541,30 @@ void test("repository retry starts a new file-open root before SDK work", () => 
 	);
 });
 
+void test("WASM asset failure spans contain code-gated phase, cache status and HTTP status", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private compile error"), {
+				code: "LIX_WASM_ASSET_UNAVAILABLE",
+				details: {
+					phase: "wasm_compile",
+					cacheStatus: "corrupt",
+					httpStatus: 503,
+					url: "https://private.example/asset.wasm?token=secret",
+					body: "private response",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["error.type"], "LIX_WASM_ASSET_UNAVAILABLE");
+	assert.equal(finished.attributes["lix.wasm_asset.phase"], "wasm_compile");
+	assert.equal(finished.attributes["lix.wasm_asset.cache_status"], "corrupt");
+	assert.equal(finished.attributes["http.response.status_code"], 503);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});
+
 void test("failed opening spans preserve structured causes without recording error content", async () => {
 	exporter.reset();
 	await assert.rejects(
@@ -691,6 +715,10 @@ void test("read fulfillment rejection spans expose only the fixed validation rea
 				details: {
 					payloadPhase: "read_fulfillment_validation",
 					payloadFailureReason: "selected_change_payload_recipe_mismatch",
+					payloadSchemaKind: "file_descriptor",
+					payloadRecipeMask: 129,
+					payloadRecipeCount: 2,
+					payloadRequiredInputCount: 17,
 					request: "private scan recipe",
 				},
 			});
@@ -705,6 +733,38 @@ void test("read fulfillment rejection spans expose only the fixed validation rea
 		finished.attributes["lix.payload.failure_reason"],
 		"selected_change_payload_recipe_mismatch",
 	);
+	assert.equal(
+		finished.attributes["lix.payload.schema_kind"],
+		"file_descriptor",
+	);
+	assert.equal(finished.attributes["lix.payload.recipe_mask"], 129);
+	assert.equal(finished.attributes["lix.payload.recipe_count"], 2);
+	assert.equal(finished.attributes["lix.payload.required_input_count"], 17);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
+});
+
+void test("native read recipe spans expose only a validated count and mask", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private read recipe"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					readFulfillment: {
+						interests: [
+							{ kind: "scan", schema_key: "private_schema" },
+							{ kind: "filesystem_paths", branch_ids: ["private_branch"] },
+						],
+					},
+					nativeReadRecipeCount: 2,
+					nativeReadRecipeMask: 18,
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["lix.read.recipe_count"], 2);
+	assert.equal(finished.attributes["lix.read.recipe_mask"], 18);
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
 });
 

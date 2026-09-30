@@ -134,6 +134,173 @@ void test("read fulfillment failures accept only the fixed validation diagnosis"
 	);
 });
 
+void test("read fulfillment recipe diagnostics retain bounded schema and mask", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_READ_FULFILLMENT_INVALID",
+			details: {
+				payloadFailureReason: "selected_change_payload_recipe_mismatch",
+				payloadSchemaKind: "file_descriptor",
+				payloadRecipeMask: 129,
+				payloadRecipeCount: 2,
+				payloadRequiredInputCount: 17,
+				payload: "private recipe",
+			},
+		}),
+		{
+			lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
+			payloadFailureReason: "selected_change_payload_recipe_mismatch",
+			payloadSchemaKind: "file_descriptor",
+			payloadRecipeMask: 129,
+			payloadRecipeCount: 2,
+			payloadRequiredInputCount: 17,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_READ_FULFILLMENT_INVALID",
+			details: {
+				payloadSchemaKind: "private_schema_name",
+				payloadRecipeMask: 256,
+			},
+		}),
+		{ lix_error_code: "LIX_READ_FULFILLMENT_INVALID" },
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_INTERNAL_ERROR",
+			details: {
+				payloadSchemaKind: "file_descriptor",
+				payloadRecipeMask: 129,
+			},
+		}),
+		{ lix_error_code: "LIX_INTERNAL_ERROR" },
+	);
+});
+
+void test("native read recipe diagnostics require a matching marker and stay numeric", () => {
+	const error = {
+		code: "LIX_INTERNAL_ERROR",
+		details: {
+			readFulfillment: {
+				interests: [
+					{
+						kind: "exact",
+						schema_key: "private_schema",
+						row_pk: "private_row",
+					},
+					{ kind: "diff", relation: "private_relation" },
+				],
+			},
+			nativeReadRecipeCount: 2,
+			nativeReadRecipeMask: 129,
+		},
+	};
+	assert.deepEqual(repositoryOpenDiagnostics(error), {
+		lix_error_code: "LIX_INTERNAL_ERROR",
+		nativeReadRecipeCount: 2,
+		nativeReadRecipeMask: 129,
+	});
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_INTERNAL_ERROR",
+			details: {
+				readFulfillment: { interests: [{ kind: "exact" }, { kind: "diff" }] },
+				nativeReadRecipeCount: 1,
+				nativeReadRecipeMask: 129,
+			},
+		}),
+		{ lix_error_code: "LIX_INTERNAL_ERROR" },
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_INTERNAL_ERROR",
+			details: { nativeReadRecipeCount: 2, nativeReadRecipeMask: 129 },
+		}),
+		{
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			nativeReadRecipeCount: 2,
+			nativeReadRecipeMask: 129,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "ERR_OTHER",
+			details: { nativeReadRecipeCount: 2, nativeReadRecipeMask: 129 },
+		}),
+		{},
+	);
+	assert.doesNotMatch(
+		JSON.stringify(repositoryOpenDiagnostics(error)),
+		/private/,
+	);
+});
+
+void test("WASM asset diagnostics are code-gated and content-free", () => {
+	const details = {
+		phase: "wasm_compile",
+		cacheStatus: "corrupt",
+		httpStatus: 503,
+		url: "https://private.example/asset.wasm?token=secret",
+		body: "private response",
+		cause: "native parser details",
+	};
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			name: "LixError",
+			code: "LIX_WASM_ASSET_UNAVAILABLE",
+			details,
+		}),
+		{
+			error_kind: "LixError",
+			lix_error_code: "LIX_WASM_ASSET_UNAVAILABLE",
+			wasmAssetPhase: "wasm_compile",
+			wasmAssetCacheStatus: "corrupt",
+			httpStatus: 503,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_INTERNAL_ERROR",
+			details,
+		}),
+		{ lix_error_code: "LIX_INTERNAL_ERROR", httpStatus: 503 },
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			code: "LIX_WASM_ASSET_UNAVAILABLE",
+			details: { phase: "wasm_link", cacheStatus: "private" },
+		}),
+		{ lix_error_code: "LIX_WASM_ASSET_UNAVAILABLE" },
+	);
+});
+
+void test("client read-fulfillment diagnostics preserve bounded causes after a successful server response", () => {
+	for (const reason of [
+		"selected_change_payload_identity_or_lifetime_mismatch",
+		"selected_change_payload_locator_missing",
+		"selected_change_payload_source_mismatch",
+		"selected_change_payload_outside_descriptor_scope",
+		"read_fulfillment_resident_input_conflict",
+	]) {
+		assert.deepEqual(
+			repositoryOpenDiagnostics({
+				code: "LIX_READ_FULFILLMENT_INVALID",
+				details: {
+					payloadPhase: "read_fulfillment_install",
+					payloadFailureReason: reason,
+					payload: "private document bytes",
+				},
+			}),
+			{
+				lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
+				payloadPhase: "read_fulfillment_install",
+				payloadFailureReason: reason,
+			},
+		);
+	}
+});
+
 void test("opening diagnostics retain coordinates and exclude arbitrary private data", () => {
 	const id = "11111111-1111-4111-8111-111111111111";
 	assert.deepEqual(
@@ -184,6 +351,41 @@ void test("non-Lix repository opening failures use the independent first-party p
 		diagnostic: { error_kind: "TypeError" },
 		frames: [],
 	});
+});
+
+void test("WASM asset diagnostics reach the first-party worker as bounded fields", async () => {
+	let sent: Record<string, unknown> | undefined;
+	const error = Object.assign(new Error("private wasm failure"), {
+		name: "LixError",
+		code: "LIX_WASM_ASSET_UNAVAILABLE",
+		details: {
+			phase: "wasm_fetch",
+			cacheStatus: "unavailable",
+			httpStatus: 502,
+			url: "https://private.example/asset.wasm?token=secret",
+			body: "private response",
+		},
+	});
+	await reportRepositoryOpenFailure(
+		error,
+		{
+			repositoryId: "id",
+			release: "build",
+			getAccessToken: async () => "test-token",
+		},
+		async (_url, init) => {
+			sent = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response(null);
+		},
+	);
+	assert.deepEqual(sent?.diagnostic, {
+		error_kind: "LixError",
+		lix_error_code: "LIX_WASM_ASSET_UNAVAILABLE",
+		wasmAssetPhase: "wasm_fetch",
+		wasmAssetCacheStatus: "unavailable",
+		httpStatus: 502,
+	});
+	assert.doesNotMatch(JSON.stringify(sent), /private|secret/);
 });
 
 void test("failed telemetry does not throw or retry opening", async () => {
