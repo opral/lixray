@@ -1887,7 +1887,10 @@ function HomeStatusLine({
 					onClick={onOpenSqlExplorer}
 				>
 					<Database aria-hidden="true" />
-					{data.tableCount} {data.tableCount === 1 ? "table" : "tables"}
+					Database
+					<span className="text-fg-subtle">
+						{data.tableCount} {data.tableCount === 1 ? "table" : "tables"}
+					</span>
 				</Button>
 			) : null}
 			{onOpenSettings ? (
