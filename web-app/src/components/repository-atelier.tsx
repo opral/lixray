@@ -1516,7 +1516,9 @@ export function RepositoryAtelier({
 						mainArea: {
 							home: { extensionId: ATELIER_BUILTIN_EXTENSION_IDS.library },
 						},
-						defaultOpenPanels: ["left"],
+						// The Library sidebar opens by default where it fits beside
+						// the page; on a phone the page gets the width.
+						defaultOpenPanels: window.innerWidth >= 768 ? ["left"] : [],
 						library: createLixrayLibraryOptions(
 							repositoryConnection,
 							hasAgentConnected,
