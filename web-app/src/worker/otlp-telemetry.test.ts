@@ -459,6 +459,26 @@ void test("browser status-only engine failures use browser source and preserve r
 												key: "lix.recovery.deadline_exceeded",
 												value: { boolValue: true },
 											},
+											{
+												key: "lix.payload.standalone_status",
+												value: { stringValue: "matched" },
+											},
+											{
+												key: "lix.payload.physical_status",
+												value: { stringValue: "lifetime_mismatch" },
+											},
+											{
+												key: "lix.payload.source_deferred",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.payload.physical_conflict",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.payload.source_commit_id",
+												value: { stringValue: "private-secret" },
+											},
 										],
 									},
 								],
@@ -496,6 +516,11 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.retryable, false);
 	assert.equal(props.admissionRetryExhausted, true);
 	assert.equal(props.recoveryDeadlineExceeded, true);
+	assert.equal(props.payloadStandaloneStatus, "matched");
+	assert.equal(props.payloadPhysicalStatus, "lifetime_mismatch");
+	assert.equal(props.payloadSourceDeferred, true);
+	assert.equal(props.payloadPhysicalConflict, true);
+	assert.equal(props.sourceCommitId, undefined);
 	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
 });
 

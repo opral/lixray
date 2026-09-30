@@ -5,6 +5,40 @@ import {
 	reportRepositoryOpenFailure,
 } from "./repository-open-telemetry.ts";
 
+void test("payload provenance diagnostics accept only bounded structural states", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadStandaloneStatus: "matched",
+				payloadPhysicalStatus: "lifetime_mismatch",
+				payloadSourceDeferred: true,
+				payloadPhysicalConflict: false,
+				changeId: "11111111-1111-4111-8111-111111111111",
+				sourceCommitId: "private document content",
+				snapshot: "secret",
+			},
+		}),
+		{
+			payloadStandaloneStatus: "matched",
+			payloadPhysicalStatus: "lifetime_mismatch",
+			payloadSourceDeferred: true,
+			payloadPhysicalConflict: false,
+			changeId: "11111111-1111-4111-8111-111111111111",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadStandaloneStatus: "secret",
+				payloadPhysicalStatus: "https://private/?token=secret",
+				payloadSourceDeferred: "true",
+				payloadPhysicalConflict: 1,
+			},
+		}),
+		{},
+	);
+});
+
 void test("opening diagnostics retain coordinates and exclude arbitrary private data", () => {
 	const id = "11111111-1111-4111-8111-111111111111";
 	assert.deepEqual(

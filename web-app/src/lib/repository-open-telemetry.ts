@@ -41,6 +41,8 @@ export function repositoryOpenDiagnostics(
 		"retryable",
 		"admissionRetryExhausted",
 		"recoveryDeadlineExceeded",
+		"payloadSourceDeferred",
+		"payloadPhysicalConflict",
 	]) {
 		if (typeof fields[key] === "boolean") result[key] = fields[key];
 	}
@@ -56,9 +58,25 @@ export function repositoryOpenDiagnostics(
 		"expectedRootCommitId",
 		"servingGeneration",
 		"expectedServingGeneration",
+		"changeId",
+		"sourceCommitId",
 	]) {
 		const value = fields[key];
 		if (value === null || (typeof value === "string" && UUID.test(value)))
+			result[key] = value;
+	}
+	for (const key of ["payloadStandaloneStatus", "payloadPhysicalStatus"]) {
+		const value = fields[key];
+		if (
+			typeof value === "string" &&
+			[
+				"absent",
+				"matched",
+				"identity_mismatch",
+				"missing_snapshot",
+				"lifetime_mismatch",
+			].includes(value)
+		)
 			result[key] = value;
 	}
 	for (const key of [

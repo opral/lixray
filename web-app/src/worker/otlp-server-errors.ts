@@ -124,12 +124,18 @@ export async function serverErrorEvents(
 		["http.response.status_code", "httpStatus"],
 		["lix.recovery.attempts", "recoveryAttempts"],
 		["lix.recovery.stage", "recoveryStage"],
+		["lix.payload.standalone_status", "payloadStandaloneStatus"],
+		["lix.payload.physical_status", "payloadPhysicalStatus"],
+		["lix.payload.change_id", "changeId"],
+		["lix.payload.source_commit_id", "sourceCommitId"],
 	])
 		details[field!] = context[key!];
 	for (const [key, field] of [
 		["lix.error.retryable", "retryable"],
 		["lix.recovery.retry_exhausted", "admissionRetryExhausted"],
 		["lix.recovery.deadline_exceeded", "recoveryDeadlineExceeded"],
+		["lix.payload.source_deferred", "payloadSourceDeferred"],
+		["lix.payload.physical_conflict", "payloadPhysicalConflict"],
 	]) {
 		if (context[key!] === "true" || context[key!] === "false")
 			details[field!] = context[key!] === "true";
