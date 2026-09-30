@@ -24,6 +24,8 @@ import {
 	Check,
 	ChevronDown,
 	Copy,
+	Database,
+	GitCompareArrows,
 	Globe2,
 	Link2,
 	LockKeyhole,
@@ -653,10 +655,10 @@ export function DirectoryView({
 					// Reserve space for the outboard checkboxes and selection toolbar,
 					// including when the app shell makes this panel narrower.
 					summary
-						? "grid grid-cols-[minmax(0,1fr)_244px] gap-12 @max-[820px]:grid-cols-1 @max-[820px]:gap-8"
+						? "flex flex-col"
 						: isHome
-						? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
-						: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
+							? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
+							: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
 				}
 			>
 				<main
@@ -667,6 +669,29 @@ export function DirectoryView({
 						showGettingStarted ? "grid min-w-0 content-center" : "min-w-0"
 					}
 				>
+					{summary && !showGettingStarted ? (
+						<HomeStatusLine
+							data={controlPlaneData}
+							visibility={visibility}
+							connection={connection}
+							hasAgentConnected={hasAgentConnected}
+							readOnly={readOnly}
+							invite={
+								onOpenPeople && detailsEnabled ? (
+									<InviteControl
+										teamApi={teamApi}
+										onOpenPeople={onOpenPeople}
+										disabled={readOnly || !teamApi}
+										className={HOME_CHIP_CLASS}
+									/>
+								) : null
+							}
+							{...(onOpenChangesReview ? { onOpenChangesReview } : {})}
+							{...(onOpenHistory ? { onOpenHistory } : {})}
+							{...(onOpenSqlExplorer ? { onOpenSqlExplorer } : {})}
+							{...(onOpenSettings ? { onOpenSettings } : {})}
+						/>
+					) : null}
 					{showGettingStarted || summary ? null : (
 						<div
 							className={`flex items-center gap-2 ${summary ? "pb-6" : "pb-5"}`}
@@ -785,7 +810,7 @@ export function DirectoryView({
 							Importing files and folders…
 						</p>
 					) : null}
-					{isHome ? (
+					{isHome && !summary ? (
 						<RepositoryNarrowStats
 							fileCount={tree.files.length}
 							data={controlPlaneData}
@@ -972,7 +997,7 @@ export function DirectoryView({
 						/>
 					) : null}
 				</main>
-				{isHome ? (
+				{isHome && !summary ? (
 					<RepositoryControlPlaneRail
 						embedded={summary}
 						reviewFocus={reviewFocus}
@@ -1058,7 +1083,9 @@ function RepositoryControlPlaneRail({
 		<aside
 			aria-label="Repository overview"
 			className={
-				embedded ? "min-w-0 @max-[820px]:hidden" : "min-w-0 @max-[1100px]:hidden"
+				embedded
+					? "min-w-0 @max-[820px]:hidden"
+					: "min-w-0 @max-[1100px]:hidden"
 			}
 		>
 			{teamSection ? (
@@ -1730,6 +1757,149 @@ function DropImportOverlay() {
 	return (
 		<div className="pointer-events-none absolute inset-2 z-10 grid place-content-center rounded-xl border-2 border-dashed border-accent bg-panel/85 text-sm font-semibold text-fg-muted">
 			Drop files and folders to import
+		</div>
+	);
+}
+
+/** Home's status chips: quiet, rounded, one line of them. */
+const HOME_CHIP_CLASS =
+	"h-7 gap-1.5 rounded-full border border-border bg-panel px-2.5 text-[12px] font-medium text-fg-muted shadow-none hover:bg-bg-hover hover:text-fg [&_img]:size-3 [&_svg]:size-3.5";
+
+/**
+ * Home's one line about the repository: whether an agent is connected, what
+ * has changed since the last checkpoint, the database, who can see it, and
+ * Invite. Each chip is the way into that part of the product.
+ */
+function HomeStatusLine({
+	data,
+	visibility,
+	connection,
+	hasAgentConnected,
+	readOnly,
+	invite,
+	onOpenChangesReview,
+	onOpenHistory,
+	onOpenSqlExplorer,
+	onOpenSettings,
+}: {
+	readonly data: RepositoryControlPlaneData | null;
+	readonly visibility: "private" | "public";
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: (() => Promise<boolean>) | null;
+	readonly readOnly: boolean;
+	readonly invite: ReactNode;
+	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
+	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenSettings?: () => void;
+}) {
+	const [agentConnected, setAgentConnected] = useState<boolean | null>(null);
+	const [dialogOpen, setDialogOpen] = useState(false);
+	useEffect(() => {
+		if (!hasAgentConnected) return;
+		let disposed = false;
+		hasAgentConnected()
+			.then((connected) => {
+				if (!disposed) setAgentConnected(connected);
+			})
+			.catch(() => {
+				if (!disposed) setAgentConnected(false);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [hasAgentConnected, dialogOpen]);
+	const changed = data?.workingFileCount ?? null;
+	return (
+		<div
+			className="flex flex-wrap items-center gap-2 pb-4"
+			data-testid="home-status-line"
+		>
+			{hasAgentConnected && !readOnly ? (
+				<>
+					<Button
+						type="button"
+						variant="outline"
+						className={HOME_CHIP_CLASS}
+						onClick={() => setDialogOpen(true)}
+					>
+						{agentConnected ? (
+							<>
+								<span
+									aria-hidden="true"
+									className="size-1.5 rounded-full bg-success"
+								/>
+								Agent connected
+							</>
+						) : (
+							<>
+								<span className="flex items-center gap-1" aria-hidden="true">
+									<img src="/landing/claude-spark.svg" alt="" />
+									<img src="/landing/brand-openai.svg" alt="" />
+									<img src="/landing/brand-gemini.svg" alt="" />
+								</span>
+								Connect an agent
+							</>
+						)}
+					</Button>
+					<AgentConnectionDialog
+						connection={connection}
+						hasAgentConnected={hasAgentConnected}
+						open={dialogOpen}
+						onOpenChange={setDialogOpen}
+					/>
+				</>
+			) : null}
+			{changed !== null && changed > 0 && onOpenChangesReview ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenChangesReview}
+				>
+					<GitCompareArrows aria-hidden="true" />
+					{changed} {changed === 1 ? "change" : "changes"}
+					<span className="text-link">Review</span>
+				</Button>
+			) : changed === 0 && onOpenHistory ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenHistory}
+				>
+					<Check aria-hidden="true" />
+					All checkpointed
+				</Button>
+			) : null}
+			{data?.tableCount != null && onOpenSqlExplorer ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenSqlExplorer}
+				>
+					<Database aria-hidden="true" />
+					{data.tableCount} {data.tableCount === 1 ? "table" : "tables"}
+				</Button>
+			) : null}
+			{onOpenSettings ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenSettings}
+					title="Visibility and settings"
+				>
+					{visibility === "public" ? (
+						<Globe2 aria-hidden="true" />
+					) : (
+						<LockKeyhole aria-hidden="true" />
+					)}
+					{visibility === "public" ? "Public" : "Private"}
+				</Button>
+			) : null}
+			{invite}
 		</div>
 	);
 }
