@@ -190,6 +190,12 @@ The gateway checks member or public repository access and records an allowlisted
 server log before delivering a PostHog `$exception` with `operation=repository_open`
 and `delivery=first_party`. Reports include client/server release, stable error
 code or JavaScript error kind, and available admission epoch/root coordinates.
+Payload resolution failures also include `payloadStandaloneStatus` and
+`payloadPhysicalStatus` (`absent`, `matched`, `identity_mismatch`,
+`missing_snapshot`, or `lifetime_mismatch`), `payloadPhysicalConflict`, and
+`payloadSourceDeferred` when the deferred marker can be read. These same bounded
+states are projected from native spans; payload values are excluded. An omitted
+deferred flag means unknown, rather than false.
 Up to eight sanitized JavaScript asset frames, including source-map chunk IDs,
 are retained in the first-party exception. Raw error messages, URL queries, page
 paths, local variables, tokens and repository contents are not accepted by this
