@@ -105,6 +105,8 @@ type DirectoryViewProps = {
 	 * no listing of files — the Library's Files section is the listing.
 	 */
 	readonly summary?: boolean;
+	/** Home: the Library's Recent row, placed under the status line. */
+	readonly recent?: ReactNode;
 	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
 	readonly showHiddenFiles?: boolean;
 	/**
@@ -180,6 +182,7 @@ export function DirectoryView({
 	dirPath,
 	isHome,
 	summary = false,
+	recent = null,
 	showHiddenFiles = false,
 	defaultFolders = NO_DEFAULT_FOLDERS,
 	onSetDefaultFolder,
@@ -692,6 +695,9 @@ export function DirectoryView({
 							{...(onOpenSettings ? { onOpenSettings } : {})}
 						/>
 					) : null}
+					{summary && !showGettingStarted && recent ? (
+						<div className="pb-10">{recent}</div>
+					) : null}
 					{showGettingStarted || summary ? null : (
 						<div
 							className={`flex items-center gap-2 ${summary ? "pb-6" : "pb-5"}`}
@@ -861,6 +867,7 @@ export function DirectoryView({
 							}`}
 						>
 							<ReadmePreview
+								section={summary}
 								lix={lix}
 								sourceFilePath={listing.readmePath}
 								fileId={
@@ -1812,7 +1819,7 @@ function HomeStatusLine({
 	const changed = data?.workingFileCount ?? null;
 	return (
 		<div
-			className="flex flex-wrap items-center gap-2 pb-4"
+			className="flex flex-wrap items-center gap-2 pb-8"
 			data-testid="home-status-line"
 		>
 			{hasAgentConnected && !readOnly ? (
@@ -1933,7 +1940,10 @@ function ReadmePreview({
 	onOpen,
 	onOpenLinkedFile,
 	onNavigate,
+	section = false,
 }: {
+	/** Home: a "README" heading like the page's other sections, Edit beside it. */
+	readonly section?: boolean;
 	readonly lix: Lix;
 	readonly sourceFilePath: string;
 	readonly fileId: string | null;
@@ -1967,30 +1977,48 @@ function ReadmePreview({
 		<section
 			aria-label={`${fileName} preview`}
 			data-testid="home-readme-preview"
-			className="mt-7 border-t border-border"
+			className={section ? "" : "mt-7 border-t border-border"}
 		>
-			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-fg-subtle">
-				<img
-					src={fileIconUrl(fileName)}
-					alt=""
-					draggable={false}
-					className="size-[19px] shrink-0"
-				/>
-				<span className="min-w-0 flex-1 truncate" title={fileName}>
-					{fileName}
-				</span>
-				<button
-					type="button"
-					data-testid="home-readme-edit"
-					aria-label={`Edit ${fileName}`}
-					title={`Edit ${fileName}`}
-					onClick={(event) => onOpen(event)}
-					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-				>
-					<PencilLine aria-hidden="true" className="size-3.5" />
-					Edit
-				</button>
-			</div>
+			{section ? (
+				<div className="flex items-center gap-1 pb-3">
+					<h2 className="m-0 text-[13px] font-semibold text-fg-muted">
+						Readme
+					</h2>
+					<button
+						type="button"
+						data-testid="home-readme-edit"
+						aria-label={`Edit ${fileName}`}
+						title={`Edit ${fileName}`}
+						onClick={(event) => onOpen(event)}
+						className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					>
+						<PencilLine aria-hidden="true" className="size-3.5" />
+					</button>
+				</div>
+			) : (
+				<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-fg-subtle">
+					<img
+						src={fileIconUrl(fileName)}
+						alt=""
+						draggable={false}
+						className="size-[19px] shrink-0"
+					/>
+					<span className="min-w-0 flex-1 truncate" title={fileName}>
+						{fileName}
+					</span>
+					<button
+						type="button"
+						data-testid="home-readme-edit"
+						aria-label={`Edit ${fileName}`}
+						title={`Edit ${fileName}`}
+						onClick={(event) => onOpen(event)}
+						className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					>
+						<PencilLine aria-hidden="true" className="size-3.5" />
+						Edit
+					</button>
+				</div>
+			)}
 			{/* Relative README links navigate the tab in place (rule 3) instead
 			    of escaping to a full page load. */}
 			{/* Click delegation only augments the anchors inside, which stay
@@ -2008,7 +2036,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-3 pt-2 pb-9"
+				className={section ? "pb-9" : "px-3 pt-2 pb-9"}
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every

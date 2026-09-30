@@ -7,7 +7,7 @@ import {
 	type AtelierExtensionView,
 } from "@opral/atelier";
 import { Folder, Home, Settings, Users } from "lucide-react";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
 import { DirectoryView, GettingStarted } from "./directory-view";
@@ -355,12 +355,14 @@ function openLibraryFolder(
  */
 function LibraryHome({
 	atelier,
+	recent,
 	connection,
 	hasAgentConnected,
 	teamApi,
 	visibility,
 }: {
 	atelier: AtelierExtensionRuntime;
+	recent: ReactNode;
 	connection: LixRepositoryConnection;
 	hasAgentConnected: AgentConnectionProbe;
 	teamApi: RepositoryTeamApi | null;
@@ -381,6 +383,7 @@ function LibraryHome({
 				dirPath="/"
 				isHome
 				summary
+				recent={recent}
 				showHiddenFiles={
 					atelier.preferences.get(
 						ATELIER_BUILTIN_EXTENSION_IDS.files,
@@ -427,9 +430,10 @@ export const createLixrayLibraryOptions = (
 	teamApi: RepositoryTeamApi | null,
 	visibility: "private" | "public",
 ): AtelierLibraryOptions => ({
-	Home: ({ atelier }) => (
+	Home: ({ atelier, recent }) => (
 		<LibraryHome
 			atelier={atelier}
+			recent={recent}
 			connection={connection}
 			hasAgentConnected={hasAgentConnected}
 			teamApi={teamApi}
