@@ -1114,9 +1114,6 @@ export function RepositoryAtelier({
 					void navigateEntity("directory", dirPath);
 					return;
 				}
-				// A second Library tab at a kind stays URL-less, as a root folder
-				// tab did: the root URL means the pinned home is in front.
-				if (isLibrary && event.instanceId !== LIBRARY_HOME_INSTANCE) return;
 				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
 				shellNavigationRef.current = "view:home";
