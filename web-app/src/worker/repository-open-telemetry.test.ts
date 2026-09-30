@@ -53,6 +53,86 @@ void test("server delivers exceptions independently of browser PostHog", async (
 	assert.equal(properties.delivery, "first_party");
 });
 
+void test("first-party exception values show bounded migration cause and path", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			failureReason: "v2_receipt_shape_invalid",
+			failurePath: "$.descriptor.descriptorVersion",
+			message: "private payload",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		failureReason: string;
+		failurePath: string;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(properties.failureReason, "v2_receipt_shape_invalid");
+	assert.equal(properties.failurePath, "$.descriptor.descriptorVersion");
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private payload/);
+});
+
+void test("first-party exception values show bounded selected-payload diagnosis", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadFailureReason: "selected_change_payload_unavailable",
+			payloadPhysicalStatus: "missing_snapshot",
+			changeId: id,
+			payload: "private bytes",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		payloadFailureReason: string;
+		payloadPhysicalStatus: string;
+		changeId: string;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(
+		properties.payloadFailureReason,
+		"selected_change_payload_unavailable",
+	);
+	assert.equal(properties.payloadPhysicalStatus, "missing_snapshot");
+	assert.equal(properties.changeId, id);
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: selected_change_payload_unavailable",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private bytes/);
+});
+
 void test("diagnostics route authenticates, bounds input and checks repository access", async () => {
 	const { handleRequest } = await import("./handler.ts");
 	const request = (body: unknown) =>

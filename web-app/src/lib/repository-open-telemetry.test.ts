@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	repositoryOpenDiagnostics,
+	repositoryOpenFailureMessage,
 	reportRepositoryOpenFailure,
 } from "./repository-open-telemetry.ts";
 
@@ -10,7 +11,8 @@ void test("payload provenance diagnostics accept only bounded structural states"
 		repositoryOpenDiagnostics({
 			details: {
 				payloadStandaloneStatus: "matched",
-				payloadPhysicalStatus: "lifetime_mismatch",
+				payloadPhysicalStatus: "missing_snapshot",
+				payloadFailureReason: "selected_change_payload_unavailable",
 				payloadSourceDeferred: true,
 				payloadPhysicalConflict: false,
 				changeId: "11111111-1111-4111-8111-111111111111",
@@ -20,7 +22,8 @@ void test("payload provenance diagnostics accept only bounded structural states"
 		}),
 		{
 			payloadStandaloneStatus: "matched",
-			payloadPhysicalStatus: "lifetime_mismatch",
+			payloadPhysicalStatus: "missing_snapshot",
+			payloadFailureReason: "selected_change_payload_unavailable",
 			payloadSourceDeferred: true,
 			payloadPhysicalConflict: false,
 			changeId: "11111111-1111-4111-8111-111111111111",
@@ -31,6 +34,7 @@ void test("payload provenance diagnostics accept only bounded structural states"
 			details: {
 				payloadStandaloneStatus: "secret",
 				payloadPhysicalStatus: "https://private/?token=secret",
+				payloadFailureReason: "private failure reason",
 				payloadSourceDeferred: "true",
 				payloadPhysicalConflict: 1,
 			},
@@ -166,6 +170,168 @@ void test("first-party diagnostics retain receipt versions and recovery stage wi
 			recoveryAttempts: 7,
 			httpStatus: 503,
 		},
+	);
+});
+
+void test("migration parser diagnostics retain only known reason and receipt paths", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				receiptVersion: 2,
+				migrationPhase: "partial_receipt",
+				failureReason: "v2_branch_incarnation_mismatch",
+				failurePath: "$.descriptor.selectedBranch.createdAt",
+				parserMessage: "contains private receipt bytes",
+			},
+		}),
+		{
+			receiptVersion: 2,
+			migrationPhase: "partial_receipt",
+			failureReason: "v2_branch_incarnation_mismatch",
+			failurePath: "$.descriptor.selectedBranch.createdAt",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				migrationPhase: "private_parser_stage",
+				failureReason: "serde said private data",
+				failurePath: "$.privateValue.token",
+			},
+		}),
+		{},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				receiptVersion: 2,
+				migrationPhase: "partial_receipt",
+				failureReason: "v2_receipt_json_data",
+				failurePath: "$",
+				jsonLine: "12",
+				jsonColumn: 5,
+				missingField: "activeAccountId",
+			},
+		}),
+		{
+			receiptVersion: 2,
+			migrationPhase: "partial_receipt",
+			failureReason: "v2_receipt_json_data",
+			failurePath: "$",
+			jsonLine: 12,
+			jsonColumn: 5,
+			missingField: "activeAccountId",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				receiptVersion: 2,
+				failureReason: "v2_receipt_json_other",
+				failurePath: "$",
+				jsonLine: 16_385,
+				jsonColumn: 0,
+				missingField: "authorId",
+			},
+		}),
+		{
+			failureReason: "v2_receipt_json_other",
+			failurePath: "$",
+			receiptVersion: 2,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				receiptVersion: 1,
+				migrationPhase: "partial_receipt",
+				failureReason: "receipt_json_data",
+				failurePath: "$",
+				missingField: "archivedBranchIds",
+			},
+		}),
+		{
+			receiptVersion: 1,
+			migrationPhase: "partial_receipt",
+			failureReason: "receipt_json_data",
+			failurePath: "$",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				receiptVersion: 3,
+				migrationPhase: "partial_receipt",
+				failureReason: "receipt_json_data",
+				failurePath: "$",
+				jsonLine: 3,
+				jsonColumn: 14,
+				missingField: "authorId",
+			},
+		}),
+		{
+			receiptVersion: 3,
+			migrationPhase: "partial_receipt",
+			failureReason: "receipt_json_data",
+			failurePath: "$",
+			jsonLine: 3,
+			jsonColumn: 14,
+			missingField: "authorId",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				migrationPhase: "partial_receipt",
+				failureReason: "receipt_validation_failed",
+				failurePath: "$.baselineLease",
+				receiptVersion: 2,
+				expectedReceiptVersion: 3,
+			},
+		}),
+		{
+			migrationPhase: "partial_receipt",
+			failureReason: "receipt_validation_failed",
+			failurePath: "$.baselineLease",
+			receiptVersion: 2,
+			expectedReceiptVersion: 3,
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: { migrationPhase: "private_parser_stage" },
+		}),
+		{},
+	);
+	assert.equal(
+		repositoryOpenFailureMessage(
+			{
+				details: {
+					failureReason: "v2_branch_incarnation_mismatch",
+					failurePath: "$.descriptor.selectedBranch.createdAt",
+				},
+			},
+			"Repository opening failed",
+		),
+		"Repository opening failed: v2_branch_incarnation_mismatch at $.descriptor.selectedBranch.createdAt",
+	);
+	assert.equal(
+		repositoryOpenFailureMessage(
+			{
+				details: {
+					payloadFailureReason: "selected_change_payload_unavailable",
+				},
+			},
+			"Repository opening failed",
+		),
+		"Repository opening failed: selected_change_payload_unavailable",
+	);
+	assert.equal(
+		repositoryOpenFailureMessage(
+			{ details: { failureReason: "arbitrary private text" } },
+			"Repository opening failed",
+		),
+		"Repository opening failed",
 	);
 });
 

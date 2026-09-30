@@ -38,8 +38,14 @@ export function withSpan<T>(
 			);
 			for (const [key, field] of [
 				["sourceCode", "lix.error.source_code"],
+				["migrationPhase", "lix.migration.phase"],
 				["fromVersion", "lix.migration.from_version"],
 				["toVersion", "lix.migration.to_version"],
+				["failureReason", "lix.migration.failure_reason"],
+				["failurePath", "lix.migration.failure_path"],
+				["jsonLine", "lix.migration.json_line"],
+				["jsonColumn", "lix.migration.json_column"],
+				["missingField", "lix.migration.missing_field"],
 				["receiptVersion", "lix.receipt.version"],
 				["expectedReceiptVersion", "lix.receipt.expected_version"],
 				["httpStatus", "http.response.status_code"],
@@ -48,6 +54,9 @@ export function withSpan<T>(
 				["retryable", "lix.error.retryable"],
 				["admissionRetryExhausted", "lix.recovery.retry_exhausted"],
 				["recoveryDeadlineExceeded", "lix.recovery.deadline_exceeded"],
+				["payloadFailureReason", "lix.payload.failure_reason"],
+				["payloadPhysicalStatus", "lix.payload.physical_status"],
+				["changeId", "lix.payload.change_id"],
 			]) {
 				const value = diagnostic[key!];
 				if (

@@ -50,9 +50,9 @@ export function installBrowserTelemetry(): void {
 				headers: async (): Promise<Record<string, string>> => {
 					const token = await accessTokenProvider();
 
-					if (!token || !repositoryId) return {};
+					if (!repositoryId) return {};
 					return {
-						Authorization: `Bearer ${token}`,
+						...(token ? { Authorization: `Bearer ${token}` } : {}),
 						"x-lixray-repository-id": repositoryId,
 					};
 				},
@@ -130,21 +130,18 @@ export function createLixTelemetryOptions(
 					Promise.resolve().then(getAccessToken),
 					controller.signal,
 				);
-				if (!token)
-					throw new Error(
-						"No repository token is available for Lix OTLP export",
-					);
 				const requestBody = new ArrayBuffer(body.byteLength);
 				new Uint8Array(requestBody).set(body);
+				const headers = new Headers({
+					"x-lixray-repository-id": repositoryId,
+					"content-type": "application/x-protobuf",
+				});
+				if (token) headers.set("Authorization", `Bearer ${token}`);
 				const response = await fetch(
 					new URL(OTLP_PATH, window.location.origin),
 					{
 						method: "POST",
-						headers: {
-							Authorization: `Bearer ${token}`,
-							"x-lixray-repository-id": repositoryId,
-							"content-type": "application/x-protobuf",
-						},
+						headers,
 						body: requestBody,
 						signal: controller.signal,
 					},

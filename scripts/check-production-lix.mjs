@@ -5,6 +5,7 @@ import { getCompatibility } from "../vendor/lix/scripts/compatibility.mjs";
 const REQUEST_TIMEOUT_MS = 20_000;
 const ADMISSION_TIMEOUT_MS = 120_000;
 const MAX_ADMISSION_ATTEMPTS = 120;
+const GLOBAL_BRANCH_ID = "ffffffff-ffff-7fff-bfff-ffffffffffff";
 const REPOSITORY_UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -30,6 +31,7 @@ export async function checkProductionLix({
 		"lix-server-protocol-version": String(compatibility.serverProtocolVersion),
 	};
 	let sessionId;
+	let globalSessionId;
 	let checkCompleted = false;
 	try {
 		const handshake = await awaitHandshake({
@@ -37,11 +39,9 @@ export async function checkProductionLix({
 			protocolUrl,
 			protocolHeaders,
 			timeoutMs,
-			deadline,
+			deadline: performance.now() + admissionTimeoutMs,
 			sleepImpl,
 		});
-		if (!handshake.response.ok)
-			throw responseError("handshake", handshake.response, handshake.body);
 		// Close any allocated session even when its identity or version is wrong.
 		if (
 			typeof handshake.body?.sessionId === "string" &&
@@ -49,6 +49,8 @@ export async function checkProductionLix({
 		) {
 			sessionId = handshake.body.sessionId;
 		}
+		if (!handshake.response.ok)
+			throw responseError("handshake", handshake.response, handshake.body);
 		if (
 			handshake.body?.protocolVersion !== compatibility.serverProtocolVersion ||
 			handshake.body?.syncProtocolVersion !==
@@ -59,7 +61,9 @@ export async function checkProductionLix({
 			typeof handshake.body?.lixId !== "string" ||
 			!REPOSITORY_UUID.test(handshake.body.lixId) ||
 			typeof handshake.body?.sessionId !== "string" ||
-			!handshake.body.sessionId
+			!handshake.body.sessionId ||
+			typeof handshake.body?.activeBranchId !== "string" ||
+			!REPOSITORY_UUID.test(handshake.body.activeBranchId)
 		) {
 			throw new Error(
 				"The production Lix handshake returned an invalid response.",
@@ -87,6 +91,74 @@ export async function checkProductionLix({
 		if (!Array.isArray(execute.body?.rows)) {
 			throw new Error("The production Lix read returned an invalid response.");
 		}
+		// The default handshake selects a branch, but a constant SQL query
+		// cannot prove the canonical setting is readable through system tables.
+		const globalUrl = new URL(protocolUrl);
+		globalUrl.searchParams.set("activeBranchId", GLOBAL_BRANCH_ID);
+		const global = await awaitHandshake({
+			fetchImpl,
+			protocolUrl: globalUrl,
+			protocolHeaders,
+			timeoutMs,
+			deadline: performance.now() + admissionTimeoutMs,
+			sleepImpl,
+		});
+		if (typeof global.body?.sessionId === "string" && global.body.sessionId) {
+			globalSessionId = global.body.sessionId;
+		}
+		if (!global.response.ok)
+			throw responseError("global handshake", global.response, global.body);
+		if (
+			!globalSessionId ||
+			global.body.activeBranchId !== GLOBAL_BRANCH_ID ||
+			global.body.activeAccountId !== admission.principalId ||
+			global.body.lixId !== handshake.body.lixId ||
+			global.body.protocolVersion !== compatibility.serverProtocolVersion ||
+			global.body.syncProtocolVersion !== compatibility.syncProtocolVersion
+		) {
+			throw new Error(
+				"The production GLOBAL handshake returned an invalid response.",
+			);
+		}
+		const defaults = await request(
+			fetchImpl,
+			new URL("execute", protocolUrl),
+			{
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+					"Lix-Session-Id": globalSessionId,
+					...protocolHeaders,
+				},
+				body: JSON.stringify({
+					sql: "SELECT value FROM lix_key_value WHERE key = $1 AND lixcol_file_id IS NULL AND lixcol_untracked = false",
+					params: [{ kind: "text", value: "lix_default_branch_id" }],
+				}),
+			},
+			timeoutMs,
+		);
+		if (!defaults.response.ok)
+			throw responseError(
+				"default branch read",
+				defaults.response,
+				defaults.body,
+			);
+		const index = Array.isArray(defaults.body?.columns)
+			? defaults.body.columns.findIndex((column) => column?.name === "value")
+			: -1;
+		const rows = defaults.body?.rows;
+		const cell =
+			Array.isArray(rows) && rows.length === 1 && index >= 0
+				? rows[0]?.[index]
+				: undefined;
+		if (
+			!["jsonb", "text"].includes(cell?.kind) ||
+			cell?.value !== handshake.body.activeBranchId
+		) {
+			throw new Error(
+				"The production canonical default branch is missing or disagrees with the default session.",
+			);
+		}
 		checkCompleted = true;
 
 		return {
@@ -94,23 +166,27 @@ export async function checkProductionLix({
 			lix: connectionUrl.pathname,
 		};
 	} finally {
-		if (sessionId) {
+		let cleanupError;
+		for (const allocatedSessionId of new Set(
+			[globalSessionId, sessionId].filter(Boolean),
+		)) {
 			const close = await request(
 				fetchImpl,
 				new URL("session", protocolUrl),
 				{
 					method: "DELETE",
-					headers: { "Lix-Session-Id": sessionId, ...protocolHeaders },
+					headers: { "Lix-Session-Id": allocatedSessionId, ...protocolHeaders },
 				},
 				timeoutMs,
 			).catch((error) => {
-				if (checkCompleted) throw error;
+				cleanupError ??= error;
 				return undefined;
 			});
 			if (checkCompleted && close && !close.response.ok) {
-				throw responseError("close", close.response, close.body);
+				cleanupError ??= responseError("close", close.response, close.body);
 			}
 		}
+		if (checkCompleted && cleanupError) throw cleanupError;
 	}
 }
 

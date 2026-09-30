@@ -142,3 +142,36 @@ void test("Lix uploader retains a failed batch and clears it only after delivery
 		}
 	}
 });
+
+void test("public repository Lix uploader sends its repository scope without a user token", async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+	const originalFetch = globalThis.fetch;
+	let requestHeaders: Headers | undefined;
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: { location: { origin: "https://lixray.com" } },
+	});
+	globalThis.fetch = async (_input, init) => {
+		requestHeaders = new Headers(init?.headers);
+		return new Response(null, { status: 200 });
+	};
+	try {
+		const telemetry = createLixTelemetryOptions(
+			"repo-public",
+			async () => null,
+		);
+		await Promise.resolve(
+			telemetry.onExport(encodeRequest("lixray.repository.open")),
+		);
+		await telemetry.flush?.();
+		assert.equal(requestHeaders?.get("x-lixray-repository-id"), "repo-public");
+		assert.equal(requestHeaders?.get("authorization"), null);
+	} finally {
+		globalThis.fetch = originalFetch;
+		if (originalWindow) {
+			Object.defineProperty(globalThis, "window", originalWindow);
+		} else {
+			Reflect.deleteProperty(globalThis, "window");
+		}
+	}
+});

@@ -240,6 +240,162 @@ void test("server error logs become exceptions with diagnostics, correlation and
 	);
 });
 
+void test("server parser failures project only the allowlisted cause and receipt path", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID" },
+				},
+				{
+					key: "lix.migration.phase",
+					value: { stringValue: "partial_receipt" },
+				},
+				{
+					key: "lix.migration.failure_reason",
+					value: { stringValue: "v2_receipt_shape_invalid" },
+				},
+				{
+					key: "lix.migration.failure_path",
+					value: { stringValue: "$.descriptor.descriptorVersion" },
+				},
+				{
+					key: "lix.receipt.version",
+					value: { intValue: 2 },
+				},
+				{
+					key: "lix.receipt.expected_version",
+					value: { intValue: 3 },
+				},
+			],
+			events: [
+				{
+					name: "partial receipt decode failed",
+					attributes: [
+						{ key: "level", value: { stringValue: "ERROR" } },
+						{
+							key: "error",
+							value: {
+								stringValue: "serde detail includes private receipt data",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(properties.migrationPhase, "partial_receipt");
+	assert.equal(properties.failureReason, "v2_receipt_shape_invalid");
+	assert.equal(properties.failurePath, "$.descriptor.descriptorVersion");
+	assert.equal(properties.receiptVersion, 2);
+	assert.equal(properties.expectedReceiptVersion, 3);
+	assert.deepEqual(properties.$exception_list, [
+		{
+			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			value:
+				"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.doesNotMatch(JSON.stringify(properties), /private receipt data/);
+});
+
+void test("JSON receipt parser positions and missing fields stay bounded in PostHog", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID" },
+				},
+				{
+					key: "lix.migration.phase",
+					value: { stringValue: "partial_receipt" },
+				},
+				{
+					key: "lix.migration.failure_reason",
+					value: { stringValue: "receipt_json_data" },
+				},
+				{
+					key: "lix.migration.failure_path",
+					value: { stringValue: "$" },
+				},
+				{ key: "lix.migration.json_line", value: { intValue: 12 } },
+				{ key: "lix.migration.json_column", value: { intValue: 5 } },
+				{ key: "lix.receipt.version", value: { intValue: 3 } },
+				{ key: "lix.receipt.expected_version", value: { intValue: 3 } },
+				{
+					key: "lix.migration.missing_field",
+					value: { stringValue: "authorId" },
+				},
+			],
+			events: [
+				{
+					name: "partial receipt decode failed",
+					attributes: [
+						{ key: "level", value: { stringValue: "ERROR" } },
+						{
+							key: "error",
+							value: { stringValue: "private receipt parser output" },
+						},
+					],
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.migrationPhase, "partial_receipt");
+	assert.equal(properties.failureReason, "receipt_json_data");
+	assert.equal(properties.failurePath, "$");
+	assert.equal(properties.jsonLine, 12);
+	assert.equal(properties.jsonColumn, 5);
+	assert.equal(properties.receiptVersion, 3);
+	assert.equal(properties.expectedReceiptVersion, 3);
+	assert.equal(properties.missingField, "authorId");
+	assert.deepEqual(properties.$exception_list, [
+		{
+			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID: receipt_json_data at $",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private receipt parser output/,
+	);
+});
+
 void test("standard OTel exceptions preserve the cause without inventing a stack trace", async () => {
 	const body = encode([
 		{
@@ -440,12 +596,28 @@ void test("browser status-only engine failures use browser source and preserve r
 												},
 											},
 											{
-												key: "lix.migration.from_version",
-												value: { intValue: 84 },
+												key: "lix.migration.phase",
+												value: { stringValue: "partial_receipt" },
 											},
 											{
-												key: "lix.migration.to_version",
-												value: { intValue: 85 },
+												key: "lix.receipt.version",
+												value: { intValue: 2 },
+											},
+											{
+												key: "lix.receipt.expected_version",
+												value: { intValue: 3 },
+											},
+											{
+												key: "lix.migration.failure_reason",
+												value: {
+													stringValue: "v2_branch_incarnation_mismatch",
+												},
+											},
+											{
+												key: "lix.migration.failure_path",
+												value: {
+													stringValue: "$.descriptor.selectedBranch.createdAt",
+												},
 											},
 											{
 												key: "lix.error.retryable",
@@ -465,7 +637,19 @@ void test("browser status-only engine failures use browser source and preserve r
 											},
 											{
 												key: "lix.payload.physical_status",
-												value: { stringValue: "lifetime_mismatch" },
+												value: { stringValue: "missing_snapshot" },
+											},
+											{
+												key: "lix.payload.failure_reason",
+												value: {
+													stringValue: "selected_change_payload_unavailable",
+												},
+											},
+											{
+												key: "lix.payload.change_id",
+												value: {
+													stringValue: "11111111-1111-4111-8111-111111111111",
+												},
 											},
 											{
 												key: "lix.payload.source_deferred",
@@ -511,13 +695,25 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.client_release, "a".repeat(40));
 	assert.equal(props.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
 	assert.equal(props.sourceCode, "LIX_PARTIAL_REPLICA_STATE_INVALID");
-	assert.equal(props.fromVersion, 84);
-	assert.equal(props.toVersion, 85);
+	assert.equal(props.migrationPhase, "partial_receipt");
+	assert.equal(props.receiptVersion, 2);
+	assert.equal(props.expectedReceiptVersion, 3);
+	assert.equal(props.failureReason, "v2_branch_incarnation_mismatch");
+	assert.equal(props.failurePath, "$.descriptor.selectedBranch.createdAt");
+	assert.equal(
+		(props.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_branch_incarnation_mismatch at $.descriptor.selectedBranch.createdAt",
+	);
 	assert.equal(props.retryable, false);
 	assert.equal(props.admissionRetryExhausted, true);
 	assert.equal(props.recoveryDeadlineExceeded, true);
 	assert.equal(props.payloadStandaloneStatus, "matched");
-	assert.equal(props.payloadPhysicalStatus, "lifetime_mismatch");
+	assert.equal(props.payloadPhysicalStatus, "missing_snapshot");
+	assert.equal(
+		props.payloadFailureReason,
+		"selected_change_payload_unavailable",
+	);
+	assert.equal(props.changeId, "11111111-1111-4111-8111-111111111111");
 	assert.equal(props.payloadSourceDeferred, true);
 	assert.equal(props.payloadPhysicalConflict, true);
 	assert.equal(props.sourceCommitId, undefined);

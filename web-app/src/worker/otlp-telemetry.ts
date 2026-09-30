@@ -279,6 +279,8 @@ export async function handleOtlpTelemetry(
 	dependencies: {
 		fetch?: typeof fetch;
 		authenticatedBrowser?: boolean;
+		/** Anonymous browser uploads are limited to the safe repository timing event. */
+		publicBrowser?: boolean;
 		browserRepositoryId?: string;
 		browserUserId?: string;
 		reportDeliveryFailure?: (failure: TelemetryDeliveryFailure) => void;
@@ -366,25 +368,29 @@ export async function handleOtlpTelemetry(
 				(resource) =>
 					resource.scopeSpans?.flatMap((scope) => scope.spans ?? []) ?? [],
 			) ?? [];
-		const opens = (await Promise.all(spans.map(openedEvent))).filter(
-			(event) => event !== null,
-		);
-		const errors = (
-			await Promise.all(
-				(decoded.resourceSpans ?? []).flatMap((resource) =>
-					(resource.scopeSpans ?? []).flatMap((scope) =>
-						(scope.spans ?? []).map((span) =>
-							serverErrorEvents(span, {
-								source: dependencies.authenticatedBrowser
-									? "browser"
-									: "server",
-								resourceAttributes: resource.resource?.attributes,
-							}),
+		const opens = dependencies.publicBrowser
+			? []
+			: (await Promise.all(spans.map(openedEvent))).filter(
+					(event) => event !== null,
+				);
+		const errors = dependencies.publicBrowser
+			? []
+			: (
+					await Promise.all(
+						(decoded.resourceSpans ?? []).flatMap((resource) =>
+							(resource.scopeSpans ?? []).flatMap((scope) =>
+								(scope.spans ?? []).map((span) =>
+									serverErrorEvents(span, {
+										source: dependencies.authenticatedBrowser
+											? "browser"
+											: "server",
+										resourceAttributes: resource.resource?.attributes,
+									}),
+								),
+							),
 						),
-					),
-				),
-			)
-		).flat();
+					)
+				).flat();
 		const performanceEvents =
 			dependencies.authenticatedBrowser && dependencies.browserRepositoryId
 				? (
@@ -406,18 +412,20 @@ export async function handleOtlpTelemetry(
 				: [];
 		const events = [...opens, ...errors, ...performanceEvents];
 		const fetcher = dependencies.fetch ?? fetch;
-		const deliveries = [
-			fetcher(new URL("/i/v1/traces", host), {
-				method: "POST",
-				headers: {
-					"content-type": "application/x-protobuf",
-					authorization: `Bearer ${env.POSTHOG_PROJECT_TOKEN}`,
-					...(encoding ? { "content-encoding": encoding } : {}),
-				},
-				body: original,
-				signal,
-			}),
-		];
+		const deliveries = dependencies.publicBrowser
+			? []
+			: [
+					fetcher(new URL("/i/v1/traces", host), {
+						method: "POST",
+						headers: {
+							"content-type": "application/x-protobuf",
+							authorization: `Bearer ${env.POSTHOG_PROJECT_TOKEN}`,
+							...(encoding ? { "content-encoding": encoding } : {}),
+						},
+						body: original,
+						signal,
+					}),
+				];
 		if (events.length)
 			deliveries.push(
 				fetcher(new URL("/batch/", host), {

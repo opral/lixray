@@ -24,6 +24,29 @@ void test("extracts safe Lix protocol fields for exception telemetry", () => {
 	);
 });
 
+void test("native Lix exceptions preserve only allowlisted migration parser diagnosis", () => {
+	const error = Object.assign(new Error("private receipt payload"), {
+		name: "LixError",
+		code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+		details: {
+			failureReason: "v2_descriptor_version_invalid",
+			failurePath: "$.descriptor.descriptorVersion",
+			parserMessage: "private receipt payload",
+		},
+	});
+
+	assert.deepEqual(lixErrorTelemetryProperties(error), {
+		error_kind: "LixError",
+		lix_error_code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+		failureReason: "v2_descriptor_version_invalid",
+		failurePath: "$.descriptor.descriptorVersion",
+	});
+	assert.doesNotMatch(
+		JSON.stringify(lixErrorTelemetryProperties(error)),
+		/private receipt payload|parserMessage/,
+	);
+});
+
 void test("ignores unrelated errors", () => {
 	assert.deepEqual(
 		lixErrorTelemetryProperties(new Error("network failed")),

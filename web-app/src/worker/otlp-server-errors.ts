@@ -1,4 +1,7 @@
-import { repositoryOpenDiagnostics } from "../lib/repository-open-telemetry.ts";
+import {
+	repositoryOpenDiagnostics,
+	repositoryOpenFailureMessage,
+} from "../lib/repository-open-telemetry.ts";
 
 /** Project operation diagnostics at the authenticated gateway, never in HTTP errors. */
 export interface OtlpAttribute {
@@ -91,6 +94,13 @@ export async function serverErrorEvents(
 		candidateCode && /^LIX_[A-Z0-9_]{1,100}$/.test(candidateCode)
 			? candidateCode
 			: undefined;
+	const migrationCause = repositoryOpenDiagnostics({
+		details: {
+			failureReason: context["lix.migration.failure_reason"],
+			failurePath: context["lix.migration.failure_path"],
+			payloadFailureReason: context["lix.payload.failure_reason"],
+		},
+	});
 	const events = [...(span.events ?? [])];
 	const hasErrorEvent = events.some((event) => {
 		const fields = attributes(event.attributes);
@@ -109,7 +119,12 @@ export async function serverErrorEvents(
 				},
 				{
 					key: "exception.message",
-					value: { stringValue: failureCode ?? "Lix operation failed" },
+					value: {
+						stringValue: repositoryOpenFailureMessage(
+							{ details: migrationCause },
+							failureCode ?? "Lix operation failed",
+						),
+					},
 				},
 			],
 		});
@@ -117,8 +132,14 @@ export async function serverErrorEvents(
 	const details: Record<string, unknown> = {};
 	for (const [key, field] of [
 		["lix.error.source_code", "sourceCode"],
+		["lix.migration.phase", "migrationPhase"],
 		["lix.migration.from_version", "fromVersion"],
 		["lix.migration.to_version", "toVersion"],
+		["lix.migration.failure_reason", "failureReason"],
+		["lix.migration.failure_path", "failurePath"],
+		["lix.migration.json_line", "jsonLine"],
+		["lix.migration.json_column", "jsonColumn"],
+		["lix.migration.missing_field", "missingField"],
 		["lix.receipt.version", "receiptVersion"],
 		["lix.receipt.expected_version", "expectedReceiptVersion"],
 		["http.response.status_code", "httpStatus"],
@@ -126,6 +147,7 @@ export async function serverErrorEvents(
 		["lix.recovery.stage", "recoveryStage"],
 		["lix.payload.standalone_status", "payloadStandaloneStatus"],
 		["lix.payload.physical_status", "payloadPhysicalStatus"],
+		["lix.payload.failure_reason", "payloadFailureReason"],
 		["lix.payload.change_id", "changeId"],
 		["lix.payload.source_commit_id", "sourceCommitId"],
 	])
@@ -143,6 +165,14 @@ export async function serverErrorEvents(
 	// Both first-party failures and OTLP projections use one bounded schema,
 	// including canonical number/boolean types for querying in PostHog.
 	const structural = repositoryOpenDiagnostics({ code: failureCode, details });
+	const structuredFailureMessage =
+		typeof migrationCause.failureReason === "string" ||
+		typeof migrationCause.payloadFailureReason === "string"
+			? repositoryOpenFailureMessage(
+					{ details: migrationCause },
+					failureCode ?? "Lix operation failed",
+				)
+			: undefined;
 	const phase = context["lix.request.phase"];
 	if (
 		phase &&
@@ -163,6 +193,7 @@ export async function serverErrorEvents(
 				// Ignore informational events; the fallback above captures failed status.
 				if (fields.level !== "ERROR" && event.name !== "exception") return null;
 				const message =
+					structuredFailureMessage ??
 					fields["exception.message"] ??
 					fields.error ??
 					fields.message ??
@@ -189,6 +220,7 @@ export async function serverErrorEvents(
 				);
 				const type =
 					fields["exception.type"] ??
+					failureCode ??
 					(source === "server" ? "LixServerError" : "LixBrowserError");
 				const digest = new Uint8Array(
 					await crypto.subtle.digest(

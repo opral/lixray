@@ -196,6 +196,20 @@ Payload resolution failures also include `payloadStandaloneStatus` and
 `payloadSourceDeferred` when the deferred marker can be read. These same bounded
 states are projected from native spans; payload values are excluded. An omitted
 deferred flag means unknown, rather than false.
+When selected canonical authority exists but has no live snapshot, diagnostics
+also include `payloadFailureReason=selected_change_payload_unavailable` and the
+validated `changeId`, alongside `payloadPhysicalStatus=missing_snapshot`. This
+distinguishes a missing selected payload from a receipt parse or identity error;
+no payload body or raw storage value is exported.
+Partial-receipt parser and migration failures carry an allowlisted
+`failureReason` and fixed-schema `failurePath` through native traces and browser
+opening exceptions. The PostHog exception value includes that safe diagnosis;
+raw parser messages, receipt values, and arbitrary JSON paths are never
+exported. JSON parse failures may include one of four bounded parser categories,
+positive `jsonLine` / `jsonColumn` values capped at 16 KiB, and a known
+`missingField` name from the applicable frozen receipt DTO. A bounded
+`migrationPhase=partial_receipt` property identifies the diagnostic stage;
+receipt versions are not physical storage-format versions.
 Up to eight sanitized JavaScript asset frames, including source-map chunk IDs,
 are retained in the first-party exception. Raw error messages, URL queries, page
 paths, local variables, tokens and repository contents are not accepted by this
