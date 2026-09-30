@@ -1516,11 +1516,8 @@ export function RepositoryAtelier({
 							repositoryVisibility,
 						),
 						onReady: setInstance,
-						// The Library is home: its sidebar is the left panel, and its
-						// view is the pinned first tab.
-						mainArea: {
-							home: { extensionId: ATELIER_BUILTIN_EXTENSION_IDS.library },
-						},
+						// The Library's sidebar is the left panel; its view is an ordinary,
+						// closable tab that the repository and folder URLs open.
 						// The Library sidebar opens by default where it fits beside
 						// the page; on a phone the page gets the width.
 						defaultOpenPanels: window.innerWidth >= 768 ? ["left"] : [],
@@ -1687,6 +1684,7 @@ export function RepositoryAtelier({
 		void instance.views
 			.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
 				state: libraryFolderState("/"),
+				instanceId: LIBRARY_HOME_INSTANCE,
 				signal: controller.signal,
 			})
 			.catch((error: unknown) => {

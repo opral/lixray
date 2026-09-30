@@ -16,7 +16,10 @@ import {
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
 import { ATELIER_BUILTIN_EXTENSION_IDS } from "@opral/atelier";
-import { libraryFolderState } from "~/components/repository-home/host-extensions";
+import {
+	LIBRARY_HOME_INSTANCE,
+	libraryFolderState,
+} from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
 	head: ({ params, match }) => repositoryHead(params, "folder", match.search),
@@ -125,6 +128,7 @@ function RepositoryFolderRoute() {
 					atelier.views
 						.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
 							state: libraryFolderState(dirPath),
+							instanceId: LIBRARY_HOME_INSTANCE,
 							signal: controller.signal,
 						})
 						.then(() => {

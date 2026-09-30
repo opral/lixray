@@ -24,8 +24,8 @@ export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
 
-/** The pinned home's reserved instance id (Atelier's `main-home`). */
-export const LIBRARY_HOME_INSTANCE = "main-home";
+/** The Library tab the repository URL names (Atelier's primary Library tab). */
+export const LIBRARY_HOME_INSTANCE = "library";
 
 /**
  * Library state for a folder URL: Files, open at that folder. The root keeps

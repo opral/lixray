@@ -13,7 +13,9 @@ import type { RepositoryLixSession } from "./repository-lix-session";
 
 // 2: the Library became the left panel, open by default. Layouts saved
 // before it kept the left area collapsed; they start fresh once.
-const SESSION_STATE_VERSION = 2;
+// 3: the Library tab is no longer the pinned home; tabs saved pinned would
+// stay unclosable.
+const SESSION_STATE_VERSION = 3;
 const PREFERENCES_STATE_VERSION = 2;
 const REVIEW_STATE_VERSION = 1;
 
