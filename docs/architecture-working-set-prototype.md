@@ -73,13 +73,14 @@ In another terminal:
 ```sh
 node experiments/seed-architecture.mjs
 node experiments/validate-architecture.mjs
-PROTOTYPE_AUTHORITY_BUILD='sdk-source-head=<sha>;sdk-diff-sha256=<sha>;authority-binary-sha256=<sha>' \
+PROTOTYPE_AUTHORITY_BUILD='sdk-source-head=<40 hex>;sdk-diff-sha256=<64 hex>;authority-source-head=<40 hex>;authority-diff-sha256=<64 hex>;authority-binary-sha256=<64 hex>;authority-profile=debug' \
 	PROTOTYPE_SAMPLES=6 node experiments/profile-architecture.mjs
+node experiments/summarize-architecture-profile.mjs .architecture/profile.json
 ```
 
-The full paired profile refuses to run without `PROTOTYPE_AUTHORITY_BUILD` so
-the artifact identifies the SDK source revision and dirty diff plus the native
-authority binary. A one-workload smoke run may omit it and is labeled
+The full paired profile requires at least six samples and validates all
+`PROTOTYPE_AUTHORITY_BUILD` fields, identifying both source revisions and dirty
+diffs plus the native authority binary and build profile. A one-workload smoke run may omit it and is labeled
 `smoke-unpinned`; do not use that artifact as revision-pinned evidence.
 
 The seed command prints a prototype URL. The page exposes both architectures.
@@ -94,8 +95,8 @@ results. Response-byte counts cover Lix protocol responses, not HTML, JavaScript
 or WASM transfer. Navigation timing includes browser application startup.
 During the offline window, the harness records native partial-replica
 `POST /sync/push` attempts separately because the background publisher may wake and
-fail against the disconnected transport. Any remote SQL `execute` or
-`execute-batch` attempt during offline local work fails the capability check.
+fail against the disconnected transport. Every other protocol attempt during offline local work fails the capability
+check, including SQL execution and observation.
 
 The browser validation suite covers the working-set path: clean reload, pending
 edit plus snapshot reset/reload, lost acknowledgment, conflicting server edits,
@@ -107,10 +108,31 @@ reads, durable edits, reopen, and reconnect against both architectures.
 `experiments/architecture-baseline24-smoke.json` preserves the initial one-sample
 smoke run against protocol 24 with the WASM cache-loader fix. It establishes a
 baseline offline-edit failure, not a statistically reliable speed comparison.
-Full paired measurements and hardened-baseline results must be reported with
-their actual SDK/server revisions and capability failures.
+The completed development comparison is documented in
+[the verification handoff](handoff-dev-30-09.md). Its
+[raw paired profile](experiments/architecture-verified-profile.json),
+[derived report](experiments/architecture-verified-summary.json), and
+[recovery validation](experiments/working-set-verified-validation.json) retain
+the measured source and build identities. Earlier WIP artifacts remain historical
+checkpoints; their failing capability results are not the final comparison.
 
 Production open-to-usable telemetry is a separate route trace: authentication,
 access resolution, replica/engine opening, branch/session setup, Atelier, and
 initial view rendering. The prototype records local spans and protocol attempts
 for controlled comparison; it does not establish deployed PostHog coverage.
+
+Offline protocol attempts retain their complete relative routes. Only native
+`POST /sync/push` background publication attempts are allowed; every other
+attempt fails the capability check. `coldResponseBytes` sums completed protocol
+bodies; `coldIncompleteByteResponses` flags unmeasured streaming or incomplete
+responses. These counts exclude browser asset downloads.
+
+The schema-filtered native working-diff path can still scan unrelated identities
+within a requested schema before applying file/row filters. The completed loaded
+file scenario does not establish bounded offline readiness for arbitrary local SQL
+or an entire repository.
+
+Reconnect timing follows each arm's `sync()` completion: the working-set path
+publishes and refreshes; native partial polls authority convergence every 50 ms
+while its background publisher runs. This includes polling granularity and is
+not a pure transport acknowledgment measurement.

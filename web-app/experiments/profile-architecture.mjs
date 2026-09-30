@@ -5,11 +5,35 @@ import { seedArchitecture } from "./seed-architecture.mjs";
 
 const samples = Number(process.env.PROTOTYPE_SAMPLES ?? 6);
 const smoke = process.env.PROTOTYPE_SMOKE === "1";
+assert.ok(
+	Number.isSafeInteger(samples) && samples >= (smoke ? 1 : 6),
+	"Full profiles require at least six samples per workload; smoke runs require at least one",
+);
 const authorityBuild = process.env.PROTOTYPE_AUTHORITY_BUILD?.trim();
 if (!smoke && !authorityBuild) {
 	throw new Error(
 		"PROTOTYPE_AUTHORITY_BUILD is required for a full profile; include the SDK source HEAD, source diff SHA-256, and authority binary SHA-256.",
 	);
+}
+const authorityMetadata = authorityBuild
+	? Object.fromEntries(
+			authorityBuild.split(";").map((field) => field.split("=")),
+		)
+	: null;
+if (!smoke) {
+	for (const [key, pattern] of Object.entries({
+		"sdk-source-head": /^[a-f0-9]{40}$/,
+		"sdk-diff-sha256": /^[a-f0-9]{64}$/,
+		"authority-source-head": /^[a-f0-9]{40}$/,
+		"authority-diff-sha256": /^[a-f0-9]{64}$/,
+		"authority-binary-sha256": /^[a-f0-9]{64}$/,
+		"authority-profile": /^(debug|release)$/,
+	}))
+		assert.match(
+			authorityMetadata?.[key] ?? "",
+			pattern,
+			`Missing or invalid authority metadata: ${key}`,
+		);
 }
 const wasmAssetIdentity = (
 	await import(
@@ -35,6 +59,7 @@ async function arm(fixture, mode, sample) {
 	const errors = [];
 	const failedRequests = [];
 	let coldResult;
+	let measuredProgress = {};
 	page.on("pageerror", (error) => errors.push(error.message));
 	page.on("requestfailed", (request) =>
 		failedRequests.push({
@@ -82,16 +107,26 @@ async function arm(fixture, mode, sample) {
 			coldOpenToUsableMs: coldOpen.durationMs,
 			coldRequests: cold.network.length,
 			coldResponseBytes: cold.network.reduce(
-				(sum, request) => sum + request.responseBytes,
+				(sum, request) =>
+					sum + (request.responseBytesComplete ? request.responseBytes : 0),
 				0,
 			),
+			coldIncompleteByteResponses: cold.network.filter(
+				(request) => !request.responseBytesComplete,
+			).length,
 			coldEvents: cold.events,
 			coldNetwork: cold.network,
 		};
 		const initial = await page.evaluate(() => window.__architecture.read());
 		const prepareStart = performance.now();
-		await page.evaluate(() => window.__architecture.prepareOfflineEditing());
-		const prepareOfflineEditingMs = performance.now() - prepareStart;
+		try {
+			await page.evaluate(() => window.__architecture.prepareOfflineEditing());
+		} finally {
+			measuredProgress = {
+				...measuredProgress,
+				prepareOfflineEditingMs: performance.now() - prepareStart,
+			};
+		}
 		await page.evaluate(() => window.__architecture.close());
 		await context.setOffline(true);
 		await page.evaluate(() => window.__architecture.setOffline(true));
@@ -100,10 +135,16 @@ async function arm(fixture, mode, sample) {
 				const api = window.__architecture;
 				const networkBefore = api.network.length;
 				const attemptsBefore = api.attempts.length;
+				const progress = {
+					networkBefore,
+					attemptsBefore,
+					warmReadMs: [],
+				};
+				api.profileProgress = progress;
 				const reopenStart = performance.now();
 				await api.open(mode);
-				const offlineReopenMs = performance.now() - reopenStart;
-				const reads = [];
+				progress.offlineReopenMs = performance.now() - reopenStart;
+				const reads = progress.warmReadMs;
 				for (let index = 0; index < 20; index++) {
 					const start = performance.now();
 					if ((await api.read()) !== initial)
@@ -113,12 +154,14 @@ async function arm(fixture, mode, sample) {
 				const editStart = performance.now();
 				const content = `${mode}:${sample}\n${initial}`;
 				await api.edit(content);
-				const durableEditMs = performance.now() - editStart;
+				progress.durableEditMs = performance.now() - editStart;
 				if ((await api.read()) !== content)
 					throw new Error("Read-after-write failed");
 				if (mode === "working-set") await api.resetCache();
 				await api.close();
+				const editReopenStart = performance.now();
 				await api.open(mode);
+				progress.offlineEditReopenMs = performance.now() - editReopenStart;
 				if ((await api.read()) !== content)
 					throw new Error(
 						"Pending edit lost during offline reopen/cache reset",
@@ -129,46 +172,61 @@ async function arm(fixture, mode, sample) {
 								.slice(attemptsBefore)
 								.filter(
 									(attempt) =>
-										attempt.method === "POST" && attempt.route === "push",
+										attempt.method === "POST" && attempt.route === "/sync/push",
 								)
 						: [];
 				const unexpectedRemoteSqlAttempts = api.attempts
 					.slice(attemptsBefore)
 					.filter((attempt) =>
-						/^(?:execute|execute-batch)$/.test(attempt.route),
+						/^\/(?:execute|execute-batch|observe)(?:\/|$)/.test(attempt.route),
 					);
-				return {
-					offlineReopenMs,
-					warmReadMs: reads,
-					durableEditMs,
-					offlineNetworkRequests: api.network.length - networkBefore,
-					offlineAttempts: api.attempts.slice(attemptsBefore),
-					nativeBackgroundPublicationAttempts,
-					unexpectedRemoteSqlAttempts,
-					expected: content,
-				};
+				progress.offlineNetworkRequests = api.network.length - networkBefore;
+				progress.offlineAttempts = api.attempts.slice(attemptsBefore);
+				progress.nativeBackgroundPublicationAttempts =
+					nativeBackgroundPublicationAttempts;
+				progress.unexpectedRemoteSqlAttempts = unexpectedRemoteSqlAttempts;
+				return { ...progress, expected: content };
 			},
 			{ initial, mode, sample },
 		);
+		const offlineProgress = Object.fromEntries(
+			Object.entries(offline).filter(
+				([key]) =>
+					!["networkBefore", "attemptsBefore", "expected"].includes(key),
+			),
+		);
+		measuredProgress = { ...measuredProgress, ...offlineProgress };
 		assert.equal(offline.offlineNetworkRequests, 0);
 		assert.deepEqual(
 			offline.unexpectedRemoteSqlAttempts,
 			[],
 			"Offline local reads and edits must not issue remote SQL; native background publication uses /sync/push and is reported separately.",
 		);
-		assert.equal(
-			offline.offlineAttempts.filter((attempt) =>
-				/native-|read-fulfillment|blob|chunk/.test(attempt.route),
-			).length,
-			0,
-			"Loaded offline work attempted data hydration",
+		assert.deepEqual(
+			offline.offlineAttempts.filter(
+				(attempt) =>
+					!(
+						mode === "partial" &&
+						attempt.method === "POST" &&
+						attempt.route === "/sync/push"
+					),
+			),
+			[],
+			"Loaded offline work attempted a protocol operation other than native background publication",
 		);
 		await context.setOffline(false);
 		await page.evaluate(() => window.__architecture.setOffline(false));
 		const syncStart = performance.now();
-		const sync = await page.evaluate(() => window.__architecture.sync());
+		let sync;
+		try {
+			sync = await page.evaluate(() => window.__architecture.sync());
+		} finally {
+			const reconnectAttemptMs = performance.now() - syncStart;
+			measuredProgress.reconnectAttemptMs = reconnectAttemptMs;
+			if (sync?.status === "synced")
+				measuredProgress.reconnectToAuthorityMs = reconnectAttemptMs;
+		}
 		assert.equal(sync.status, "synced");
-		const reconnectToAuthorityMs = performance.now() - syncStart;
 		assert.equal(
 			(await page.evaluate(() => window.__architecture.authorityRead()))
 				.content,
@@ -179,7 +237,7 @@ async function arm(fixture, mode, sample) {
 		const metrics = await page.evaluate(() => window.__architecture.metrics());
 		return {
 			...coldResult,
-			prepareOfflineEditingMs,
+			...measuredProgress,
 			mode,
 			sample,
 			bytes: fixture.bytes,
@@ -189,18 +247,63 @@ async function arm(fixture, mode, sample) {
 			coldOpenToUsableMs: coldOpen.durationMs,
 			coldRequests: cold.network.length,
 			coldResponseBytes: cold.network.reduce(
-				(sum, request) => sum + request.responseBytes,
+				(sum, request) =>
+					sum + (request.responseBytesComplete ? request.responseBytes : 0),
 				0,
 			),
-			...offline,
-			expected: undefined,
-			reconnectToAuthorityMs,
 			events: metrics.events,
 			engineSpans: metrics.engineSpans,
 			requests: metrics.network,
 			capabilityStatus: "passed",
 		};
 	} catch (error) {
+		const partialMetrics = await page
+			.evaluate(async () => {
+				const api = window.__architecture;
+				if (!api) return null;
+				const progress = api.profileProgress ?? {};
+				const attemptsBefore = progress.attemptsBefore ?? api.attempts.length;
+				const networkBefore = progress.networkBefore ?? api.network.length;
+				const offlineAttempts =
+					progress.offlineAttempts ?? api.attempts.slice(attemptsBefore);
+				return {
+					progress,
+					offlineNetworkRequests:
+						progress.offlineNetworkRequests ??
+						api.network.length - networkBefore,
+					offlineAttempts,
+					nativeBackgroundPublicationAttempts:
+						progress.nativeBackgroundPublicationAttempts ??
+						offlineAttempts.filter(
+							(attempt) =>
+								attempt.method === "POST" && attempt.route === "/sync/push",
+						),
+					unexpectedRemoteSqlAttempts:
+						progress.unexpectedRemoteSqlAttempts ??
+						offlineAttempts.filter((attempt) =>
+							/^\/(?:execute|execute-batch|observe)(?:\/|$)/.test(
+								attempt.route,
+							),
+						),
+				};
+			})
+			.catch(() => null);
+		if (partialMetrics) {
+			const progress = Object.fromEntries(
+				Object.entries(partialMetrics.progress).filter(
+					([key]) => !["networkBefore", "attemptsBefore"].includes(key),
+				),
+			);
+			measuredProgress = {
+				...measuredProgress,
+				...progress,
+				offlineNetworkRequests: partialMetrics.offlineNetworkRequests,
+				offlineAttempts: partialMetrics.offlineAttempts,
+				nativeBackgroundPublicationAttempts:
+					partialMetrics.nativeBackgroundPublicationAttempts,
+				unexpectedRemoteSqlAttempts: partialMetrics.unexpectedRemoteSqlAttempts,
+			};
+		}
 		await page
 			.evaluate(() => window.__architecture?.close())
 			.catch(() => undefined);
@@ -212,6 +315,7 @@ async function arm(fixture, mode, sample) {
 					.evaluate(async () => ({
 						events: window.__architecture?.events,
 						attempts: window.__architecture?.attempts,
+						profileProgress: window.__architecture?.profileProgress,
 						engineSpans: window.__architecture
 							? (await window.__architecture.metrics()).engineSpans
 							: [],
@@ -223,6 +327,7 @@ async function arm(fixture, mode, sample) {
 		if (coldResult)
 			return {
 				...coldResult,
+				...measuredProgress,
 				capabilityStatus: "failed",
 				capabilityError: String(error),
 			};
@@ -290,14 +395,18 @@ try {
 				generatedAt: new Date().toISOString(),
 				wasmAssetIdentity,
 				authorityBuild: authorityBuild ?? "smoke-unpinned",
+				authorityMetadata,
+				browserVersion: browser.version(),
 				samples,
+				workloads,
 				results,
 				failures,
 				notes: [
 					"Same local protocol-25 authority for both arms; synthetic text fixtures. Browser WASM identified by SHA-256 above.",
 					"Request delay is injected before each protocol fetch, not a full network emulator.",
+					"coldResponseBytes sums completed non-stream protocol bodies; coldIncompleteByteResponses identifies excluded or unfinished responses.",
 					"Usable means text present in prototype textarea; production auth, tree, plugins excluded.",
-					"Offline uses Chromium network disconnect plus explicit transport rejection; no network succeeds. Native partial-replica POST /sync/push attempts are recorded separately; remote SQL execute attempts fail the capability check.",
+					"Offline uses Chromium network disconnect plus explicit transport rejection; no network succeeds. Native partial-replica POST /sync/push attempts are recorded separately; all other offline protocol attempts fail the capability check.",
 					"Both arms use actual browser durability (OPFS vs strict IndexedDB) and authoritative Lix SQL.",
 					"Warm reopened measurements use the already loaded document, not offline HTML navigation.",
 				],

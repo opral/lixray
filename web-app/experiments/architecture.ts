@@ -39,7 +39,11 @@ const localTelemetry = {
 						status?: { code?: number };
 						attributes?: {
 							key?: string;
-							value?: { stringValue?: string; intValue?: string };
+							value?: {
+								stringValue?: string;
+								intValue?: string;
+								doubleValue?: number;
+							};
 						}[];
 					}[];
 				}[];
@@ -58,7 +62,9 @@ const localTelemetry = {
 						)
 							continue;
 						const value =
-							attribute.value?.stringValue ?? attribute.value?.intValue;
+							attribute.value?.stringValue ??
+							attribute.value?.intValue ??
+							attribute.value?.doubleValue;
 						if (value !== undefined) diagnostics[attribute.key] = value;
 					}
 					engineSpans.push({
@@ -98,6 +104,7 @@ const network: {
 	durationMs: number;
 	status: number;
 	responseBytes: number;
+	responseBytesComplete: boolean;
 }[] = [];
 const attempts: { method: string; route: string; purpose: string }[] = [];
 const measurements: Promise<unknown>[] = [];
@@ -136,13 +143,24 @@ async function span<T>(name: string, operation: () => Promise<T>): Promise<T> {
 		);
 	}
 }
+function protocolRoute(url: string) {
+	const path = new URL(url).pathname;
+	for (const base of [
+		`/lix/v1/${scope.repositoryId}`,
+		`/lix/${scope.repositoryId}`,
+	]) {
+		if (path === base || path.startsWith(`${base}/`))
+			return path.slice(base.length);
+	}
+	return path;
+}
 function measuredFetch(purpose: string): RemoteLixFetch {
 	return async (input, init) => {
 		const start = performance.now();
 		const request = new Request(input, init);
 		attempts.push({
 			method: request.method,
-			route: new URL(request.url).pathname.split("/").at(-1) ?? "",
+			route: protocolRoute(request.url),
 			purpose,
 		});
 		const shouldDrop =
@@ -158,20 +176,27 @@ function measuredFetch(purpose: string): RemoteLixFetch {
 		const response = await networkFetch(request);
 		const record = {
 			method: request.method,
-			route: new URL(request.url).pathname.split("/").at(-1) ?? "",
+			route: protocolRoute(request.url),
 			purpose,
 			durationMs: performance.now() - start,
 			status: response.status,
 			responseBytes: Number(response.headers.get("content-length") ?? 0),
+			responseBytesComplete: false,
 		};
 		network.push(record);
-		if (!response.headers.get("content-type")?.includes("event-stream"))
+		if (
+			!response.headers
+				.get("content-type")
+				?.toLowerCase()
+				.includes("event-stream")
+		)
 			measurements.push(
 				response
 					.clone()
 					.arrayBuffer()
 					.then((bytes) => {
 						record.responseBytes = bytes.byteLength;
+						record.responseBytesComplete = true;
 					})
 					.catch(() => undefined),
 			);
