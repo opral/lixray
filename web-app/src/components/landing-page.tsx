@@ -215,7 +215,57 @@ const connectedApps = [
 	},
 ] as const;
 
-const mountConnectors = ["Google Drive", "Notion", "GitHub"] as const;
+const inlangReuse = [
+	{
+		title: "Data",
+		description:
+			"Translations are files in the repository, next to the code that uses them.",
+	},
+	{
+		title: "Automation",
+		description: "The company’s CI/CD checks and translates on each commit.",
+	},
+	{
+		title: "Review",
+		description:
+			"Translation changes go through the same pull requests as code changes.",
+	},
+] as const;
+
+const codexSetup = `codex mcp add LixRay --url https://lixray.com/mcp --oauth-resource https://lixray.com
+codex mcp login LixRay`;
+
+const sdkExample = `import { openLix } from "@lix-js/sdk";
+
+const lix = await openLix({
+  server: {
+    mode: "remote",
+    url: \`https://lixray.com/lix/\${repositoryId}\`,
+    headers: async () => ({
+      Authorization: \`Bearer \${process.env.LIXRAY_API_TOKEN}\`,
+    }),
+  },
+});
+
+await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
+  "/notes/status.txt",
+  new TextEncoder().encode("ready"),
+]);`;
+
+function CodeBlock({ code, label }: { code: string; label: string }) {
+	return (
+		<pre
+			className="m-0 max-w-full overflow-x-auto rounded-[10px] border border-border bg-panel px-4 py-3.5 text-[13px] leading-[1.6]"
+			aria-label={label}
+		>
+			<code className="font-mono">{code}</code>
+		</pre>
+	);
+}
+
+const sectionTitle =
+	"m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em] text-balance";
+const sectionText = "m-0 text-[18px] leading-[1.65] text-fg-muted";
 
 const reviewBenefits = [
 	{
@@ -346,6 +396,28 @@ export function LandingPage() {
 							</li>
 						))}
 					</ul>
+					<p className={sectionText}>
+						We learned this at{" "}
+						<a
+							className="font-semibold text-fg underline-offset-2"
+							href="https://inlang.com"
+							target="_blank"
+							rel="noreferrer"
+						>
+							inlang
+						</a>
+						, where Lix started. Inlang stores translations in the company’s git
+						repository, next to the source code. Inlang did not build its own
+						storage, automation, or review. It uses what the company already
+						has:
+					</p>
+					<ul className="m-0 flex list-none flex-col gap-3 p-0 text-[17px] leading-[1.55] text-fg-muted">
+						{inlangReuse.map(({ title, description }) => (
+							<li key={title}>
+								<strong className="text-fg">{title}.</strong> {description}
+							</li>
+						))}
+					</ul>
 					<WhyRepositoryIllustration />
 					<div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-4">
 						{reviewBenefits.map(({ title, description, icon: Icon }) => (
@@ -367,30 +439,64 @@ export function LandingPage() {
 				</section>
 
 				<section
-					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-[140px]"
-					aria-labelledby="mount-title"
+					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-24"
+					aria-labelledby="connect-title"
 				>
-					<h2
-						id="mount-title"
-						className="m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em]"
-					>
-						Mount external data
+					<h2 id="connect-title" className={sectionTitle}>
+						Connect an agent
 					</h2>
-					<p className="m-0 text-[18px] leading-[1.6] text-fg-muted">
-						LixRay will mount data from other tools into the repository. Apps
-						and agents then read it next to your own files and tables.
+					<p className={sectionText}>
+						The MCP endpoint is{" "}
+						<code className="font-mono text-[16px] text-fg">
+							https://lixray.com/mcp
+						</code>
+						. It uses OAuth. In Codex:
 					</p>
-					<ul className="m-0 flex list-none flex-wrap gap-2.5 p-0">
-						{mountConnectors.map((name) => (
-							<li
-								key={name}
-								className="inline-flex items-center gap-2 rounded-full border border-border bg-panel px-3.5 py-1.5 text-[15px] font-semibold"
-							>
-								{name}
-								<span className="font-normal text-fg-subtle">Planned</span>
-							</li>
-						))}
-					</ul>
+					<CodeBlock code={codexSetup} label="Codex setup commands" />
+					<p className={sectionText}>
+						In other clients, add the endpoint as a remote MCP server.
+					</p>
+				</section>
+
+				<section
+					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-24"
+					aria-labelledby="sdk-title"
+				>
+					<h2 id="sdk-title" className={sectionTitle}>
+						Use the SDK
+					</h2>
+					<p className={sectionText}>
+						Install{" "}
+						<code className="font-mono text-[16px] text-fg">@lix-js/sdk</code>,
+						create an API token in a repository under Settings → API tokens, and
+						connect:
+					</p>
+					<CodeBlock code={sdkExample} label="SDK example" />
+				</section>
+
+				<section
+					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-[140px]"
+					aria-labelledby="comparison-title"
+				>
+					<h2 id="comparison-title" className={sectionTitle}>
+						How it compares
+					</h2>
+					<p className={sectionText}>
+						In the future, LixRay will mount external data, with Google Drive,
+						Notion, and GitHub as sources.
+					</p>
+					<p className={sectionText}>
+						<strong className="text-fg">GitHub</strong> has version control, but
+						can’t store tables and is hard to use.
+					</p>
+					<p className={sectionText}>
+						<strong className="text-fg">Notion</strong> has tables, but no real
+						files. Uploads are attachments you can’t edit in place.
+					</p>
+					<p className={sectionText}>
+						<strong className="text-fg">Google Drive</strong> has files, but no
+						tables and no version control across them.
+					</p>
 				</section>
 			</main>
 			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
