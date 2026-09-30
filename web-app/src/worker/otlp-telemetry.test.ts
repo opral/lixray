@@ -18,7 +18,7 @@ interface CaptureBatch {
 		distinct_id: string;
 		timestamp: string;
 		uuid: string;
-		properties: Record<string, string>;
+		properties: Record<string, unknown>;
 	}>;
 }
 const codec = protobuf.Root.fromJSON(schema).lookupType(
@@ -231,8 +231,8 @@ void test("server error logs become exceptions with diagnostics, correlation and
 	);
 	assert.equal(captured.properties.$otel_trace_id, "01".repeat(16));
 	assert.equal(captured.properties.$otel_span_id, "02".repeat(8));
-	assert.equal(captured.properties.migration_from_version, "78");
-	assert.equal(captured.properties.migration_to_version, "79");
+	assert.equal(captured.properties.fromVersion, 78);
+	assert.equal(captured.properties.toVersion, 79);
 	assert.equal(captured.properties.repository_id, "lix-123");
 	assert.doesNotMatch(
 		JSON.stringify(captured),
@@ -365,6 +365,7 @@ void test("status-only admission failures reach PostHog with code, versions, HTT
 			...span("lix.protocol.request"),
 			status: { code: 2 },
 			attributes: [
+				{ key: "lix.request.phase", value: { stringValue: "admission" } },
 				...span().attributes,
 				{
 					key: "lix.error.code",
@@ -394,9 +395,10 @@ void test("status-only admission failures reach PostHog with code, versions, HTT
 	const props = batches[0]!.batch[0]!.properties;
 	assert.equal(props.lix_error_code, "LIX_ERROR_RECOVERING");
 	assert.equal(props.operation, "lix.protocol.request");
-	assert.equal(props.httpStatus, "503");
-	assert.equal(props.receiptVersion, "2");
-	assert.equal(props.expectedReceiptVersion, "3");
+	assert.equal(props.httpStatus, 503);
+	assert.equal(props.request_phase, "admission");
+	assert.equal(props.receiptVersion, 2);
+	assert.equal(props.expectedReceiptVersion, 3);
 	assert.equal(props.request_id, "request-123");
 	assert.equal(props.$otel_trace_id, "01".repeat(16));
 	assert.doesNotMatch(JSON.stringify(props), /must-not-project/);
@@ -445,6 +447,18 @@ void test("browser status-only engine failures use browser source and preserve r
 												key: "lix.migration.to_version",
 												value: { intValue: 85 },
 											},
+											{
+												key: "lix.error.retryable",
+												value: { boolValue: false },
+											},
+											{
+												key: "lix.recovery.retry_exhausted",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.recovery.deadline_exceeded",
+												value: { boolValue: true },
+											},
 										],
 									},
 								],
@@ -477,8 +491,11 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.client_release, "a".repeat(40));
 	assert.equal(props.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
 	assert.equal(props.sourceCode, "LIX_PARTIAL_REPLICA_STATE_INVALID");
-	assert.equal(props.fromVersion, "84");
-	assert.equal(props.toVersion, "85");
+	assert.equal(props.fromVersion, 84);
+	assert.equal(props.toVersion, 85);
+	assert.equal(props.retryable, false);
+	assert.equal(props.admissionRetryExhausted, true);
+	assert.equal(props.recoveryDeadlineExceeded, true);
 	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
 });
 

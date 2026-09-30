@@ -553,6 +553,9 @@ void test("failed opening spans preserve structured causes without recording err
 					toVersion: 3,
 					receiptVersion: 2,
 					expectedReceiptVersion: 3,
+					retryable: false,
+					admissionRetryExhausted: true,
+					recoveryDeadlineExceeded: true,
 					responseBody: "secret",
 				},
 			});
@@ -571,5 +574,8 @@ void test("failed opening spans preserve structured causes without recording err
 	assert.equal(finished.attributes["lix.migration.to_version"], 3);
 	assert.equal(finished.attributes["lix.receipt.version"], 2);
 	assert.equal(finished.attributes["lix.receipt.expected_version"], 3);
+	assert.equal(finished.attributes["lix.error.retryable"], false);
+	assert.equal(finished.attributes["lix.recovery.retry_exhausted"], true);
+	assert.equal(finished.attributes["lix.recovery.deadline_exceeded"], true);
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
 });

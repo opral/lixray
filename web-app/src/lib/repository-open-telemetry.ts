@@ -37,7 +37,11 @@ export function repositoryOpenDiagnostics(
 	const details = candidate.details;
 	if (!details || typeof details !== "object") return result;
 	const fields = details as Record<string, unknown>;
-	for (const key of ["retryable", "admissionRetryExhausted"]) {
+	for (const key of [
+		"retryable",
+		"admissionRetryExhausted",
+		"recoveryDeadlineExceeded",
+	]) {
 		if (typeof fields[key] === "boolean") result[key] = fields[key];
 	}
 	if (
@@ -76,7 +80,7 @@ export function repositoryOpenDiagnostics(
 		if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
 			result[key] = value;
 		else if (typeof value === "string" && /^\d{1,20}$/.test(value))
-			result[key] = value;
+			result[key] = Number.isSafeInteger(Number(value)) ? Number(value) : value;
 	}
 	if (
 		fields.recoveryStage === "admission" ||

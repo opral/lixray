@@ -64,36 +64,55 @@ async function recoveryAdmission(
 	headers: Headers,
 	signal: AbortSignal,
 ) {
-	for (let attempt = 0; ; attempt++) {
-		signal.throwIfAborted();
-		const response = await fetcher(url, { headers, signal });
-		if (response.ok) return response;
-		const error = await recoveryError(response, "admission", attempt + 1);
-		const delay = ADMISSION_RETRY_DELAYS_MS[attempt];
-		error.details.admissionRetryExhausted =
-			error.details.retryable && delay === undefined;
+	let lastError: Awaited<ReturnType<typeof recoveryError>> | undefined;
+	try {
+		for (let attempt = 0; ; attempt++) {
+			signal.throwIfAborted();
+			const response = await fetcher(url, { headers, signal });
+			if (response.ok) return response;
+			const error = await recoveryError(response, "admission", attempt + 1);
+			if (response.status !== 503 || !error.details.retryable) {
+				lastError = undefined;
+				throw error;
+			}
+			lastError = error;
+			// The enclosing recovery deadline bounds this safe GET loop.
+			// A migration can legitimately outlast the initial backoff ramp.
+			const delay =
+				ADMISSION_RETRY_DELAYS_MS[
+					Math.min(attempt, ADMISSION_RETRY_DELAYS_MS.length - 1)
+				]!;
+			await new Promise<void>((resolve, reject) => {
+				const onAbort = () => {
+					signal.removeEventListener("abort", onAbort);
+					clearTimeout(timer);
+					reject(
+						signal.reason instanceof Error
+							? signal.reason
+							: new DOMException("Replica recovery was aborted", "AbortError"),
+					);
+				};
+				const timer = setTimeout(() => {
+					signal.removeEventListener("abort", onAbort);
+					resolve();
+				}, delay);
+				signal.addEventListener("abort", onAbort, { once: true });
+				if (signal.aborted) onAbort();
+			});
+		}
+	} catch (error) {
 		if (
-			response.status !== 503 ||
-			!error.details.retryable ||
-			delay === undefined
-		)
-			throw error;
-		await new Promise<void>((resolve, reject) => {
-			const onAbort = () => {
-				clearTimeout(timer);
-				reject(
-					signal.reason instanceof Error
-						? signal.reason
-						: new DOMException("Replica recovery was aborted", "AbortError"),
-				);
-			};
-			const timer = setTimeout(() => {
-				signal.removeEventListener("abort", onAbort);
-				resolve();
-			}, delay);
-			signal.addEventListener("abort", onAbort, { once: true });
-			if (signal.aborted) onAbort();
-		});
+			lastError &&
+			signal.aborted &&
+			(signal.reason instanceof Error ||
+				signal.reason instanceof DOMException) &&
+			signal.reason.name === "TimeoutError"
+		) {
+			lastError.details.admissionRetryExhausted = true;
+			Object.assign(lastError.details, { recoveryDeadlineExceeded: true });
+			throw lastError;
+		}
+		throw error;
 	}
 }
 

@@ -1,8 +1,11 @@
-/** Project server diagnostics at the authenticated gateway, never in HTTP errors. */
+import { repositoryOpenDiagnostics } from "../lib/repository-open-telemetry.ts";
+
+/** Project operation diagnostics at the authenticated gateway, never in HTTP errors. */
 export interface OtlpAttribute {
 	key?: string;
 	value?: {
 		stringValue?: string;
+		boolValue?: boolean;
 		intValue?: { toString(): string } | number;
 	};
 }
@@ -32,7 +35,9 @@ function attributes(entries: OtlpAttribute[] = []): Record<string, string> {
 					? value.stringValue
 					: value && Object.hasOwn(value, "intValue")
 						? value.intValue?.toString()
-						: undefined;
+						: value && Object.hasOwn(value, "boolValue")
+							? value.boolValue?.toString()
+							: undefined;
 			return key && text !== undefined ? [[key, text]] : [];
 		}),
 	);
@@ -108,28 +113,37 @@ export async function serverErrorEvents(
 			],
 		});
 	}
-	const structural: Record<string, string> = {};
+	const details: Record<string, unknown> = {};
 	for (const [key, field] of [
+		["lix.error.source_code", "sourceCode"],
 		["lix.migration.from_version", "fromVersion"],
 		["lix.migration.to_version", "toVersion"],
 		["lix.receipt.version", "receiptVersion"],
 		["lix.receipt.expected_version", "expectedReceiptVersion"],
 		["http.response.status_code", "httpStatus"],
 		["lix.recovery.attempts", "recoveryAttempts"],
+		["lix.recovery.stage", "recoveryStage"],
+	])
+		details[field!] = context[key!];
+	for (const [key, field] of [
+		["lix.error.retryable", "retryable"],
+		["lix.recovery.retry_exhausted", "admissionRetryExhausted"],
+		["lix.recovery.deadline_exceeded", "recoveryDeadlineExceeded"],
 	]) {
-		if (context[key!] && /^\d{1,20}$/.test(context[key!]!))
-			structural[field!] = context[key!]!;
+		if (context[key!] === "true" || context[key!] === "false")
+			details[field!] = context[key!] === "true";
 	}
+	// Both first-party failures and OTLP projections use one bounded schema,
+	// including canonical number/boolean types for querying in PostHog.
+	const structural = repositoryOpenDiagnostics({ code: failureCode, details });
+	const phase = context["lix.request.phase"];
 	if (
-		context["lix.recovery.stage"] === "admission" ||
-		context["lix.recovery.stage"] === "replacement"
+		phase &&
+		["admission", "completed", "protocol_handler", "sql_execution"].includes(
+			phase,
+		)
 	)
-		structural.recoveryStage = context["lix.recovery.stage"]!;
-	if (failureCode && /^LIX_[A-Z0-9_]{1,100}$/.test(failureCode))
-		structural.lix_error_code = failureCode;
-	const sourceCode = context["lix.error.source_code"];
-	if (sourceCode && /^LIX_[A-Z0-9_]{1,100}$/.test(sourceCode))
-		structural.sourceCode = sourceCode;
+		structural.request_phase = phase;
 	const revision =
 		resource["vcs.ref.head.revision"] ?? resource["service.version"];
 	if (revision && /^[a-f0-9]{40}$/.test(revision))
@@ -201,6 +215,12 @@ export async function serverErrorEvents(
 						source,
 						service: source === "server" ? "lix-server" : "lix-browser",
 						...structural,
+						...repositoryOpenDiagnostics({
+							details: {
+								fromVersion: fields.from_version,
+								toVersion: fields.to_version,
+							},
+						}),
 						operation: span.name,
 						server_span_name: span.name,
 						server_log_message: summary,
@@ -208,12 +228,6 @@ export async function serverErrorEvents(
 						...(lixId ? { lix_id: lixId, repository_id: lixId } : {}),
 						...(context["lix.request.id"]
 							? { request_id: context["lix.request.id"] }
-							: {}),
-						...(fields.from_version
-							? { migration_from_version: fields.from_version }
-							: {}),
-						...(fields.to_version
-							? { migration_to_version: fields.to_version }
 							: {}),
 					},
 				};

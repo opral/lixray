@@ -45,9 +45,16 @@ export function withSpan<T>(
 				["httpStatus", "http.response.status_code"],
 				["recoveryStage", "lix.recovery.stage"],
 				["recoveryAttempts", "lix.recovery.attempts"],
+				["retryable", "lix.error.retryable"],
+				["admissionRetryExhausted", "lix.recovery.retry_exhausted"],
+				["recoveryDeadlineExceeded", "lix.recovery.deadline_exceeded"],
 			]) {
 				const value = diagnostic[key!];
-				if (typeof value === "string" || typeof value === "number")
+				if (
+					typeof value === "string" ||
+					typeof value === "number" ||
+					typeof value === "boolean"
+				)
 					span.setAttribute(field!, value);
 			}
 			throw error;

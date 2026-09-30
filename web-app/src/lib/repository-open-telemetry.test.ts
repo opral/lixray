@@ -24,7 +24,7 @@ void test("opening diagnostics retain coordinates and exclude arbitrary private 
 			lix_error_code: "LIX_PARTIAL_REPLICA_ADMISSION_MISMATCH",
 			branchId: id,
 			rootCommitId: null,
-			servingGeneration: "123",
+			servingGeneration: 123,
 			expectedStorageEpoch: 82,
 		},
 	);

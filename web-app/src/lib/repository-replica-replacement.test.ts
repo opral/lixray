@@ -279,7 +279,7 @@ void test("aborting admission backoff stops recovery before replacement", async 
 	});
 });
 
-void test("admission retry exhaustion is bounded and reports its terminal attempt count", async () => {
+void test("admission deadline preserves its last cause and leaves the source active", async () => {
 	await withReplicaEnvironment(async () => {
 		let requests = 0;
 		await assert.rejects(
@@ -288,6 +288,7 @@ void test("admission retry exhaustion is bounded and reports its terminal attemp
 				failedName: "old",
 				url: new URL("https://example.test/lix/repository"),
 				headers: async () => ({}),
+				signal: AbortSignal.timeout(25),
 				fetch: async () => {
 					requests++;
 					return Response.json(
@@ -301,14 +302,61 @@ void test("admission retry exhaustion is bounded and reports its terminal attemp
 				assert.deepEqual(error.details, {
 					httpStatus: 503,
 					recoveryStage: "admission",
-					recoveryAttempts: 7,
+					recoveryAttempts: 1,
 					retryable: true,
 					admissionRetryExhausted: true,
+					recoveryDeadlineExceeded: true,
 				});
 				return true;
 			},
 		);
-		assert.equal(requests, 7);
+		assert.equal(requests, 1);
 		assert.equal(activeReplicaStorage("old"), "old");
+	});
+});
+
+void test("retryable admission can finish after the initial backoff ramp", async (t) => {
+	await withReplicaEnvironment(async () => {
+		t.mock.timers.enable({ apis: ["setTimeout"] });
+		let admissions = 0;
+		let replacements = 0;
+		const opening = replaceRepositoryReplica({
+			source: "old",
+			failedName: "old",
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch: async (_input, init) => {
+				if (init?.method === "DELETE")
+					return new Response(null, { status: 204 });
+				if (init?.method === "POST") {
+					replacements++;
+					const body = JSON.parse(init.body as string) as {
+						replacementId: string;
+					};
+					return Response.json({ replicaId: body.replacementId });
+				}
+				admissions++;
+				return admissions <= 7
+					? Response.json(
+							{ error: { code: "LIX_ERROR_MIGRATING" } },
+							{ status: 503 },
+						)
+					: Response.json({ sessionId: "session" });
+			},
+		}).then(
+			(value) => ({ value }),
+			(error: unknown) => ({ error }),
+		);
+		await new Promise((resolve) => setImmediate(resolve));
+		for (let tick = 0; tick < 9 && admissions < 8; tick++) {
+			t.mock.timers.tick(3_000);
+			await new Promise((resolve) => setImmediate(resolve));
+		}
+		const result = await opening;
+		assert.ok("value" in result);
+		assert.equal(admissions, 8);
+		assert.equal(replacements, 1);
+		assert.equal(activeReplicaStorage("old"), result.value);
+		t.mock.timers.reset();
 	});
 });
