@@ -107,3 +107,51 @@ void test("first-party reports preserve browser frames without messages, queries
 		/secret|private document|@private/,
 	);
 });
+
+void test("first-party diagnostics retain receipt versions and recovery stage without response content", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			name: "LixError",
+			code: "LIX_REPLICA_RECOVERY_FAILED",
+			details: {
+				receiptVersion: 2,
+				expectedReceiptVersion: 3,
+				recoveryStage: "admission",
+				recoveryAttempts: 7,
+				httpStatus: 503,
+				message: "private",
+				responseBody: "secret",
+			},
+		}),
+		{
+			error_kind: "LixError",
+			lix_error_code: "LIX_REPLICA_RECOVERY_FAILED",
+			receiptVersion: 2,
+			expectedReceiptVersion: 3,
+			recoveryStage: "admission",
+			recoveryAttempts: 7,
+			httpStatus: 503,
+		},
+	);
+});
+
+void test("first-party failure diagnostics preserve valid trace correlation and reject invalid identifiers", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				telemetryTraceId: "a".repeat(32),
+				telemetrySpanId: "b".repeat(16),
+			},
+		}),
+		{ $otel_trace_id: "a".repeat(32), $otel_span_id: "b".repeat(16) },
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				telemetryTraceId: "0".repeat(32),
+				telemetrySpanId: "token-secret",
+			},
+		}),
+		{},
+	);
+});

@@ -358,3 +358,126 @@ void test("stalled downstream delivery is aborted within the receiver deadline",
 	assert.equal(aborted, true);
 	assert.ok(Date.now() - started < 5_000);
 });
+
+void test("status-only admission failures reach PostHog with code, versions, HTTP status and correlation", async () => {
+	const body = encode([
+		{
+			...span("lix.protocol.request"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_ERROR_RECOVERING" },
+				},
+				{ key: "http.response.status_code", value: { intValue: 503 } },
+				{ key: "lix.receipt.version", value: { intValue: 2 } },
+				{ key: "lix.receipt.expected_version", value: { intValue: 3 } },
+				{ key: "lix.request.id", value: { stringValue: "request-123" } },
+			],
+		},
+	]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	for (let i = 0; i < 2; i++)
+		assert.equal(
+			(await handleOtlpTelemetry(request(body), env, { fetch: fetcher }))
+				.status,
+			200,
+		);
+	assert.deepEqual(batches[0], batches[1]);
+	const props = batches[0]!.batch[0]!.properties;
+	assert.equal(props.lix_error_code, "LIX_ERROR_RECOVERING");
+	assert.equal(props.operation, "lix.protocol.request");
+	assert.equal(props.httpStatus, "503");
+	assert.equal(props.receiptVersion, "2");
+	assert.equal(props.expectedReceiptVersion, "3");
+	assert.equal(props.request_id, "request-123");
+	assert.equal(props.$otel_trace_id, "01".repeat(16));
+	assert.doesNotMatch(JSON.stringify(props), /must-not-project/);
+});
+
+void test("browser status-only engine failures use browser source and preserve resource revision", async () => {
+	const bytes = codec
+		.encode(
+			codec.fromObject({
+				resourceSpans: [
+					{
+						resource: {
+							attributes: [
+								{
+									key: "vcs.ref.head.revision",
+									value: { stringValue: "a".repeat(40) },
+								},
+								{ key: "private-resource", value: { stringValue: "secret" } },
+							],
+						},
+						scopeSpans: [
+							{
+								spans: [
+									{
+										...span("lix.engine.open"),
+										status: { code: 2 },
+										attributes: [
+											...span().attributes,
+											{
+												key: "error.type",
+												value: {
+													stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+												},
+											},
+											{
+												key: "lix.error.source_code",
+												value: {
+													stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+												},
+											},
+											{
+												key: "lix.migration.from_version",
+												value: { intValue: 84 },
+											},
+											{
+												key: "lix.migration.to_version",
+												value: { intValue: 85 },
+											},
+										],
+									},
+								],
+							},
+						],
+					},
+				],
+			}),
+		)
+		.finish();
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(bytes), env, {
+				fetch: fetcher,
+				authenticatedBrowser: true,
+			})
+		).status,
+		200,
+	);
+	const props = batch!.batch[0]!.properties;
+	assert.equal(props.source, "browser");
+	assert.equal(props.$exception_source, "browser");
+	assert.equal(props.client_release, "a".repeat(40));
+	assert.equal(props.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(props.sourceCode, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(props.fromVersion, "84");
+	assert.equal(props.toVersion, "85");
+	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
+});

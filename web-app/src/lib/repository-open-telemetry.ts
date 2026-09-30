@@ -6,8 +6,8 @@ const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 /** Only structural coordinates: never messages, URLs, credentials or document data. */
 export function repositoryOpenDiagnostics(
 	error: unknown,
-): Record<string, string | number | null> {
-	const result: Record<string, string | number | null> = {};
+): Record<string, string | number | boolean | null> {
+	const result: Record<string, string | number | boolean | null> = {};
 	if (!error || typeof error !== "object") return result;
 	const candidate = error as Record<string, unknown>;
 	if (
@@ -37,6 +37,14 @@ export function repositoryOpenDiagnostics(
 	const details = candidate.details;
 	if (!details || typeof details !== "object") return result;
 	const fields = details as Record<string, unknown>;
+	for (const key of ["retryable", "admissionRetryExhausted"]) {
+		if (typeof fields[key] === "boolean") result[key] = fields[key];
+	}
+	if (
+		typeof fields.sourceCode === "string" &&
+		/^LIX_[A-Z0-9_]{1,100}$/.test(fields.sourceCode)
+	)
+		result.sourceCode = fields.sourceCode;
 	for (const key of [
 		"branchId",
 		"headCommitId",
@@ -58,12 +66,34 @@ export function repositoryOpenDiagnostics(
 		"expectedStorageEpoch",
 		"protocolEpoch",
 		"expectedProtocolEpoch",
+		"fromVersion",
+		"toVersion",
+		"receiptVersion",
+		"expectedReceiptVersion",
+		"recoveryAttempts",
 	]) {
 		const value = fields[key];
 		if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
 			result[key] = value;
 		else if (typeof value === "string" && /^\d{1,20}$/.test(value))
 			result[key] = value;
+	}
+	if (
+		fields.recoveryStage === "admission" ||
+		fields.recoveryStage === "replacement"
+	)
+		result.recoveryStage = fields.recoveryStage;
+	for (const [key, field, length] of [
+		["telemetryTraceId", "$otel_trace_id", 32],
+		["telemetrySpanId", "$otel_span_id", 16],
+	] as const) {
+		const value = fields[key] ?? fields[field];
+		if (
+			typeof value === "string" &&
+			new RegExp(`^[a-f0-9]{${length}}$`).test(value) &&
+			/[1-9a-f]/.test(value)
+		)
+			result[field] = value;
 	}
 	return result;
 }

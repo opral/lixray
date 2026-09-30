@@ -101,3 +101,214 @@ void test("replacement retries lost replies and publishes one retained route acr
 		else Reflect.deleteProperty(globalThis, "navigator");
 	}
 });
+
+async function withReplicaEnvironment(run: () => Promise<void>) {
+	const storage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
+	const navigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+	const entries = new Map<string, string>();
+	Object.defineProperty(globalThis, "localStorage", {
+		configurable: true,
+		value: {
+			getItem: (key: string) => entries.get(key) ?? null,
+			setItem: (key: string, value: string) => entries.set(key, value),
+		},
+	});
+	Object.defineProperty(globalThis, "navigator", {
+		configurable: true,
+		value: {
+			locks: {
+				request: (
+					_name: string,
+					_options: unknown,
+					callback: () => Promise<string>,
+				) => callback(),
+			},
+		},
+	});
+	try {
+		await run();
+	} finally {
+		if (storage) Object.defineProperty(globalThis, "localStorage", storage);
+		else Reflect.deleteProperty(globalThis, "localStorage");
+		if (navigator) Object.defineProperty(globalThis, "navigator", navigator);
+		else Reflect.deleteProperty(globalThis, "navigator");
+	}
+}
+
+void test("recovery waits through transient admission 503 before retiring the replica", async () => {
+	await withReplicaEnvironment(async () => {
+		let admissions = 0;
+		let replacements = 0;
+		let replacement = "";
+		const result = await replaceRepositoryReplica({
+			source: "old",
+			failedName: "old",
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch: async (_input, init) => {
+				if (init?.method === "DELETE")
+					return new Response(null, { status: 204 });
+				if (init?.method === "POST") {
+					assert.equal(admissions, 2);
+					replacements++;
+					replacement = (
+						JSON.parse(init.body as string) as { replacementId: string }
+					).replacementId;
+					return Response.json({ replicaId: replacement });
+				}
+				admissions++;
+				if (admissions === 1)
+					return Response.json(
+						{
+							error: {
+								code: "LIX_ERROR_MIGRATING",
+								details: { retryable: true },
+							},
+						},
+						{ status: 503 },
+					);
+				return Response.json({ sessionId: "session" });
+			},
+		});
+		assert.equal(result, replacement);
+		assert.equal(replacements, 1);
+		assert.equal(activeReplicaStorage("old"), replacement);
+	});
+});
+
+void test("terminal admission preserves safe diagnostics and leaves local routing untouched", async () => {
+	await withReplicaEnvironment(async () => {
+		let requests = 0;
+		await assert.rejects(
+			replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				fetch: async () => {
+					requests++;
+					return Response.json(
+						{
+							error: {
+								code: "LIX_ERROR_CACHE_CLEANUP",
+								message: "private details",
+								details: {
+									retryable: false,
+									admissionRetryExhausted: false,
+									token: "secret",
+								},
+							},
+						},
+						{ status: 503 },
+					);
+				},
+			}),
+			(error: unknown) => {
+				assert.ok(error instanceof Error);
+				assert.equal(
+					error.message,
+					"Replica recovery admission returned HTTP 503 (LIX_ERROR_CACHE_CLEANUP)",
+				);
+				assert.deepEqual((error as Error & { details: unknown }).details, {
+					httpStatus: 503,
+					recoveryStage: "admission",
+					recoveryAttempts: 1,
+					retryable: false,
+					admissionRetryExhausted: false,
+				});
+				return true;
+			},
+		);
+		assert.equal(requests, 1);
+		assert.equal(activeReplicaStorage("old"), "old");
+	});
+});
+
+void test("replacement POST failure is never replayed and closes the admission session", async () => {
+	await withReplicaEnvironment(async () => {
+		const methods: string[] = [];
+		await assert.rejects(
+			replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				fetch: async (_input, init) => {
+					methods.push(init?.method ?? "GET");
+					if (init?.method === "DELETE")
+						return new Response(null, { status: 204 });
+					if (init?.method === "POST")
+						return Response.json(
+							{ error: { code: "LIX_ERROR_RECOVERING" } },
+							{ status: 503 },
+						);
+					return Response.json({ sessionId: "session" });
+				},
+			}),
+			{ code: "LIX_ERROR_RECOVERING", status: 503 },
+		);
+		assert.deepEqual(methods, ["GET", "POST", "DELETE"]);
+		assert.equal(activeReplicaStorage("old"), "old");
+	});
+});
+
+void test("aborting admission backoff stops recovery before replacement", async () => {
+	await withReplicaEnvironment(async () => {
+		const controller = new AbortController();
+		let requests = 0;
+		await assert.rejects(
+			replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				signal: controller.signal,
+				fetch: async () => {
+					requests++;
+					queueMicrotask(() => controller.abort(new Error("cancelled")));
+					return Response.json(
+						{ error: { code: "LIX_ERROR_RECOVERING" } },
+						{ status: 503 },
+					);
+				},
+			}),
+			/cancelled/,
+		);
+		assert.equal(requests, 1);
+		assert.equal(activeReplicaStorage("old"), "old");
+	});
+});
+
+void test("admission retry exhaustion is bounded and reports its terminal attempt count", async () => {
+	await withReplicaEnvironment(async () => {
+		let requests = 0;
+		await assert.rejects(
+			replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				fetch: async () => {
+					requests++;
+					return Response.json(
+						{ error: { code: "LIX_ERROR_RECOVERING" } },
+						{ status: 503 },
+					);
+				},
+			}),
+			(error: unknown) => {
+				assert.ok(error instanceof Error && "details" in error);
+				assert.deepEqual(error.details, {
+					httpStatus: 503,
+					recoveryStage: "admission",
+					recoveryAttempts: 7,
+					retryable: true,
+					admissionRetryExhausted: true,
+				});
+				return true;
+			},
+		);
+		assert.equal(requests, 7);
+		assert.equal(activeReplicaStorage("old"), "old");
+	});
+});

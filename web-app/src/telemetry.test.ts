@@ -540,3 +540,36 @@ void test("repository retry starts a new file-open root before SDK work", () => 
 		["lixray.file.open", "lixray.file.open"],
 	);
 });
+
+void test("failed opening spans preserve structured causes without recording error content", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private content"), {
+				code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+				details: {
+					sourceCode: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+					fromVersion: 2,
+					toVersion: 3,
+					receiptVersion: 2,
+					expectedReceiptVersion: 3,
+					responseBody: "secret",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["error.type"],
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
+	);
+	assert.equal(
+		finished.attributes["lix.error.source_code"],
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
+	);
+	assert.equal(finished.attributes["lix.migration.from_version"], 2);
+	assert.equal(finished.attributes["lix.migration.to_version"], 3);
+	assert.equal(finished.attributes["lix.receipt.version"], 2);
+	assert.equal(finished.attributes["lix.receipt.expected_version"], 3);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});

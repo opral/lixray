@@ -10,6 +10,8 @@ import {
 	type Span,
 } from "@opentelemetry/api";
 
+import { repositoryOpenDiagnostics } from "./lib/repository-open-telemetry.ts";
+
 export const tracer = trace.getTracer("lixray");
 
 /** Only bounded, application-owned error categories belong in traces. */
@@ -27,7 +29,27 @@ export function withSpan<T>(
 		try {
 			return await operation(span);
 		} catch (error) {
-			failSpan(span);
+			const diagnostic = repositoryOpenDiagnostics(error);
+			failSpan(
+				span,
+				typeof diagnostic.lix_error_code === "string"
+					? diagnostic.lix_error_code
+					: "operation_failed",
+			);
+			for (const [key, field] of [
+				["sourceCode", "lix.error.source_code"],
+				["fromVersion", "lix.migration.from_version"],
+				["toVersion", "lix.migration.to_version"],
+				["receiptVersion", "lix.receipt.version"],
+				["expectedReceiptVersion", "lix.receipt.expected_version"],
+				["httpStatus", "http.response.status_code"],
+				["recoveryStage", "lix.recovery.stage"],
+				["recoveryAttempts", "lix.recovery.attempts"],
+			]) {
+				const value = diagnostic[key!];
+				if (typeof value === "string" || typeof value === "number")
+					span.setAttribute(field!, value);
+			}
 			throw error;
 		} finally {
 			span.end();

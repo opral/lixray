@@ -1,5 +1,100 @@
 import { compatibility } from "@lix-js/sdk/compatibility";
 import type { RemoteLixFetch } from "@lix-js/sdk";
+import { repositoryOpenDiagnostics } from "./repository-open-telemetry.ts";
+
+const ADMISSION_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
+const RETRYABLE_ADMISSION_CODES = new Set([
+	"LIX_ERROR_RECOVERING",
+	"LIX_ERROR_MIGRATING",
+	"LIX_REPOSITORY_MIGRATING",
+	"LIX_ERROR_SHUTTING_DOWN",
+	"LIX_ERROR_CAPACITY",
+]);
+
+async function recoveryError(
+	response: Response,
+	stage: "admission" | "replacement",
+	attempts: number,
+) {
+	let code: string | undefined;
+	let retryable = false;
+	let diagnostics: Record<string, string | number | boolean | null> = {};
+	try {
+		const body = (await response.json()) as {
+			error?: { code?: unknown; details?: { retryable?: unknown } };
+		};
+		diagnostics = repositoryOpenDiagnostics({ details: body.error?.details });
+		if (
+			typeof body.error?.code === "string" &&
+			/^LIX_[A-Z0-9_]{1,100}$/.test(body.error.code)
+		) {
+			code = body.error.code;
+			retryable =
+				body.error.details?.retryable !== false &&
+				RETRYABLE_ADMISSION_CODES.has(code);
+		}
+	} catch {
+		/* Preserve bounded diagnostics for non-JSON gateway responses too. */
+	}
+	return Object.assign(
+		new Error(
+			`Replica recovery ${stage} returned HTTP ${response.status}${code ? ` (${code})` : ""}`,
+		),
+		{
+			name: "LixError",
+			code: code ?? "LIX_REPLICA_RECOVERY_FAILED",
+			status: response.status,
+			details: {
+				...diagnostics,
+				httpStatus: response.status,
+				recoveryStage: stage,
+				recoveryAttempts: attempts,
+				retryable: stage === "admission" && retryable,
+				admissionRetryExhausted: false,
+			},
+		},
+	);
+}
+
+/** Only retry admission before any replica retirement; never replay replacement POSTs. */
+async function recoveryAdmission(
+	fetcher: RemoteLixFetch,
+	url: URL,
+	headers: Headers,
+	signal: AbortSignal,
+) {
+	for (let attempt = 0; ; attempt++) {
+		signal.throwIfAborted();
+		const response = await fetcher(url, { headers, signal });
+		if (response.ok) return response;
+		const error = await recoveryError(response, "admission", attempt + 1);
+		const delay = ADMISSION_RETRY_DELAYS_MS[attempt];
+		error.details.admissionRetryExhausted =
+			error.details.retryable && delay === undefined;
+		if (
+			response.status !== 503 ||
+			!error.details.retryable ||
+			delay === undefined
+		)
+			throw error;
+		await new Promise<void>((resolve, reject) => {
+			const onAbort = () => {
+				clearTimeout(timer);
+				reject(
+					signal.reason instanceof Error
+						? signal.reason
+						: new DOMException("Replica recovery was aborted", "AbortError"),
+				);
+			};
+			const timer = setTimeout(() => {
+				signal.removeEventListener("abort", onAbort);
+				resolve();
+			}, delay);
+			signal.addEventListener("abort", onAbort, { once: true });
+			if (signal.aborted) onAbort();
+		});
+	}
+}
 
 type Route = { activeName: string; retainedSources: string[] };
 const key = (source: string) =>
@@ -63,11 +158,12 @@ export async function replaceRepositoryReplica(options: {
 				"lix-sync-protocol-version",
 				String(compatibility.syncProtocolVersion),
 			);
-			const handshake = await options.fetch(url, { headers, signal });
-			if (!handshake.ok)
-				throw new Error(
-					`Replica recovery admission returned HTTP ${handshake.status}`,
-				);
+			const handshake = await recoveryAdmission(
+				options.fetch,
+				url,
+				headers,
+				signal,
+			);
 			const identity = (await handshake.json()) as { sessionId?: unknown };
 			if (typeof identity.sessionId !== "string")
 				throw new Error("Replica recovery admission returned no session");
@@ -83,10 +179,7 @@ export async function replaceRepositoryReplica(options: {
 						replacementId,
 					}),
 				});
-				if (!response.ok)
-					throw new Error(
-						`Replica replacement returned HTTP ${response.status}`,
-					);
+				if (!response.ok) throw await recoveryError(response, "replacement", 1);
 				const result = (await response.json()) as { replicaId?: unknown };
 				if (
 					typeof result.replicaId !== "string" ||

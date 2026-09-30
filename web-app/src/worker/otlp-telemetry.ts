@@ -1,6 +1,10 @@
 import protobuf from "protobufjs/light.js";
 import schema from "./otlp-traces.schema.json" with { type: "json" };
-import { serverErrorEvents, type OtlpSpan } from "./otlp-server-errors.ts";
+import {
+	serverErrorEvents,
+	type OtlpSpan,
+	type OtlpAttribute,
+} from "./otlp-server-errors.ts";
 
 export interface OtlpTelemetryEnvironment {
 	LIXRAY_INTERNAL_TOKEN?: string;
@@ -10,7 +14,10 @@ export interface OtlpTelemetryEnvironment {
 }
 
 interface TraceRequest {
-	resourceSpans?: Array<{ scopeSpans?: Array<{ spans?: OtlpSpan[] }> }>;
+	resourceSpans?: Array<{
+		resource?: { attributes?: OtlpAttribute[] };
+		scopeSpans?: Array<{ spans?: OtlpSpan[] }>;
+	}>;
 }
 
 // Generated from the official trace-service proto, never a custom wire format.
@@ -197,7 +204,22 @@ export async function handleOtlpTelemetry(
 		const opens = (await Promise.all(spans.map(openedEvent))).filter(
 			(event) => event !== null,
 		);
-		const errors = (await Promise.all(spans.map(serverErrorEvents))).flat();
+		const errors = (
+			await Promise.all(
+				(decoded.resourceSpans ?? []).flatMap((resource) =>
+					(resource.scopeSpans ?? []).flatMap((scope) =>
+						(scope.spans ?? []).map((span) =>
+							serverErrorEvents(span, {
+								source: dependencies.authenticatedBrowser
+									? "browser"
+									: "server",
+								resourceAttributes: resource.resource?.attributes,
+							}),
+						),
+					),
+				),
+			)
+		).flat();
 		const events = [...opens, ...errors];
 		const fetcher = dependencies.fetch ?? fetch;
 		const deliveries = [
