@@ -248,7 +248,8 @@ p50/p95 of `duration_ms`, and split by `entry` and `client_release`. Use the sta
 fields to identify the dominant delay, then open that sample's trace to inspect
 engine, SQL and client/server request spans. Count other outcomes separately;
 exclude background-tab delays from foreground latency. Successful samples cover
-authenticated, authorized repositories under the existing browser gateway
-policy; anonymous visitors and failures before repository access is established
+authenticated, authorized repositories and public repositories opened anonymously.
+For anonymous opens, the gateway verifies the public repository and accepts only
+the bounded root timing sample. Failures before repository access is established
 are not performance samples through this gateway. Existing first-party opening
 failure diagnostics remain independent.
