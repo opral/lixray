@@ -141,11 +141,26 @@ async function openedEvent(span: OtlpSpan) {
 	};
 }
 
+export interface TelemetryDeliveryFailure {
+	code:
+		| "LIX_TELEMETRY_CONFIGURATION_INVALID"
+		| "LIX_TELEMETRY_UPSTREAM_UNAVAILABLE"
+		| "LIX_TELEMETRY_UPSTREAM_REJECTED"
+		| "LIX_TELEMETRY_DELIVERY_FAILED";
+	destination: "gateway" | "traces" | "events";
+	source: "browser" | "server";
+	httpStatus?: number;
+}
+
 /** Lix emits one vendor-neutral OTLP stream; this gateway owns PostHog routing. */
 export async function handleOtlpTelemetry(
 	request: Request,
 	env: OtlpTelemetryEnvironment,
-	dependencies: { fetch?: typeof fetch; authenticatedBrowser?: boolean } = {},
+	dependencies: {
+		fetch?: typeof fetch;
+		authenticatedBrowser?: boolean;
+		reportDeliveryFailure?: (failure: TelemetryDeliveryFailure) => void;
+	} = {},
 ): Promise<Response> {
 	if (!dependencies.authenticatedBrowser) {
 		if (
@@ -167,7 +182,30 @@ export async function handleOtlpTelemetry(
 	const encoding = request.headers.get("content-encoding")?.toLowerCase();
 	if (encoding && encoding !== "gzip" && encoding !== "identity")
 		return new Response("Unsupported encoding", { status: 415 });
+	// When PostHog cannot receive evidence, preserve bounded pipeline health in
+	// the host logs. Never log upstream bodies, URLs, tokens or span payloads.
+	const reportFailure = (failure: Omit<TelemetryDeliveryFailure, "source">) => {
+		try {
+			const diagnostic: TelemetryDeliveryFailure = {
+				...failure,
+				source: dependencies.authenticatedBrowser ? "browser" : "server",
+			};
+			if (dependencies.reportDeliveryFailure)
+				dependencies.reportDeliveryFailure(diagnostic);
+			else
+				console.error(
+					"lix.telemetry.delivery_failed",
+					JSON.stringify(diagnostic),
+				);
+		} catch {
+			/* Reporting must not change export acknowledgement/retry semantics. */
+		}
+	};
 	if (!env.POSTHOG_PROJECT_TOKEN || env.POSTHOG_ENVIRONMENT !== "production") {
+		reportFailure({
+			code: "LIX_TELEMETRY_CONFIGURATION_INVALID",
+			destination: "gateway",
+		});
 		return new Response("Telemetry destination is not configured", {
 			status: 503,
 		});
@@ -175,8 +213,13 @@ export async function handleOtlpTelemetry(
 	const signal = AbortSignal.timeout(DELIVERY_TIMEOUT_MS);
 	try {
 		const host = new URL(env.POSTHOG_HOST ?? "https://us.i.posthog.com");
-		if (!["https:", "http:"].includes(host.protocol))
+		if (!["https:", "http:"].includes(host.protocol)) {
+			reportFailure({
+				code: "LIX_TELEMETRY_CONFIGURATION_INVALID",
+				destination: "gateway",
+			});
 			return new Response("Invalid telemetry destination", { status: 503 });
+		}
 		if (Number(request.headers.get("content-length")) > MAX_OTLP_BYTES)
 			throw new InputError(413, "OTLP payload too large");
 		const original = await readBounded(request.body, signal);
@@ -248,11 +291,22 @@ export async function handleOtlpTelemetry(
 			);
 		const results = await Promise.allSettled(deliveries);
 		let delivered = true;
-		for (const result of results) {
+		for (const [index, result] of results.entries()) {
+			const destination = index === 0 ? "traces" : "events";
 			if (result.status === "rejected") {
+				reportFailure({
+					code: "LIX_TELEMETRY_UPSTREAM_UNAVAILABLE",
+					destination,
+				});
 				delivered = false;
 				continue;
 			}
+			if (!result.value.ok)
+				reportFailure({
+					code: "LIX_TELEMETRY_UPSTREAM_REJECTED",
+					destination,
+					httpStatus: result.value.status,
+				});
 			delivered &&= result.value.ok;
 			void result.value.body?.cancel().catch(() => {});
 		}
@@ -263,6 +317,11 @@ export async function handleOtlpTelemetry(
 			headers: { "content-type": "application/x-protobuf" },
 		});
 	} catch (error) {
+		if (!(error instanceof InputError))
+			reportFailure({
+				code: "LIX_TELEMETRY_DELIVERY_FAILED",
+				destination: "gateway",
+			});
 		return new Response(
 			error instanceof InputError ? error.message : "Telemetry delivery failed",
 			{

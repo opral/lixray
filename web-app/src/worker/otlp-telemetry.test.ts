@@ -481,3 +481,33 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.toVersion, "85");
 	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
 });
+
+void test("delivery failures identify the failed destination without exporting private transport errors", async () => {
+	const failures: object[] = [];
+	const response = await handleOtlpTelemetry(request(encode([span()])), env, {
+		reportDeliveryFailure: (failure) => failures.push(failure),
+		fetch: (async (url) => {
+			const destination =
+				url instanceof Request ? url.url : url instanceof URL ? url.href : url;
+			if (destination.endsWith("/i/v1/traces"))
+				return new Response("private upstream body", { status: 429 });
+			throw new Error("private transport error with secret-token");
+		}) as typeof fetch,
+	});
+	assert.equal(response.status, 503);
+	assert.deepEqual(failures, [
+		{
+			code: "LIX_TELEMETRY_UPSTREAM_REJECTED",
+			destination: "traces",
+			httpStatus: 429,
+			source: "server",
+		},
+		{
+			code: "LIX_TELEMETRY_UPSTREAM_UNAVAILABLE",
+			destination: "events",
+			source: "server",
+		},
+	]);
+	assert.equal(JSON.stringify(failures).includes("private"), false);
+	assert.equal(JSON.stringify(failures).includes("secret-token"), false);
+});
