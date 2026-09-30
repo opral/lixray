@@ -131,7 +131,8 @@ function openDirFromView(
 
 function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 	void atelier.views
-		.open(LIXRAY_PEOPLE_EXTENSION_ID)
+		// Activated if open; otherwise beside Home, never in its place.
+		.open(LIXRAY_PEOPLE_EXTENSION_ID, { newTab: true })
 		.catch((error: unknown) => {
 			console.error("repository-home: unable to open the People tab", error);
 		});
@@ -139,16 +140,20 @@ function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 
 function openSettingsFromView(atelier: AtelierExtensionRuntime) {
 	void atelier.views
-		.open(LIXRAY_SETTINGS_EXTENSION_ID)
+		// Activated if open; otherwise beside Home, never in its place.
+		.open(LIXRAY_SETTINGS_EXTENSION_ID, { newTab: true })
 		.catch((error: unknown) => {
 			console.error("repository-home: unable to open the Settings tab", error);
 		});
 }
 
 function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
-	void atelier.views.open("sql_explorer").catch((error: unknown) => {
-		console.error("repository-home: unable to open SQL Explorer", error);
-	});
+	// Activated if open; otherwise beside Home, never in its place.
+	void atelier.views
+		.open("sql_explorer", { newTab: true })
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open SQL Explorer", error);
+		});
 }
 
 function openHistoryFromView(atelier: AtelierExtensionRuntime) {
