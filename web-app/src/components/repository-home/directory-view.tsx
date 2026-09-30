@@ -1992,7 +1992,8 @@ function ReadmePreview({
 						data-testid="home-readme-edit"
 						aria-label={`Edit ${fileName}`}
 						title={`Edit ${fileName}`}
-						onClick={(event) => onOpen(event)}
+						// On Home, the README opens beside the Library tab.
+						onClick={(event) => onOpen(event, { newTab: true })}
 						className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
 					>
 						<PencilLine aria-hidden="true" className="size-3.5" />
