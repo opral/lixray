@@ -36,6 +36,11 @@ const PAYLOAD_FAILURE_REASONS = [
 	"selected_change_payload_unavailable",
 	"exact_owner_point_read_budget_exhausted",
 ] as const;
+const PAYLOAD_PHASES = ["pre_request_catalog"] as const;
+const PAYLOAD_OPERATIONS = [
+	"registered_schema_identity_scan",
+	"registered_schema_snapshot_load",
+] as const;
 const EXACT_OWNER_POINT_READ_BUDGET = 65_536;
 const MIGRATION_MISSING_FIELDS = [
 	"version",
@@ -178,6 +183,20 @@ export function repositoryOpenDiagnostics(
 		)
 	)
 		result.payloadFailureReason = fields.payloadFailureReason;
+	if (
+		typeof fields.payloadPhase === "string" &&
+		PAYLOAD_PHASES.includes(
+			fields.payloadPhase as (typeof PAYLOAD_PHASES)[number],
+		)
+	)
+		result.payloadPhase = fields.payloadPhase;
+	if (
+		typeof fields.payloadOperation === "string" &&
+		PAYLOAD_OPERATIONS.includes(
+			fields.payloadOperation as (typeof PAYLOAD_OPERATIONS)[number],
+		)
+	)
+		result.payloadOperation = fields.payloadOperation;
 	if (
 		fields.payloadFailureReason === "exact_owner_point_read_budget_exhausted" &&
 		parseBoundedPayloadCount(

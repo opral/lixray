@@ -55,6 +55,8 @@ export function withSpan<T>(
 				["admissionRetryExhausted", "lix.recovery.retry_exhausted"],
 				["recoveryDeadlineExceeded", "lix.recovery.deadline_exceeded"],
 				["payloadFailureReason", "lix.payload.failure_reason"],
+				["payloadPhase", "lix.payload.phase"],
+				["payloadOperation", "lix.payload.operation"],
 				["attempted", "lix.payload.attempted"],
 				["budget", "lix.payload.budget"],
 				["payloadPhysicalStatus", "lix.payload.physical_status"],

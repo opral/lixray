@@ -70,6 +70,45 @@ void test("payload provenance diagnostics accept only bounded structural states"
 	);
 });
 
+void test("pre-request catalog operations accept only fixed phase and operation values", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadPhase: "pre_request_catalog",
+				payloadOperation: "registered_schema_identity_scan",
+				payloadFailureReason: "selected_change_payload_unavailable",
+				private: "document bytes",
+			},
+		}),
+		{
+			payloadFailureReason: "selected_change_payload_unavailable",
+			payloadPhase: "pre_request_catalog",
+			payloadOperation: "registered_schema_identity_scan",
+		},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadPhase: "private phase",
+				payloadOperation: "private operation",
+			},
+		}),
+		{},
+	);
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				payloadPhase: "pre_request_catalog",
+				payloadOperation: "registered_schema_snapshot_load",
+			},
+		}),
+		{
+			payloadPhase: "pre_request_catalog",
+			payloadOperation: "registered_schema_snapshot_load",
+		},
+	);
+});
+
 void test("opening diagnostics retain coordinates and exclude arbitrary private data", () => {
 	const id = "11111111-1111-4111-8111-111111111111";
 	assert.deepEqual(

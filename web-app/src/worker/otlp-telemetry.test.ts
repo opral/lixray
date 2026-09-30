@@ -646,6 +646,16 @@ void test("browser status-only engine failures use browser source and preserve r
 												},
 											},
 											{
+												key: "lix.payload.phase",
+												value: { stringValue: "pre_request_catalog" },
+											},
+											{
+												key: "lix.payload.operation",
+												value: {
+													stringValue: "registered_schema_identity_scan",
+												},
+											},
+											{
 												key: "lix.payload.change_id",
 												value: {
 													stringValue: "11111111-1111-4111-8111-111111111111",
@@ -713,6 +723,8 @@ void test("browser status-only engine failures use browser source and preserve r
 		props.payloadFailureReason,
 		"selected_change_payload_unavailable",
 	);
+	assert.equal(props.payloadPhase, "pre_request_catalog");
+	assert.equal(props.payloadOperation, "registered_schema_identity_scan");
 	assert.equal(props.changeId, "11111111-1111-4111-8111-111111111111");
 	assert.equal(props.payloadSourceDeferred, true);
 	assert.equal(props.payloadPhysicalConflict, true);

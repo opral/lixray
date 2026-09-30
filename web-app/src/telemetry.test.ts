@@ -656,6 +656,32 @@ void test("payload failures spans preserve only bounded reason, status, and UUID
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|bytes/);
 });
 
+void test("catalog scan failures spans preserve only the fixed boundary markers", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private catalog detail"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					payloadPhase: "pre_request_catalog",
+					payloadOperation: "registered_schema_identity_scan",
+					private: "private schema bytes",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["lix.payload.phase"], "pre_request_catalog");
+	assert.equal(
+		finished.attributes["lix.payload.operation"],
+		"registered_schema_identity_scan",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(finished.attributes),
+		/private|schema bytes/,
+	);
+});
+
 void test("owner point-read budget failure spans preserve only bounded counts", async () => {
 	exporter.reset();
 	await assert.rejects(

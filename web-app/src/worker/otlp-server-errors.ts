@@ -148,6 +148,8 @@ export async function serverErrorEvents(
 		["lix.payload.standalone_status", "payloadStandaloneStatus"],
 		["lix.payload.physical_status", "payloadPhysicalStatus"],
 		["lix.payload.failure_reason", "payloadFailureReason"],
+		["lix.payload.phase", "payloadPhase"],
+		["lix.payload.operation", "payloadOperation"],
 		["lix.payload.attempted", "attempted"],
 		["lix.payload.budget", "budget"],
 		["lix.payload.change_id", "changeId"],

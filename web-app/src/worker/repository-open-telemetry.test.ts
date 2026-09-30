@@ -176,6 +176,35 @@ void test("first-party exception values preserve bounded owner point-read counts
 	assert.doesNotMatch(JSON.stringify(payload), /secret/);
 });
 
+void test("first-party exception values preserve fixed pre-request catalog operation", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadPhase: "pre_request_catalog",
+			payloadOperation: "registered_schema_snapshot_load",
+			privateValue: "secret schema bytes",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.payloadPhase, "pre_request_catalog");
+	assert.equal(properties.payloadOperation, "registered_schema_snapshot_load");
+	assert.doesNotMatch(JSON.stringify(payload), /secret|schema bytes/);
+});
+
 void test("diagnostics route authenticates, bounds input and checks repository access", async () => {
 	const { handleRequest } = await import("./handler.ts");
 	const request = (body: unknown) =>
