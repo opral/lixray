@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   server-image:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev-30-09')
     name: Lix server image
     permissions:
       contents: read
@@ -24,7 +24,7 @@ jobs:
     secrets: inherit
 
   sdk:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev-30-09')
     name: Vendored Lix SDK
     uses: ./.github/workflows/lix-sdk.yml
     secrets: inherit
@@ -56,9 +56,9 @@ jobs:
       web-image: ${{ needs.web-image.outputs.image }}
       server-image: ${{ needs.server-image.outputs.image }}
 
-  # Promote main only after the matching web/server images pass validation.
+  # Promote main, or an explicitly dispatched dev-30-09 release, after matching images pass validation.
   database:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev-30-09')
     name: Apply database migrations
     needs: validate
     runs-on: ubuntu-latest
@@ -113,7 +113,7 @@ jobs:
         run: supabase db push --linked --dry-run
 
   release:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/dev-30-09')
     name: Promote production release
     needs:
       - database
