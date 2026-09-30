@@ -970,7 +970,11 @@ export function RepositoryAtelier({
 				activeBranchId && defaultBranchId
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
-			const navigateEntity = async (kind: EntityKind, path: string) => {
+			const navigateEntity = async (
+				kind: EntityKind,
+				path: string,
+				options: { readonly removed?: boolean } = {},
+			) => {
 				const session = activeLixRef.current;
 				if (!session) return;
 				try {
@@ -990,13 +994,29 @@ export function RepositoryAtelier({
 						{ path },
 					);
 					if (
-						!entity ||
 						revision !== navigationRevision ||
 						session !== activeLixRef.current ||
 						startingPath !== pathnameRef.current ||
 						activeBranchId !== session.activeBranchSnapshot()
 					)
 						return;
+					if (!entity) {
+						if (!options.removed) return;
+						// Nothing at that path any more (a review's removed file): the
+						// URL falls back to the repository root rather than keep naming
+						// the tab that was in front before.
+						const rootPath = `/@${namespace}/${repositorySlug}`;
+						if (startingPath === rootPath) return;
+						shellNavigationRef.current = "view:home";
+						await navigationQueue.navigate(rootPath, () =>
+							navigate({
+								to: "/@{$namespace}/$repository",
+								params: { namespace, repository: repositorySlug },
+								replace: true,
+							}),
+						);
+						return;
+					}
 					const current = routeChildRef.current;
 					const routed =
 						current.kind === (kind === "file" ? "file" : "folder") &&
@@ -1222,7 +1242,10 @@ export function RepositoryAtelier({
 				void navigateEntity("directory", dirPath);
 				return;
 			}
-			if (event.filePath) void navigateEntity("file", event.filePath);
+			if (event.filePath)
+				void navigateEntity("file", event.filePath, {
+					removed: event.state?.afterExists === false,
+				});
 		};
 		return () => {
 			navigationRevision++;
