@@ -846,7 +846,7 @@ export function DirectoryView({
 												),
 											],
 										);
-										onOpenFile("/README.md", { newTab: false });
+										onOpenFile("/README.md", { newTab: true });
 									} catch (error) {
 										console.error(
 											"repository-home: unable to create README",
