@@ -7,6 +7,7 @@ import {
 } from "~/lib/shell-navigation-queue";
 import {
 	canonicalConversationSplat,
+	canonicalEntitySplat,
 	conversationRoutePath,
 	conversationUrlSplat,
 	entityUrlSplat,
@@ -972,12 +973,14 @@ export function RepositoryAtelier({
 					)
 						return;
 					const current = routeChildRef.current;
-					if (
+					const routed =
 						current.kind === (kind === "file" ? "file" : "folder") &&
-						parseEntityUrlSplat(current.splat)?.id === entity.id
-					)
-						return;
-					shellNavigationRef.current = `${kind}:${entity.id}`;
+						parseEntityUrlSplat(current.splat)?.id === entity.id;
+					// The same item under a new name (a page titled from untitled.md, a
+					// rename): the URL's slug follows, replaced rather than pushed, and
+					// with no marker — the route does not re-run for it.
+					if (routed && canonicalEntitySplat(current.splat, entity) === null) return;
+					if (!routed) shellNavigationRef.current = `${kind}:${entity.id}`;
 					await navigationQueue.navigate(
 						entityRoutePath(
 							namespace,
@@ -995,9 +998,10 @@ export function RepositoryAtelier({
 								params: {
 									namespace,
 									repository: repositorySlug,
-									_splat: entityUrlSplat(entity.id, entity.path),
+											_splat: entityUrlSplat(entity.id, entity.path),
 								},
 								search,
+								replace: routed,
 							}),
 					);
 				} catch (error) {
