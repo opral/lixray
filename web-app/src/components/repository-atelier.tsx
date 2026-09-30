@@ -924,6 +924,31 @@ export function RepositoryAtelier({
 				setReviewFocusActive(event.active && event.changedFileCount > 0);
 				return;
 			}
+			if (event.type === "main_area_emptied") {
+				// Nothing in front: the URL leaves the view that closed for the
+				// repository root, without reopening anything there. A navigation
+				// still resolving for the closed view is superseded.
+				navigationRevision += 1;
+				if (!routeSyncedRef.current) return;
+				const targetPath = `/@${namespace}/${repositorySlug}`;
+				void navigationQueue
+					.settle(() => pathnameRef.current)
+					.then((startingPath) => {
+						if (startingPath === null || pathnameRef.current === targetPath)
+							return;
+						shellNavigationRef.current = "view:home";
+						return navigationQueue.navigate(targetPath, () =>
+							navigate({
+								to: "/@{$namespace}/$repository",
+								params: { namespace, repository: repositorySlug },
+							}),
+						);
+					})
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
+				return;
+			}
 			if (event.type === "main_view_navigation_requested") {
 				routeLifecycle.current.cancel();
 				routeSyncedRef.current = true;
