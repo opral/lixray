@@ -6,6 +6,7 @@ export interface OtlpAttribute {
 	value?: {
 		stringValue?: string;
 		boolValue?: boolean;
+		doubleValue?: number;
 		intValue?: { toString(): string } | number;
 	};
 }

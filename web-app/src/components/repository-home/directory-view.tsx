@@ -525,17 +525,15 @@ export function DirectoryView({
 	);
 
 	useEffect(() => {
-		if (
-			!isActive ||
-			!isHome ||
-			tree === null ||
-			repositoryTreeMarkedRef.current
-		) {
+		if (!isActive || tree === null || repositoryTreeMarkedRef.current) {
 			return;
 		}
 		repositoryTreeMarkedRef.current = true;
-		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.treeReady);
-	}, [isActive, isHome, tree]);
+		markRepositoryOpenPerformance(
+			REPOSITORY_OPEN_MARKS.treeReady,
+			connection.lixId,
+		);
+	}, [isActive, tree, connection.lixId]);
 
 	useEffect(() => {
 		if (!isActive || readOnly || viewingHistory) return;

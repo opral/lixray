@@ -1,3 +1,8 @@
+import {
+	beginRepositoryOpenRoute,
+	retainRepositoryOpenRoute,
+	repositoryOpenTrace,
+} from "~/lib/repository-open-performance";
 import { entityFromRoute, resolvePublishedEntity } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import {
@@ -10,6 +15,7 @@ import {
 	type ReactNode,
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -68,6 +74,14 @@ interface RepositorySearch {
 export const Route = createFileRoute("/@{$namespace}/$repository")({
 	head: ({ params, match }) => repositoryHead(params, undefined, match.search),
 	ssr: false,
+	beforeLoad: ({ params, preload, abortController }) => {
+		if (!preload)
+			beginRepositoryOpenRoute(
+				params.namespace,
+				params.repository,
+				abortController.signal,
+			);
+	},
 	pendingComponent: RepositoryAccessPending,
 	validateSearch: (search: Record<string, unknown>): RepositorySearch => {
 		const dir = normalizeDirPath(search.dir);
@@ -157,6 +171,14 @@ function RepositoryRoutePage() {
 		!isDemoModeEnabled &&
 		inviteResolutionKey !== null &&
 		settledInviteKey !== inviteResolutionKey;
+
+	useLayoutEffect(
+		() => retainRepositoryOpenRoute(`${namespace}/${repositorySlug}`),
+		[namespace, repositorySlug],
+	);
+	useEffect(() => {
+		if (authIsLoaded) repositoryOpenTrace.phase("access");
+	}, [authIsLoaded, namespace, repositorySlug]);
 
 	// Public route resolution is intentionally independent of the repository
 	// directory. A reader may have no organization membership at all.
@@ -283,10 +305,14 @@ function RepositoryRoutePage() {
 						return;
 					}
 				}
+				if (nextResolved)
+					repositoryOpenTrace.phase("replica", nextResolved.repositoryId);
+				else repositoryOpenTrace.finish("failed");
 				setResolved(nextResolved);
 			})
 			.catch((caught: unknown) => {
 				if (disposed) return;
+				repositoryOpenTrace.finish("failed");
 				setResolveError(
 					caught instanceof Error
 						? caught.message

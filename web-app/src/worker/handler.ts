@@ -418,6 +418,8 @@ export async function handleRequest(
 		return handleOtlpTelemetry(request, env, {
 			fetch: options.fetch ?? fetch,
 			authenticatedBrowser: true,
+			browserRepositoryId: repositoryId,
+			browserUserId: auth.auth.userId,
 		});
 	}
 

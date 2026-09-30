@@ -1,3 +1,4 @@
+import { createRepositorySpanExporter } from "./lib/repository-span-exporter.ts";
 import { context, propagation, type Context } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { ZoneContextManager } from "@opentelemetry/context-zone";
@@ -42,19 +43,23 @@ export function installBrowserTelemetry(): void {
 	if (providerInstalled || isDemoModeEnabled || typeof window === "undefined")
 		return;
 	providerInstalled = true;
-	const exporter = new OTLPTraceExporter({
-		url: new URL(OTLP_PATH, window.location.origin).toString(),
-		headers: async (): Promise<Record<string, string>> => {
-			const token = await accessTokenProvider();
-			const repositoryId = repositoryIdProvider();
-			if (!token || !repositoryId) return {};
-			return {
-				Authorization: `Bearer ${token}`,
-				"x-lixray-repository-id": repositoryId,
-			};
-		},
-		timeoutMillis: 4_000,
-	});
+	const exporter = createRepositorySpanExporter(
+		(repositoryId) =>
+			new OTLPTraceExporter({
+				url: new URL(OTLP_PATH, window.location.origin).toString(),
+				headers: async (): Promise<Record<string, string>> => {
+					const token = await accessTokenProvider();
+
+					if (!token || !repositoryId) return {};
+					return {
+						Authorization: `Bearer ${token}`,
+						"x-lixray-repository-id": repositoryId,
+					};
+				},
+				timeoutMillis: 4_000,
+			}),
+		() => repositoryIdProvider(),
+	);
 	const provider = new WebTracerProvider({
 		resource: resourceFromAttributes({
 			"service.name": "lixray-web",

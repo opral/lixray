@@ -1,3 +1,4 @@
+import { PRODUCT_EVENTS } from "../lib/telemetry-events.ts";
 import protobuf from "protobufjs/light.js";
 import schema from "./otlp-traces.schema.json" with { type: "json" };
 import {
@@ -141,6 +142,125 @@ async function openedEvent(span: OtlpSpan) {
 	};
 }
 
+/** A queryable performance sample for each finished browser route attempt. */
+async function repositoryPerformanceEvent(
+	span: OtlpSpan,
+	repositoryId: string,
+	resourceAttributes: OtlpAttribute[] = [],
+	userId?: string,
+) {
+	if (
+		span.name !== "lixray.repository.open" ||
+		span.traceId?.length !== 16 ||
+		span.spanId?.length !== 8 ||
+		!span.traceId.some(Boolean) ||
+		!span.spanId.some(Boolean)
+	)
+		return null;
+	const fields = Object.fromEntries(
+		(span.attributes ?? []).flatMap(({ key, value }) =>
+			key && value
+				? [
+						[
+							key,
+							Object.hasOwn(value, "stringValue")
+								? value.stringValue
+								: Object.hasOwn(value, "doubleValue")
+									? value.doubleValue
+									: Object.hasOwn(value, "intValue")
+										? Number(value.intValue?.toString())
+										: undefined,
+						],
+					]
+				: [],
+		),
+	);
+	if (fields["lix.id"] !== repositoryId) return null;
+	const outcome = fields["lixray.repository.open.outcome"];
+	const duration = fields["lixray.repository.open.duration_ms"];
+	if (
+		!["usable", "failed", "cancelled", "superseded", "timeout"].includes(
+			String(outcome),
+		) ||
+		typeof duration !== "number" ||
+		!Number.isFinite(duration) ||
+		duration < 0 ||
+		duration > 86_400_000
+	)
+		return null;
+	let timestamp: string;
+	try {
+		timestamp = new Date(
+			Number(BigInt(span.startTimeUnixNano?.toString() ?? "0") / 1_000_000n),
+		).toISOString();
+	} catch {
+		return null;
+	}
+	const traceId = hex(span.traceId),
+		spanId = hex(span.spanId);
+	const digest = new Uint8Array(
+		await crypto.subtle.digest(
+			"SHA-256",
+			new TextEncoder().encode(`repository-performance:${traceId}:${spanId}`),
+		),
+	);
+	digest[6] = (digest[6]! & 0x0f) | 0x80;
+	digest[8] = (digest[8]! & 0x3f) | 0x80;
+	const id = hex(digest.subarray(0, 16));
+	const properties: Record<string, unknown> = {
+		repository_id: repositoryId,
+		lix_id: repositoryId,
+		duration_ms: duration,
+		outcome,
+		surface: "web",
+		source: "browser",
+		environment: "production",
+		$otel_trace_id: traceId,
+		$otel_span_id: spanId,
+		$process_person_profile: false,
+		$geoip_disable: true,
+	};
+	const revision = resourceAttributes.find(
+		({ key }) => key === "service.version",
+	)?.value?.stringValue;
+	if (revision && /^[a-f0-9]{40}$/.test(revision))
+		properties.client_release = revision;
+	const visibility = fields["lixray.repository.open.visibility"];
+	if (visibility === "foreground" || visibility === "background")
+		properties.visibility = visibility;
+	const entry = fields["lixray.repository.open.entry"];
+	if (["navigation", "client_navigation", "retry"].includes(String(entry)))
+		properties.entry = entry;
+	for (const phase of [
+		"bootstrap",
+		"auth",
+		"access",
+		"replica",
+		"engine",
+		"branch",
+		"session",
+		"atelier",
+		"initial_view",
+		"paint",
+	]) {
+		const value = fields[`lixray.repository.open.${phase}_ms`];
+		if (
+			typeof value === "number" &&
+			Number.isFinite(value) &&
+			value >= 0 &&
+			value <= duration
+		)
+			properties[`${phase}_ms`] = value;
+	}
+	return {
+		event: PRODUCT_EVENTS.repositoryOpenPerformance,
+		distinct_id: userId ?? `browser:${repositoryId}`,
+		timestamp,
+		uuid: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
+		properties,
+	};
+}
+
 export interface TelemetryDeliveryFailure {
 	code:
 		| "LIX_TELEMETRY_CONFIGURATION_INVALID"
@@ -159,6 +279,8 @@ export async function handleOtlpTelemetry(
 	dependencies: {
 		fetch?: typeof fetch;
 		authenticatedBrowser?: boolean;
+		browserRepositoryId?: string;
+		browserUserId?: string;
 		reportDeliveryFailure?: (failure: TelemetryDeliveryFailure) => void;
 	} = {},
 ): Promise<Response> {
@@ -263,7 +385,26 @@ export async function handleOtlpTelemetry(
 				),
 			)
 		).flat();
-		const events = [...opens, ...errors];
+		const performanceEvents =
+			dependencies.authenticatedBrowser && dependencies.browserRepositoryId
+				? (
+						await Promise.all(
+							(decoded.resourceSpans ?? []).flatMap((resource) =>
+								(resource.scopeSpans ?? []).flatMap((scope) =>
+									(scope.spans ?? []).map((span) =>
+										repositoryPerformanceEvent(
+											span,
+											dependencies.browserRepositoryId!,
+											resource.resource?.attributes,
+											dependencies.browserUserId,
+										),
+									),
+								),
+							),
+						)
+					).filter((event) => event !== null)
+				: [];
+		const events = [...opens, ...errors, ...performanceEvents];
 		const fetcher = dependencies.fetch ?? fetch;
 		const deliveries = [
 			fetcher(new URL("/i/v1/traces", host), {

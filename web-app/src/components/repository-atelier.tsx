@@ -1,3 +1,4 @@
+import { repositoryOpenTrace } from "~/lib/repository-open-performance";
 import { reportRepositoryOpenFailure } from "~/lib/repository-open-telemetry";
 import { createRepositoryRouteLifecycle } from "~/lib/repository-route-lifecycle";
 import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
@@ -1202,7 +1203,7 @@ export function RepositoryAtelier({
 			typeof createRepositoryDebugRemote
 		> | null = null;
 		const openController = new AbortController();
-		resetRepositoryOpenPerformance();
+		resetRepositoryOpenPerformance(repositoryId);
 		setShellProps(null);
 		setInstance(null);
 		setBranchSession(null);
@@ -1213,6 +1214,7 @@ export function RepositoryAtelier({
 		routeSyncedRef.current = false;
 
 		if (!atelierAccountId) {
+			repositoryOpenTrace.finish("failed");
 			setError("Unable to identify the current Atelier account.");
 			return;
 		}
@@ -1222,7 +1224,9 @@ export function RepositoryAtelier({
 				? parseEntityUrlSplat(routeChildRef.current.splat)?.id
 				: undefined;
 		if (openingFileId) fileOpenTrace.ensureRepositoryAttempt(openingFileId);
-		void fileOpenTrace.run(() =>
+		const runOpening = <T,>(operation: () => T): T =>
+			repositoryOpenTrace.run(() => fileOpenTrace.run(operation));
+		void runOpening(() =>
 			openRepositoryLixSession({
 				namespace,
 				repositorySlug: repositorySlug,
@@ -1245,7 +1249,10 @@ export function RepositoryAtelier({
 					}
 					activeLix = session;
 					setMigration(null);
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.sessionReady,
+						repositoryId,
+					);
 					activeLixRef.current = session;
 					if (import.meta.env.DEV) {
 						// Dev-only escape hatch: lets the console (and agents driving
@@ -1511,7 +1518,10 @@ export function RepositoryAtelier({
 						}),
 						onEvent: (event) => eventHandlerRef.current(event),
 					};
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.atelierReady,
+						repositoryId,
+					);
 					setShellProps(atelierProps);
 					const actualBranchId = session.activeBranchSnapshot();
 					if (
@@ -1527,6 +1537,7 @@ export function RepositoryAtelier({
 				})
 				.catch((caught: unknown) => {
 					if (!disposed) {
+						repositoryOpenTrace.finish("failed");
 						const failedFileId =
 							routeChildRef.current.kind === "file"
 								? parseEntityUrlSplat(routeChildRef.current.splat)?.id

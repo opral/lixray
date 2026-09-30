@@ -528,3 +528,74 @@ void test("delivery failures identify the failed destination without exporting p
 	assert.equal(JSON.stringify(failures).includes("private"), false);
 	assert.equal(JSON.stringify(failures).includes("secret-token"), false);
 });
+
+void test("browser route attempts become replay-stable performance samples with bounded phase timings", async () => {
+	const root = {
+		...span("lixray.repository.open"),
+		attributes: [
+			{ key: "lix.id", value: { stringValue: "repo-id" } },
+			{
+				key: "lixray.repository.open.outcome",
+				value: { stringValue: "usable" },
+			},
+			{
+				key: "lixray.repository.open.entry",
+				value: { stringValue: "navigation" },
+			},
+			{
+				key: "lixray.repository.open.visibility",
+				value: { stringValue: "foreground" },
+			},
+			{
+				key: "lixray.repository.open.duration_ms",
+				value: { doubleValue: 123.5 },
+			},
+			{ key: "lixray.repository.open.engine_ms", value: { doubleValue: 80.5 } },
+			{ key: "lixray.repository.open.paint_ms", value: { intValue: 32 } },
+			{ key: "private-url", value: { stringValue: "https://private/?secret" } },
+		],
+	};
+	const bytes = encode([
+		root,
+		{
+			...root,
+			attributes: [
+				...root.attributes,
+				{ key: "lix.id", value: { stringValue: "unrelated-id" } },
+			],
+		},
+	]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const req = new Request(input, init);
+		if (req.url.endsWith("/batch/"))
+			batches.push((await req.json()) as CaptureBatch);
+		return new Response(null, { status: 200 });
+	};
+	for (let replay = 0; replay < 2; replay++)
+		assert.equal(
+			(
+				await handleOtlpTelemetry(request(bytes), env, {
+					fetch: fetcher,
+					authenticatedBrowser: true,
+					browserRepositoryId: "repo-id",
+					browserUserId: "trusted-account",
+				})
+			).status,
+			200,
+		);
+	assert.equal(batches.length, 2);
+	assert.deepEqual(batches[0]!.batch, batches[1]!.batch);
+	assert.equal(batches[0]!.batch.length, 1);
+	const event = batches[0]!.batch[0]!;
+	assert.equal(event.event, "repository_open_performance");
+	assert.equal(event.distinct_id, "trusted-account");
+	assert.equal(event.properties.duration_ms, 123.5);
+	assert.equal(event.properties.engine_ms, 80.5);
+	assert.equal(event.properties.paint_ms, 32);
+	assert.equal(event.properties.outcome, "usable");
+	assert.equal(event.properties.entry, "navigation");
+	assert.equal(event.properties.visibility, "foreground");
+	assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+	assert.doesNotMatch(JSON.stringify(event), /private|secret|unrelated/);
+});

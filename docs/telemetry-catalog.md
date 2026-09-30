@@ -195,3 +195,40 @@ are retained in the first-party exception. Raw error messages, URL queries, page
 paths, local variables, tokens and repository contents are not accepted by this
 endpoint. Direct browser exception reporting remains available for stack traces.
 Failures to reach the gateway cannot be delivered through this path.
+
+## Repository route to usable performance
+
+`lixray.repository.open` measures entering a repository route until its initial
+view is usable. A cold browser load begins at Navigation Timing's start (including
+network and JS bootstrap); an in-app navigation starts at the repository route's
+`beforeLoad`. Hover preloads do not count as opens. Repository home and folder
+views finish after their initial directory data commits and two animation frames
+allow it to paint. File views use the existing document-loaded and initial-read
+readiness boundary before that paint fence. This measures initial usability,
+not background sync completion or all restored tabs.
+
+The root owns SDK/engine and request spans through explicit context propagation.
+Sequential child spans describe `bootstrap`, `auth`, `access`, `replica`, `engine`,
+`branch`, `session`, `atelier`, `initial_view`, and `paint`. Cached sessions may
+skip phases. Phase spans are emitted when the attempt ends, preserving pre-auth
+coordinates until repository access is known. React re-renders and branch
+normalization do not create duplicate opens; explicit retries get fresh attempts.
+
+The authorized browser OTLP gateway emits `repository_open_performance` alongside
+the raw trace. Each sample contains `duration_ms`, individual `<phase>_ms`,
+`outcome` (`usable`, `failed`, `cancelled`, `superseded`, `timeout`), `entry`
+(`navigation`, `client_navigation`, `retry`), `visibility` (`foreground` or
+`background`), the repository ID, release revision, and trace/span IDs. Identity
+comes from the gateway's authenticated account. The event UUID derives from the
+span identity, so delivery retries do not double-count an attempt. URL paths,
+repository names, credentials and document contents are not included.
+
+For loading latency, select `outcome=usable` and `visibility=foreground`, compare
+p50/p95 of `duration_ms`, and split by `entry` and `client_release`. Use the stage
+fields to identify the dominant delay, then open that sample's trace to inspect
+engine, SQL and client/server request spans. Count other outcomes separately;
+exclude background-tab delays from foreground latency. Successful samples cover
+authenticated, authorized repositories under the existing browser gateway
+policy; anonymous visitors and failures before repository access is established
+are not performance samples through this gateway. Existing first-party opening
+failure diagnostics remain independent.

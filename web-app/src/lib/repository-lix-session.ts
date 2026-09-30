@@ -136,7 +136,10 @@ export async function openRepositoryLixSession(
 				const replicaId = options.publicPath
 					? "remote-public-path"
 					: await repositoryBrowserReplicaId(options);
-				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
+				markRepositoryOpenPerformance(
+					REPOSITORY_OPEN_MARKS.replicaIdentified,
+					options.repositoryId,
+				);
 				try {
 					return await openRepositoryLixSessionWithRetry({
 						...options,
@@ -282,7 +285,10 @@ async function openRepositoryLixSessionOnce(
 		openingParent = undefined;
 		throw error;
 	});
-	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
+	markRepositoryOpenPerformance(
+		REPOSITORY_OPEN_MARKS.lixOpened,
+		options.repositoryId,
+	);
 
 	try {
 		const activeBranchId = await lix.activeBranchId();
@@ -327,7 +333,10 @@ async function openRepositoryLixSessionOnce(
 				// Offline or slow pending uploads must not hide the cached branch.
 				// An explicit later switch still reports its failure to the caller.
 				if (isErrorCode(error, "LIX_PARTIAL_BRANCH_SWITCH_PENDING")) {
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.branchReady,
+						options.repositoryId,
+					);
 					requestFailureReporting.enabled = true;
 					return session;
 				}
@@ -344,7 +353,10 @@ async function openRepositoryLixSessionOnce(
 				}
 			}
 		}
-		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
+		markRepositoryOpenPerformance(
+			REPOSITORY_OPEN_MARKS.branchReady,
+			options.repositoryId,
+		);
 		requestFailureReporting.enabled = true;
 		return session;
 	} catch (error) {
