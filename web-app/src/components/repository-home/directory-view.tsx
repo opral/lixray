@@ -1990,7 +1990,7 @@ function GettingStartedIllustration() {
  * home listing would be: connect an agent, start a document yourself, or
  * drop files anywhere to import.
  */
-function GettingStarted({
+export function GettingStarted({
 	connection,
 	hasAgentConnected,
 	onCreateFile,

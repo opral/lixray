@@ -15,10 +15,8 @@ import {
 	useRepositoryDefaultBranchId,
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
-import {
-	LIXRAY_HOME_EXTENSION_ID,
-	lixrayHomeDirState,
-} from "~/components/repository-home/host-extensions";
+import { ATELIER_BUILTIN_EXTENSION_IDS } from "@opral/atelier";
+import { libraryFolderState } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
 	head: ({ params, match }) => repositoryHead(params, "folder", match.search),
@@ -29,8 +27,8 @@ export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
 });
 
 /**
- * A folder URL drives the primary Files surface (flow A): the pinned Home
- * tab drills to the named folder in place. Folder tabs a user forked with
+ * A folder URL drives the primary surface: the pinned Library tab opens the
+ * named folder in Folders mode, in place. Folder tabs a user forked with
  * cmd-click keep their own state and claim the URL only while active.
  */
 function RepositoryFolderRoute() {
@@ -125,8 +123,8 @@ function RepositoryFolderRoute() {
 						}
 					}, 800);
 					atelier.views
-						.open(LIXRAY_HOME_EXTENSION_ID, {
-							state: lixrayHomeDirState(dirPath),
+						.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+							state: libraryFolderState(dirPath),
 							signal: controller.signal,
 						})
 						.then(() => {

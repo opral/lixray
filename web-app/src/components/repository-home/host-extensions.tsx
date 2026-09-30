@@ -2,6 +2,7 @@ import {
 	ATELIER_BUILTIN_EXTENSION_IDS,
 	useDefaultFolders,
 	type AtelierExtensionRegistration,
+	type AtelierLibraryOptions,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
 } from "@opral/atelier";
@@ -9,8 +10,12 @@ import { Folder, Home, Settings, Users } from "lucide-react";
 import { StrictMode } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
-import { DirectoryView } from "./directory-view";
-import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
+import { DirectoryView, GettingStarted } from "./directory-view";
+import {
+	canonicalDirectoryPath,
+	createRepositoryFile,
+	dirNameFromPath,
+} from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
 import { SettingsView, type RepositorySettingsApi } from "./settings-view";
 
@@ -18,6 +23,21 @@ export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
+
+/** The pinned home's reserved instance id (Atelier's `main-home`). */
+export const LIBRARY_HOME_INSTANCE = "main-home";
+
+/**
+ * Library state for a folder URL: Folders mode at that folder. Kind is left
+ * out on purpose, so the person's chosen kind survives a deep link; the
+ * Library renames its own tab to match.
+ */
+export const libraryFolderState = (dirPath: string) => {
+	const path = canonicalDirectoryPath(dirPath);
+	return path === "/"
+		? { dirPath: "/" }
+		: { mode: "folders", dirPath: path };
+};
 
 export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
@@ -309,3 +329,28 @@ export const createLixrayRepositoryExtensions = (
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
 ];
+
+/**
+ * What LixRay adds to Atelier's Library: an empty repository greets with the
+ * same onboarding the home always had — connect an agent, or start yourself.
+ */
+export const createLixrayLibraryOptions = (
+	connection: LixRepositoryConnection,
+	hasAgentConnected: AgentConnectionProbe,
+): AtelierLibraryOptions => ({
+	EmptyWorkspace: ({ atelier }) => (
+		<div className="grid flex-1 content-center py-6">
+			<GettingStarted
+				connection={connection}
+				hasAgentConnected={hasAgentConnected}
+				onCreateFile={(extension) => {
+					void createRepositoryFile(atelier.lix, "/", extension)
+						.then((path) => openFileFromView(atelier, path, { newTab: false, created: true }))
+						.catch((error: unknown) => {
+							console.error("repository-home: unable to create a file", error);
+						});
+				}}
+			/>
+		</div>
+	),
+});

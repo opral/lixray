@@ -18,6 +18,7 @@ import {
 import {
 	Atelier,
 	AtelierSkeleton,
+	ATELIER_BUILTIN_EXTENSION_IDS,
 	ATELIER_CONVERSATION_VIEW_ID,
 	selectConversationSummary,
 	type AtelierEvent,
@@ -107,8 +108,10 @@ import {
 	LIXRAY_HOME_EXTENSION_ID,
 	LIXRAY_PEOPLE_EXTENSION_ID,
 	LIXRAY_SETTINGS_EXTENSION_ID,
+	LIBRARY_HOME_INSTANCE,
+	createLixrayLibraryOptions,
 	createLixrayRepositoryExtensions,
-	lixrayHomeDirState,
+	libraryFolderState,
 } from "~/components/repository-home/host-extensions";
 import type {
 	TeamMember,
@@ -1080,15 +1083,24 @@ export function RepositoryAtelier({
 					);
 				return;
 			}
-			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
-				// Home is the primary Files surface (flow A): drilled into a
-				// folder it claims the /folder URL, at the root it claims the
-				// repository root URL.
+			if (
+				event.viewKind === LIXRAY_HOME_EXTENSION_ID ||
+				event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library
+			) {
+				// The Library (and the Home it replaced) is the primary surface:
+				// open on a folder in Folders it claims the /folder URL; anywhere
+				// else — a kind, the Grid — it claims the repository root URL.
 				const state = event.state;
-				const dirPath =
-					state &&
-					(state.kind === undefined || state.kind === EntryKind.Directory) &&
-					typeof state.path === "string"
+				const isLibrary =
+					event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library;
+				const dirPath = isLibrary
+					? state?.mode === "folders" && typeof state.dirPath === "string"
+						? state.dirPath
+						: "/"
+					: state &&
+						  (state.kind === undefined ||
+								state.kind === EntryKind.Directory) &&
+						  typeof state.path === "string"
 						? state.path
 						: "/";
 				const splat = dirPath.replace(/^\/+/, "");
@@ -1096,6 +1108,9 @@ export function RepositoryAtelier({
 					void navigateEntity("directory", dirPath);
 					return;
 				}
+				// A second Library tab at a kind stays URL-less, as a root folder
+				// tab did: the root URL means the pinned home is in front.
+				if (isLibrary && event.instanceId !== LIBRARY_HOME_INSTANCE) return;
 				const targetPath = `/@${namespace}/${repositorySlug}`;
 				if (pathnameRef.current === targetPath) return;
 				shellNavigationRef.current = "view:home";
@@ -1423,6 +1438,24 @@ export function RepositoryAtelier({
 					);
 					const getDebugRemoteLix = () => debugRemoteSession!.selectedBranch();
 					const getDebugRemoteSnapshot = () => debugRemoteSession!.snapshot();
+					const repositoryConnection = {
+						lixId: repositoryId,
+						namespace,
+						lixSlug: repositorySlug,
+						lixName: repositoryName,
+					};
+					const hasAgentConnected = async () => {
+						if (!client || !canEdit || !atelierAccountId) return false;
+						if (!(await getAccessToken())) return false;
+						const { data, error } = await client
+							.from("mcp_lix_connections")
+							.select("last_seen_at")
+							.eq("lix_id", repositoryId)
+							.order("last_seen_at", { ascending: false })
+							.limit(1);
+						if (error) throw error;
+						return data.length > 0;
+					};
 					const atelierProps: AtelierProps = {
 						// Atelier owns the shell, built-in extensions, and document views.
 						// Scope its shared Lix handle once so every initial SQL read joins
@@ -1469,24 +1502,8 @@ export function RepositoryAtelier({
 						},
 						branchSession: repositoryBranchSession,
 						extensions: createLixrayRepositoryExtensions(
-							{
-								lixId: repositoryId,
-								namespace,
-								lixSlug: repositorySlug,
-								lixName: repositoryName,
-							},
-							async () => {
-								if (!client || !canEdit || !atelierAccountId) return false;
-								if (!(await getAccessToken())) return false;
-								const { data, error } = await client
-									.from("mcp_lix_connections")
-									.select("last_seen_at")
-									.eq("lix_id", repositoryId)
-									.order("last_seen_at", { ascending: false })
-									.limit(1);
-								if (error) throw error;
-								return data.length > 0;
-							},
+							repositoryConnection,
+							hasAgentConnected,
 							canEdit ? stableTeamApiRef.current : null,
 							canEdit && !isDemoModeEnabled && client
 								? stableSettingsApiRef.current
@@ -1494,9 +1511,16 @@ export function RepositoryAtelier({
 							repositoryVisibility,
 						),
 						onReady: setInstance,
+						// The Library is home: its sidebar is the left panel, and its
+						// view is the pinned first tab.
 						mainArea: {
-							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
+							home: { extensionId: ATELIER_BUILTIN_EXTENSION_IDS.library },
 						},
+						defaultOpenPanels: ["left"],
+						library: createLixrayLibraryOptions(
+							repositoryConnection,
+							hasAgentConnected,
+						),
 						sessionStateStore: createRepositorySessionStateStore({
 							accountId: atelierAccountId,
 							repositoryId,
@@ -1649,13 +1673,13 @@ export function RepositoryAtelier({
 			markRouteSynced();
 			return;
 		}
-		// The state reset matters as much as the activation: Home may be
-		// drilled into a folder (flow A), and the root URL means the root
-		// listing.
+		// The state reset matters as much as the activation: the Library may
+		// be open on a folder, and the root URL means the top level. Its kind
+		// and mode stay what the person chose.
 		const controller = beginRouteNavigation();
 		void instance.views
-			.open(LIXRAY_HOME_EXTENSION_ID, {
-				state: lixrayHomeDirState("/"),
+			.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+				state: libraryFolderState("/"),
 				signal: controller.signal,
 			})
 			.catch((error: unknown) => {
