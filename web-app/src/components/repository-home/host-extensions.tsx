@@ -341,7 +341,7 @@ function openLibraryFolder(
 			state: libraryFolderState(dirPath),
 			...(options.newTab
 				? { newTab: true }
-				: { instanceId: LIBRARY_HOME_INSTANCE }),
+				: { instanceId: LIBRARY_HOME_INSTANCE, newTab: true }),
 		})
 		.catch((error: unknown) => {
 			console.error("repository-home: unable to open folder", error);

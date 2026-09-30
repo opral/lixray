@@ -1732,7 +1732,10 @@ export function RepositoryAtelier({
 		void instance.views
 			.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
 				state: libraryFolderState("/"),
+				// Activated if open; otherwise beside the tab in front, never in
+				// its place (Back to the root must not close a document).
 				instanceId: LIBRARY_HOME_INSTANCE,
+				newTab: true,
 				signal: controller.signal,
 			})
 			.catch((error: unknown) => {

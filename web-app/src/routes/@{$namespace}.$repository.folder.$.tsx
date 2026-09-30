@@ -128,7 +128,9 @@ function RepositoryFolderRoute() {
 					atelier.views
 						.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
 							state: libraryFolderState(dirPath),
+							// Activated if open; otherwise beside the tab in front.
 							instanceId: LIBRARY_HOME_INSTANCE,
+							newTab: true,
 							signal: controller.signal,
 						})
 						.then(() => {
