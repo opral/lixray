@@ -83,3 +83,11 @@ Keep automatic eviction disabled until ownership-aware collection can prove
 that each candidate is absent from pending commit, prepared-scope and recovery
 roots. An immutable storage key can still contain irreplaceable unpublished
 work; its mutability label alone is not permission to discard it.
+
+## User-confirmed cache reset
+
+The failed-opening screen offers **Reset OPFS cache** for a current client with a readable replica route. This bootstraps a fresh repository replica through the authenticated replacement endpoint; it preserves the original physical OPFS copy and the existing recovery catalog. Both provider ownership fences must be idle, and Retry is disabled during the transaction. Replacement intent is durable before authority retirement, and only the acknowledged canonical destination becomes active. No other repository or origin storage is cleared.
+
+The confirmation explains that unpublished changes will not appear automatically in the new copy. It offers a raw ZIP download and requires acknowledgement before continuing, including an explicit choice to proceed without a download. Failed or incompatible replicas cannot be promised a `.lixsnap` export; their raw physical archive preserves their journals without opening or migrating them. An open repository's storage-protection control still offers a native `.lixsnap` export.
+
+Protocol/admission mismatch screens offer a full-page **Reload LixRay** action instead of retrying within the old runtime, and hide reset until the client has been updated. This distinction matters: October 1 Safari failures ran September 30 release `a85ac4da`, while the current-release Chromium failure involved the separate v2 read-interest journal (#539).

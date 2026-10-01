@@ -97,12 +97,14 @@ import {
 	openRepositoryRemoteLix,
 	type RepositoryMigrationState,
 	type RepositoryLixSession,
+	resetRepositoryLocalReplica,
 } from "~/lib/repository-lix-session";
 import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
 import { createRepositoryDebugRemote } from "~/lib/repository-debug-remote";
 import {
 	formatRepositoryOpenError,
 	isRepositoryStorageInUse,
+	REPOSITORY_CLIENT_UPDATE_MESSAGE,
 } from "~/lib/repository-open-error";
 import { RepositoryOpenFailure } from "./repository-open-failure";
 import { ReplicaRecovery } from "./replica-recovery";
@@ -276,6 +278,7 @@ export function RepositoryAtelier({
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [storageBusy, setStorageBusy] = useState(false);
+	const [resetInProgress, setResetInProgress] = useState(false);
 	const [openAttempt, setOpenAttempt] = useState(0);
 	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
 		null,
@@ -1848,6 +1851,8 @@ export function RepositoryAtelier({
 				<RepositoryOpenFailure
 					message={error}
 					storageBusy={storageBusy}
+					resetInProgress={resetInProgress}
+					reloadRequired={error === REPOSITORY_CLIENT_UPDATE_MESSAGE}
 					onRetry={() => {
 						setError(null);
 						setStorageBusy(false);
@@ -1860,6 +1865,24 @@ export function RepositoryAtelier({
 					repositoryId={repositoryId}
 					authIdentity={atelierAccountId}
 					openingFailed={error !== null}
+					resetAvailable={error !== REPOSITORY_CLIENT_UPDATE_MESSAGE}
+					onReset={async (expectedStorageName, signal) => {
+						setResetInProgress(true);
+						try {
+							return await resetRepositoryLocalReplica({
+								repositoryId,
+								namespace,
+								repositorySlug,
+								authIdentity: atelierAccountId,
+								getAccessToken,
+								refreshAccessToken,
+								expectedStorageName,
+								signal,
+							});
+						} finally {
+							setResetInProgress(false);
+						}
+					}}
 				/>
 			) : null}
 		</div>

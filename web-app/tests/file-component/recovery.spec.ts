@@ -1,3 +1,4 @@
+import { unzipSync, strFromU8 } from "fflate";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
@@ -114,4 +115,66 @@ test("opening errors keep their diagnostic and can retry without lock recovery",
 	await page.getByRole("button", { name: "Retry", exact: true }).click();
 	await expect(page.getByRole("alert")).toHaveCount(0);
 	await expect(page.getByRole("status")).toHaveText("Opening repository");
+});
+
+test("reset requires acknowledgement and exports the incompatible local copy before recovery", async ({
+	page,
+}) => {
+	await page.goto("/recovery.html?mode=device-reset-error");
+	await page
+		.getByRole("button", { name: "Reset OPFS cache", exact: true })
+		.click();
+	const reset = page.getByRole("button", {
+		name: "Reset and reload from server",
+	});
+	await expect(reset).toBeDisabled();
+	await expect(page.getByText(/Changes that have not synced/)).toBeVisible();
+	const downloading = page.waitForEvent("download");
+	await page
+		.getByRole("button", { name: "Download local backup (ZIP)" })
+		.click();
+	const download = await downloading;
+	expect(download.suggestedFilename()).toBe("lix-saved-device-copy-1.zip");
+	const files = unzipSync(await readFile((await download.path())!));
+	expect(strFromU8(files["opfs/saved-data"]!)).toBe("unpublished fixture work");
+	await page.getByRole("checkbox").check();
+	await reset.click();
+	await expect(page.getByRole("alert")).toContainText("another tab owns");
+	await expect(page.getByText("Reset requests: 1")).toBeVisible();
+	await expect(
+		page.getByRole("button", { name: "Download local backup (ZIP)" }),
+	).toBeEnabled();
+});
+test("successful reset reloads into the new replica flow", async ({ page }) => {
+	await page.goto("/recovery.html?mode=device-reset-success");
+	await page
+		.getByRole("button", { name: "Reset OPFS cache", exact: true })
+		.click();
+	await page.getByRole("checkbox").check();
+	await page
+		.getByRole("button", { name: "Reset and reload from server" })
+		.click();
+	await expect(page.getByText("Fresh replica opening")).toBeVisible();
+});
+
+test("protocol update action reloads the document instead of retrying the old client", async ({
+	page,
+}) => {
+	await page.goto("/recovery.html?mode=client-update");
+	await expect(
+		page.getByRole("button", { name: "Retry", exact: true }),
+	).toHaveCount(0);
+	await page.getByRole("button", { name: "Reload LixRay" }).click();
+	await expect
+		.poll(() => page.evaluate(() => sessionStorage.getItem("fixture-loads")))
+		.toBe("2");
+});
+test("retry cannot interrupt an in-flight reset transaction", async ({
+	page,
+}) => {
+	await page.goto("/recovery.html?mode=reset-busy");
+	await expect(
+		page.getByRole("button", { name: "Reset in progress…" }),
+	).toBeDisabled();
+	await expect(page.getByRole("status")).toHaveCount(0);
 });

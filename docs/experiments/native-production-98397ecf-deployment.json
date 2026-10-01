@@ -1,0 +1,100 @@
+{
+  "deployment": {
+    "url": "https://lixray.com",
+    "appRevision": "4095463523cb68df76b203d225c88d278fc4b22b",
+    "engineRevision": "98397ecf730587829fa3c115f2d62300724424cb",
+    "productionRun": 36864074092,
+    "runAttempt": 2,
+    "conclusion": "success",
+    "completedAt": "2026-10-01T13:09:55Z",
+    "webImage": "ghcr.io/opral/lixray-web@sha256:ec08ae06c7fd3e1326a14ea59d2b23b8f419bbc1a338870c617a469f14cc8701",
+    "serverImage": "ghcr.io/opral/lixray-server@sha256:ba65673e4e0080b8f22269c8cc18a038097498f9fb8688f91025865905615b86",
+    "database": "Preview, apply and final confirmation: remote database up to date."
+  },
+  "liveCanary": {
+    "protocolVersion": 12,
+    "lix": "/lix/96a89619-6909-4bfb-a8f8-f6319c45e6c0",
+    "compatibility": {
+      "serverProtocolVersion": 12,
+      "syncProtocolVersion": 25,
+      "storageFormatVersion": 85
+    },
+    "durationMs": 2159,
+    "checkedAt": "2026-10-01T13:10:48.909Z"
+  },
+  "mcpHealth": {
+    "checkedAt": "2026-10-01T13:11:34.464Z",
+    "results": [
+      {
+        "lix_ref": "@opral/demo",
+        "durationMs": 8400,
+        "isError": false,
+        "columns": [
+          "healthy"
+        ],
+        "rows": [
+          [
+            {
+              "kind": "int",
+              "value": 1
+            }
+          ]
+        ]
+      },
+      {
+        "lix_ref": "@opral/monorepo",
+        "durationMs": 8977,
+        "isError": false,
+        "columns": [
+          "healthy"
+        ],
+        "rows": [
+          [
+            {
+              "kind": "int",
+              "value": 1
+            }
+          ]
+        ]
+      }
+    ]
+  },
+  "preflight": {
+    "status": 200,
+    "durationMs": 1162,
+    "protocolEpoch": 24,
+    "storageEpoch": 85,
+    "review": {
+      "reviewer": "GPT-6 Luna, xhigh",
+      "previousEngine": "7844dbb",
+      "candidateEngine": "98397ecf730587829fa3c115f2d62300724424cb",
+      "storageFormatBoth": 85,
+      "authorityMarkerBoth": "certified-authority-v6-replica-retirement",
+      "eligibilityFence": "authority_baseline_fence.rs byte-identical; current v6 requires no marker upgrade",
+      "transition": "sync24/25 clients fail closed on mismatch during non-atomic Railway service transition; no data reset"
+    }
+  },
+  "firstAttempt": {
+    "run": 36864074092,
+    "appRevision": "4095463523cb68df76b203d225c88d278fc4b22b",
+    "observations": [
+      {
+        "time": "2026-10-01T12:55:37.785Z",
+        "status": 503,
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/lix/v1/00000000-0000-4000-8000-000000000002/sync/push",
+        "requestBodyResourceSha1": "cdf9c4913125598359e1c10e42caa9be10dae1b6.json",
+        "responseBodyAvailable": false
+      },
+      {
+        "time": "2026-10-01T12:55:38.468Z",
+        "status": 200,
+        "method": "POST",
+        "url": "http://127.0.0.1:8790/lix/v1/00000000-0000-4000-8000-000000000002/sync/push",
+        "requestBodyResourceSha1": "cdf9c4913125598359e1c10e42caa9be10dae1b6.json",
+        "responseBodyAvailable": false
+      }
+    ],
+    "limitation": "503 response body unavailable; cannot infer a typed storage error. Exact request replay returned200 and all functional history checks passed; strict cleanup classifier failed."
+  }
+}

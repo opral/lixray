@@ -1,12 +1,17 @@
 export function RepositoryOpenFailure({
 	message,
 	storageBusy,
+	resetInProgress,
+	reloadRequired,
 	onRetry,
 }: {
 	message: string;
 	storageBusy: boolean;
+	resetInProgress: boolean;
+	reloadRequired: boolean;
 	onRetry: () => void;
 }) {
+	const onAction = reloadRequired ? () => window.location.reload() : onRetry;
 	return (
 		<main className="absolute inset-0 grid place-content-center bg-bg p-6 text-center text-fg-muted">
 			<div
@@ -26,9 +31,14 @@ export function RepositoryOpenFailure({
 				<button
 					type="button"
 					className="mt-2 rounded-md bg-fg px-4 py-2 text-bg focus-visible:outline-2 focus-visible:outline-offset-2"
-					onClick={onRetry}
+					disabled={resetInProgress}
+					onClick={onAction}
 				>
-					Retry
+					{resetInProgress
+						? "Reset in progress…"
+						: reloadRequired
+							? "Reload LixRay"
+							: "Retry"}
 				</button>
 			</div>
 		</main>

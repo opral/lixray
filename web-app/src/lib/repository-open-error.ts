@@ -1,3 +1,6 @@
+export const REPOSITORY_CLIENT_UPDATE_MESSAGE =
+	"LixRay has been updated. Save any unsaved edits, then reload this tab to continue syncing.";
+
 export function isRepositoryStorageInUse(caught: unknown): boolean {
 	return getErrorCode(caught) === "LIX_STORAGE_IN_USE";
 }
@@ -25,7 +28,7 @@ export function formatRepositoryOpenError(caught: unknown): string {
 		code === "LIX_SYNC_PROTOCOL_MISMATCH" ||
 		code === "LIX_PROTOCOL_VERSION_MISMATCH"
 	) {
-		return "LixRay has been updated. Save any unsaved edits, then reload this tab to continue syncing.";
+		return REPOSITORY_CLIENT_UPDATE_MESSAGE;
 	}
 
 	return message;

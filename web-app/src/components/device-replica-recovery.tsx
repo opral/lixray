@@ -23,14 +23,22 @@ export function DeviceReplicaRecovery({
 	repositoryId,
 	authIdentity,
 	openingFailed,
+	onReset,
+	resetAvailable = true,
 }: {
 	repositoryId: string;
 	authIdentity: string;
 	openingFailed: boolean;
+	resetAvailable?: boolean;
+	onReset: (storageName: string, signal: AbortSignal) => Promise<string>;
 }) {
 	const [names, setNames] = useState<string[]>([]);
 	const [error, setError] = useState<string | null>(null);
 	const [busy, setBusy] = useState<number | null>(null);
+	const [activeName, setActiveName] = useState<string | null>(null);
+	const [confirmReset, setConfirmReset] = useState(false);
+	const [acknowledged, setAcknowledged] = useState(false);
+	const resetController = useRef<AbortController | null>(null);
 	const generation = useRef(0);
 	useEffect(() => {
 		let active = true;
@@ -39,6 +47,9 @@ export function DeviceReplicaRecovery({
 		setError(null);
 		setNames([]);
 		setBusy(null);
+		setActiveName(null);
+		setConfirmReset(false);
+		setAcknowledged(false);
 		void repositoryBrowserReplicaId({ repositoryId, authIdentity })
 			.then(async (replicaId) => {
 				const original = repositoryOpfsCacheName({ repositoryId, replicaId });
@@ -52,7 +63,10 @@ export function DeviceReplicaRecovery({
 							...(openingFailed ? [current] : []),
 						]),
 					];
-					if (active) setNames(sources);
+					if (active) {
+						setNames(sources);
+						setActiveName(current);
+					}
 				} catch {
 					try {
 						const discovered =
@@ -88,6 +102,7 @@ export function DeviceReplicaRecovery({
 			});
 		return () => {
 			active = false;
+			resetController.current?.abort();
 			generation.current = current + 1;
 		};
 	}, [repositoryId, authIdentity, openingFailed]);
@@ -116,6 +131,29 @@ export function DeviceReplicaRecovery({
 			if (generation.current === current) setBusy(null);
 		}
 	}
+	async function reset() {
+		if (!activeName || !acknowledged || busy !== null) return;
+		const current = generation.current;
+		const controller = new AbortController();
+		resetController.current = controller;
+		setBusy(-1);
+		setError(null);
+		try {
+			await onReset(activeName, controller.signal);
+			if (generation.current === current) window.location.reload();
+		} catch (caught) {
+			if (generation.current === current)
+				setError(
+					caught instanceof Error
+						? caught.message
+						: "Reset failed. Your saved copy remains on this device.",
+				);
+		} finally {
+			if (generation.current === current) setBusy(null);
+			if (resetController.current === controller)
+				resetController.current = null;
+		}
+	}
 	return (
 		<aside
 			aria-label="Older device copies"
@@ -141,6 +179,69 @@ export function DeviceReplicaRecovery({
 						: `Download saved copy ${index + 1}`}
 				</button>
 			))}
+			{openingFailed && resetAvailable && activeName ? (
+				<section className="mt-4 grid gap-3 border-t border-border-subtle pt-3">
+					{confirmReset ? (
+						<>
+							<strong>Reset this repository’s OPFS cache?</strong>
+							<p>
+								The new local copy will load from the server. Changes that have
+								not synced will not appear automatically. Download a backup
+								before continuing. The old device copy will also remain
+								available for recovery.
+							</p>
+							<p>
+								A repository that cannot open can only provide a raw ZIP backup
+								here, not a .lixsnap snapshot.
+							</p>
+							<button
+								type="button"
+								disabled={busy !== null}
+								onClick={() =>
+									void download(activeName, names.indexOf(activeName))
+								}
+							>
+								Download local backup (ZIP)
+							</button>
+							<label className="flex gap-2">
+								<input
+									type="checkbox"
+									checked={acknowledged}
+									disabled={busy !== null}
+									onChange={(event) => setAcknowledged(event.target.checked)}
+								/>
+								I understand unsynced changes may require recovery. I have saved
+								a backup or choose to continue without one.
+							</label>
+							<button
+								type="button"
+								disabled={!acknowledged || busy !== null}
+								onClick={() => void reset()}
+							>
+								{busy === -1 ? "Resetting…" : "Reset and reload from server"}
+							</button>
+							<button
+								type="button"
+								disabled={busy !== null}
+								onClick={() => {
+									setConfirmReset(false);
+									setAcknowledged(false);
+								}}
+							>
+								Cancel
+							</button>
+						</>
+					) : (
+						<button
+							type="button"
+							disabled={busy !== null}
+							onClick={() => setConfirmReset(true)}
+						>
+							Reset OPFS cache
+						</button>
+					)}
+				</section>
+			) : null}
 			{error ? (
 				<p className="mt-2" role="alert">
 					{error}
