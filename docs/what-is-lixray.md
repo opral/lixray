@@ -1,7 +1,8 @@
 # What is LixRay?
 
-LixRay is a shared repository for you and your AI agents. It holds documents,
-files, and database tables in one place. Claude, ChatGPT, or any MCP agent
+LixRay is a shared repository for you and your AI agents, and the official
+host for [Lix](https://lix.dev/). It holds documents, files, and database
+tables in one place. Claude, ChatGPT, or any MCP agent
 reads and edits the same data, and every change is versioned.
 
 ```
@@ -16,8 +17,9 @@ you (browser)      agents (MCP)
 └──────────────────────────────┘
 ```
 
-LixRay runs on [Lix](https://github.com/opral/lix), an open-source (MIT)
-version control system for files and SQL tables.
+[Lix](https://lix.dev/) is an open-source (MIT) version control system for files
+and SQL tables. LixRay hosts Lix repositories and adds a web UI, sharing, and
+MCP access for agents.
 
 ## What you get
 

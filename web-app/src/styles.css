@@ -188,7 +188,9 @@
 	align-content: start;
 	gap: 24px;
 	width: 100%;
-	max-width: 1120px;
+	/* Matches SiteHeader `contained` (max-w-[1024px] px-6), so the logo lines up
+	   with the sidebar and the header actions with the article's right edge. */
+	max-width: 1024px;
 	margin-inline: auto;
 	padding: 32px 24px 120px;
 	flex: 1;
@@ -208,8 +210,7 @@
 }
 @media (min-width: 768px) {
 	.docs-layout {
-		grid-template-columns: 176px minmax(0, 720px);
-		justify-content: center;
+		grid-template-columns: 176px minmax(0, 1fr);
 		gap: 40px;
 		padding-top: 40px;
 	}
@@ -227,7 +228,7 @@
 }
 @media (min-width: 1024px) {
 	.docs-layout {
-		grid-template-columns: 200px minmax(0, 720px);
+		grid-template-columns: 200px minmax(0, 1fr);
 		gap: 56px;
 	}
 }
@@ -292,6 +293,40 @@
 .docs-article pre::-webkit-scrollbar-thumb {
 	background: var(--atelier-border);
 	border-radius: 3px;
+}
+/* Syntax colours for docs code blocks (src/lib/docs-highlight.ts emits
+   @lezer/highlight's classHighlighter tok-* classes). Atelier's syntax tokens,
+   so docs and editor code look the same. */
+.docs-article pre .tok-keyword,
+.docs-article pre .tok-operator {
+	color: var(--atelier-syntax-keyword);
+}
+.docs-article pre .tok-string,
+.docs-article pre .tok-string2 {
+	color: var(--atelier-syntax-string);
+}
+.docs-article pre .tok-number {
+	color: var(--atelier-syntax-number);
+}
+.docs-article pre .tok-bool,
+.docs-article pre .tok-atom,
+.docs-article pre .tok-literal {
+	color: var(--atelier-syntax-constant);
+}
+.docs-article pre .tok-comment {
+	color: var(--atelier-syntax-comment);
+	font-style: italic;
+}
+.docs-article pre .tok-typeName,
+.docs-article pre .tok-className,
+.docs-article pre .tok-namespace {
+	color: var(--atelier-syntax-type);
+}
+.docs-article pre .tok-propertyName {
+	color: var(--atelier-syntax-property);
+}
+.docs-article pre .tok-invalid {
+	color: var(--atelier-syntax-invalid);
 }
 .docs-article :not(pre) > code {
 	overflow-wrap: anywhere;

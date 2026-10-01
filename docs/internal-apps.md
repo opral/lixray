@@ -15,23 +15,23 @@ npm install @lix-js/sdk@0.16.0
 
 ## Connect to your repository
 
-[Create an access token](./access-tokens.md), then set `LIX_REPOSITORY_URL`
-and `LIX_ACCESS_TOKEN` in your Node.js environment. Open the hosted repository:
+[Create an access token](./access-tokens.md), then set `LIXRAY_REPOSITORY_URL`
+and `LIXRAY_ACCESS_TOKEN` in your Node.js environment. Open the hosted repository:
 
 ```javascript
 import { openLix } from "@lix-js/sdk";
 
 const lix = await openLix({
   server: {
-    url: process.env.LIX_REPOSITORY_URL,
+    url: process.env.LIXRAY_REPOSITORY_URL,
     headers: {
-      Authorization: `Bearer ${process.env.LIX_ACCESS_TOKEN}`,
+      Authorization: `Bearer ${process.env.LIXRAY_ACCESS_TOKEN}`,
     },
   },
 });
 ```
 
-`LIX_REPOSITORY_URL` is the SDK endpoint for your repository:
+`LIXRAY_REPOSITORY_URL` is the SDK endpoint for your repository:
 `https://lixray.com/lix/REPOSITORY_ID`. Use the repository ID, not its name or
 browser page URL. Keep the token in your server environment, outside browser code.
 

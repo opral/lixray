@@ -21,7 +21,7 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 
 	return (
 		<div className="flex min-h-screen flex-col bg-bg font-sans text-fg antialiased">
-			<SiteHeader sticky />
+			<SiteHeader sticky contained />
 
 			<div className="docs-layout">
 				<details

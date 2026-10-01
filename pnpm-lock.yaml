@@ -334,6 +334,18 @@ importers:
 
   web-app:
     dependencies:
+      '@codemirror/lang-sql':
+        specifier: 6.10.0
+        version: 6.10.0
+      '@lezer/highlight':
+        specifier: 1.2.3
+        version: 1.2.3
+      '@lezer/javascript':
+        specifier: 1.5.4
+        version: 1.5.4
+      '@lezer/json':
+        specifier: 1.0.3
+        version: 1.0.3
       '@lix-js/sdk':
         specifier: link:../vendor/lix/packages/js-sdk
         version: link:../vendor/lix/packages/js-sdk

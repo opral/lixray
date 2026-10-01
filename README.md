@@ -4,6 +4,8 @@
 
 LixRay connects all your data in one place. Claude, ChatGPT, or any MCP agent reads and edits the same data, with full version control.
 
+LixRay is the official host for [Lix](https://lix.dev/).
+
 ## Why LixRay
 
 - **All data for agents in one place.** Documents, files, and database tables live in one repository.
@@ -58,7 +60,7 @@ const lix = await openLix({
     mode: "remote",
     url: `https://lixray.com/lix/${repositoryId}`,
     headers: async () => ({
-      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+      Authorization: `Bearer ${process.env.LIXRAY_ACCESS_TOKEN}`,
     }),
   },
 });
@@ -258,7 +260,7 @@ const lix = await openLix({
     mode: "remote", // default; opt into "partial_replica" with local storage
     url: `https://lixray.com/lix/${repositoryId}`,
     headers: async () => ({
-      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+      Authorization: `Bearer ${process.env.LIXRAY_ACCESS_TOKEN}`,
     }),
   },
 });
