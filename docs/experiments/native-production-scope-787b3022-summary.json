@@ -1,0 +1,266 @@
+{
+  "input": "native-production-scope-787b3022-profile.json",
+  "cases": 24,
+  "failures": 0,
+  "samplesPerWorkload": 6,
+  "bootstrapByteRange": [
+    2598,
+    2624
+  ],
+  "rows": [
+    {
+      "unrelatedFiles": 0,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 986.5499999998137,
+        "min": 975,
+        "max": 1119.5
+      },
+      "scopeMs": {
+        "median": 918.1499999994412,
+        "min": 917.2000000001863,
+        "max": 923.9000000003725
+      },
+      "readyMs": {
+        "median": 1904.3999999999069,
+        "min": 1893.0999999996275,
+        "max": 2036.800000000745
+      },
+      "navigationToReadyMs": {
+        "median": 1925.5801345,
+        "min": 1915.3329329999979,
+        "max": 2054.359209000002
+      },
+      "bootstrapBytes": {
+        "median": 2611,
+        "min": 2598,
+        "max": 2619
+      },
+      "scopeBytes": {
+        "median": 23071,
+        "min": 23053,
+        "max": 23083
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 17.149999999906868,
+        "min": 14.700000000186265,
+        "max": 76.5
+      },
+      "hotReadMs": {
+        "median": 3.7000000001862645,
+        "min": 3.2000000001862645,
+        "max": 21.699999999254942
+      },
+      "offlineReopenMs": {
+        "median": 516.8499999996275,
+        "min": 497.70000000018626,
+        "max": 530
+      },
+      "convergenceMs": {
+        "median": 522.6739339999986,
+        "min": 521.1043140000038,
+        "max": 530.0434499999992
+      }
+    },
+    {
+      "unrelatedFiles": 500,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 984.8499999996275,
+        "min": 976.2000000001863,
+        "max": 27735.299999999814
+      },
+      "scopeMs": {
+        "median": 979.8999999994412,
+        "min": 932.2999999998137,
+        "max": 1022.8000000007451
+      },
+      "readyMs": {
+        "median": 2005.0499999998137,
+        "min": 1908.5999999996275,
+        "max": 28685.599999999627
+      },
+      "navigationToReadyMs": {
+        "median": 2022.1318690000007,
+        "min": 1919.3473739999972,
+        "max": 28697.457144999993
+      },
+      "bootstrapBytes": {
+        "median": 2609.5,
+        "min": 2604,
+        "max": 2624
+      },
+      "scopeBytes": {
+        "median": 94897.5,
+        "min": 75909,
+        "max": 104439
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 19.5,
+        "min": 18.200000000186265,
+        "max": 77.6000000005588
+      },
+      "hotReadMs": {
+        "median": 3.7000000001862645,
+        "min": 3.099999999627471,
+        "max": 15.300000000745058
+      },
+      "offlineReopenMs": {
+        "median": 517.5,
+        "min": 512.8000000007451,
+        "max": 523.7000000001863
+      },
+      "convergenceMs": {
+        "median": 525.0666599999895,
+        "min": 521.8133360000065,
+        "max": 527.2030620000005
+      }
+    },
+    {
+      "unrelatedFiles": 5000,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 992.0000000004657,
+        "min": 979.2000000001863,
+        "max": 1107.8999999994412
+      },
+      "scopeMs": {
+        "median": 1279.7999999998137,
+        "min": 1273,
+        "max": 1364.5999999996275
+      },
+      "readyMs": {
+        "median": 2268.850000000093,
+        "min": 2255,
+        "max": 2413
+      },
+      "navigationToReadyMs": {
+        "median": 2290.412182999993,
+        "min": 2264.2573210000046,
+        "max": 2424.9343499999995
+      },
+      "bootstrapBytes": {
+        "median": 2611.5,
+        "min": 2599,
+        "max": 2617
+      },
+      "scopeBytes": {
+        "median": 141553,
+        "min": 120848,
+        "max": 172268
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 22.149999999906868,
+        "min": 19.799999999813735,
+        "max": 85.20000000018626
+      },
+      "hotReadMs": {
+        "median": 3.699999999254942,
+        "min": 3.199999999254942,
+        "max": 22.800000000745058
+      },
+      "offlineReopenMs": {
+        "median": 517.75,
+        "min": 509.8999999994412,
+        "max": 529.7999999998137
+      },
+      "convergenceMs": {
+        "median": 522.7969609999964,
+        "min": 521.6835420000134,
+        "max": 526.8513609999991
+      }
+    },
+    {
+      "unrelatedFiles": 0,
+      "unrelatedHistory": 500,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 989.1000000005588,
+        "min": 985.2000000001863,
+        "max": 1001.9000000003725
+      },
+      "scopeMs": {
+        "median": 1440.7000000001863,
+        "min": 1431,
+        "max": 1454.5
+      },
+      "readyMs": {
+        "median": 2431.2500000004657,
+        "min": 2424.7000000001863,
+        "max": 2442.4000000003725
+      },
+      "navigationToReadyMs": {
+        "median": 2445.796243999999,
+        "min": 2436.519736999995,
+        "max": 2466.059054999998
+      },
+      "bootstrapBytes": {
+        "median": 2612,
+        "min": 2604,
+        "max": 2615
+      },
+      "scopeBytes": {
+        "median": 30595,
+        "min": 30583,
+        "max": 31925
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 17.149999999906868,
+        "min": 15.100000000558794,
+        "max": 76.8999999994412
+      },
+      "hotReadMs": {
+        "median": 3.7000000001862645,
+        "min": 3.199999999254942,
+        "max": 15.200000000186265
+      },
+      "offlineReopenMs": {
+        "median": 517.9500000001863,
+        "min": 502.70000000018626,
+        "max": 525.5
+      },
+      "convergenceMs": {
+        "median": 521.7024009999968,
+        "min": 520.2023390000104,
+        "max": 525.4703749999971
+      }
+    }
+  ],
+  "productionScope": true,
+  "engineRevision": "787b30226c1c621b752334a1dbffe8993b752038",
+  "appRevision": "5844e3d413a9fb9dba65044858f7628cfd064c21",
+  "ciRunId": "36841323230",
+  "ciConclusion": "success",
+  "sdkWasmSha256": "9584c602738184dbbc8bb098f9e4de19438db49cfda42db00c0af01662e2eb15",
+  "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+  "authorityProfile": "release",
+  "publicationValidation": "native-production-scope-787b3022-publication-validation.json",
+  "runtimeContext": "native-production-scope-787b3022-runtime-context.json",
+  "qualificationScope": "prepared-document baseline only",
+  "productionScopeMeaning": "Harness mode flag; the measured runtime used loopback-only fixtures and does not establish full Library release qualification.",
+  "libraryReleaseQualification": "pending cold directory-registry fix and fresh profile with exact matching SDK/server artifacts",
+  "deployment": "none"
+}

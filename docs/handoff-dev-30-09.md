@@ -1,15 +1,28 @@
 # dev-30-09 verification and architecture handoff
 
-The native partial replica and working-set prototype completed the paired comparison on 2026-09-30. Both branches contain the verified fixes; Lixray pins the matching Lix commit. No production deployment was performed.
+The release target is **native browser Lix**, with repository admission separated from active-document preparation. The native engine owns SQL execution, dependency tracking, unpublished commits and their durable OPFS journal. It fetches missing authenticated inputs before declaring a document ready; prepared reads and edits then commit locally without waiting for publication. The application has no separate mutation outbox. The earlier application working-set A/B comparison below is historical evidence for a narrower editing surface.
 
-The architectural direction for the follow-up is **native browser Lix**. The earlier application working-set comparison is historical evidence for a narrow file surface, not a recommendation to build a second database or application mutation outbox. The [native working-scope prototype](native-working-scope-prototype.md) automatically prepares the active document before enabling local editing and profiles repository bootstrap independently of document preparation. Its source and remote-size/history evidence are separate from the preserved A/B run below.
+## Current release qualification
 
-The native follow-up completed on 2026-10-01: **48/48 native profile cases and 2/2 held-publication tests pass**. Across 0/500/5000 unrelated files and 500 unrelated history writes, bootstrap completes three finite responses totaling 2598–2621 bytes. Warm-authority bootstrap medians are 989–1004 ms; restarted-authority medians are 1056–1259 ms. Cold-server latency is not perfectly size-independent. Active-file preparation uses exact IDs and indexed native proof dependencies, with its bytes reported separately. Hot reads and offline edits/reopen require no remote data fetch; held publication proves local native commits do not await an acknowledgment. See the linked native prototype document for raw evidence, reproduction and limitations. Lix remains unchanged at the verified pin below.
+Production deployment is **pending**. The corrected engine candidate is `b87fe28c94f6d65d16771f009e3d162f0a99826b`; its [complete CI run 36852414209](https://github.com/opral/lix/actions/runs/36852414209) is running. Local qualification passed **4,959 all-simulation and HTTP tests, 10 doctests, and 30 real HTTP sync-mode E2E tests** (88 and 3 respective skips). The application includes the latest shared-WASM build and Library fixtures from main.
 
-- Lix: `38dd17445501e3293f1e626eec53dd94ee709460` on `dev-30-09`.
-- Lixray: use this document's containing commit on `dev-30-09`.
-- [Raw paired profile](experiments/architecture-verified-profile.json), [derived report](experiments/architecture-verified-summary.json), and [browser recovery evidence](experiments/working-set-verified-validation.json).
-- [Experiment contract and reproduction](architecture-working-set-prototype.md).
+The preceding candidate at Lixray `5844e3d413a9fb9dba65044858f7628cfd064c21`, pinned to Lix `787b30226c1c621b752334a1dbffe8993b752038`, passed the complete engine CI and the production document profile, but the real Library browser gates exposed a cold-directory dependency validation bug. [Production run 36843834144](https://github.com/opral/lixray/actions/runs/36843834144) stopped before database migrations or promotion. The corrected candidate must pass these gates before deployment; the earlier profile does not prove that the full Library works.
+
+- [Engine release PR](https://github.com/opral/lix/pull/1930) and [application release PR](https://github.com/opral/lixray/pull/536).
+- Engine `787b30226`: [full CI 36841323230](https://github.com/opral/lix/actions/runs/36841323230) passed 6033 Rust tests, 10 doctests, 260 E2E tests and 69 tooling tests; local all-simulations with HTTP passed 4957 tests. Skips are recorded in the corresponding CI logs.
+- [Matched production document profile](experiments/native-production-scope-787b3022-summary.md): 24/24 capabilities and 2/2 held-publication tests passed. Bootstrap body size was 2598–2624 bytes across 0/500/5000 unrelated files and 500 history writes, with workload medians of 985–992 ms. Selected-document preparation is measured separately and grows with proof/index and write-frontier dependencies.
+- The raw profile retains one 27.7-second browser-side bootstrap outlier. Its protocol responses were fast; its cause remains unproven. These medians are not a guarantee of constant startup wall time.
+- The cold-directory regression passed, including registry side-input proof and offline reopen. A separate browser reproduction confirmed that the old candidate fetches on the first read and edit after adopting an incoming remote update; native background current-scope preparation now addresses that gap. Before adopting a clean incoming generation, the engine prepares retained moving scopes and their write dependencies, with registry revision and durable-journal guards. Fixed historical scopes remain on demand. Local full verification passed; complete CI and matched browser profiling remain pending. Final full Library validation, matched-revision profiling and production promotion are still required.
+
+Replaceable cache inputs and irreplaceable local work have different ownership even when both live in native storage. Immutable keys identify content that can be verified and fetched again; they do not alone prove that all dependencies needed for a particular SQL operation are resident. Native read recipes supply that dependency boundary. Pending publication and format-conversion journals remain protected, and incompatible conversion recovery fails closed while preserving the source. General automatic cache eviction is disabled; unsupported cross-format semantic replay requires explicit recovery rather than dropping local work.
+
+## Historical prototype qualification
+
+The paired comparison and first native document prototype completed on 2026-09-30/2026-10-01 at Lix `38dd17445501e3293f1e626eec53dd94ee709460`. The historical native follow-up passed 48/48 profile cases and 2/2 held-publication tests, including warm and restarted authority runs. Their evidence remains separate from the current production candidate.
+
+- [Historical paired raw profile](experiments/architecture-verified-profile.json), [derived report](experiments/architecture-verified-summary.json), and [browser recovery evidence](experiments/working-set-verified-validation.json).
+- [Historical experiment contract and reproduction](architecture-working-set-prototype.md).
+- [Native working-scope design and profiles](native-working-scope-prototype.md).
 
 ## Resolved defects
 
@@ -23,7 +36,7 @@ A new native-worker regression test reads a file online, prepares offline editin
 
 The recipe-mask type correction from the previous handoff has compiled. Numeric OTLP `doubleValue` measurements are retained, and bounded categorical schema diagnostics are tested independently from numeric bounds. These checks do not establish deployed PostHog coverage.
 
-## Verification
+## Historical verification at `38dd174455`
 
 | Check                                                            | Result                                        |
 | ---------------------------------------------------------------- | --------------------------------------------- |
@@ -86,7 +99,7 @@ export RUST_MIN_STACK=16777216
 export CARGO_INCREMENTAL=0
 export CARGO_TARGET_DIR=/root/repos-iv/lix-dev-29-09/target
 export CARGO_BUILD_JOBS=8
-cargo nextest run -p lix --features all-simulations --no-fail-fast -j8
+cargo nextest run -p lix --features all-simulations --features server-protocol --no-fail-fast -j8
 cargo test -p lix --doc
 cargo nextest run -p lix-storage-slatedb
 cargo nextest run -p lix-storage-rocksdb
@@ -103,10 +116,10 @@ pnpm --filter @lix-js/sdk run build:browser
 pnpm --filter @lix-js/storage-opfs run build
 ```
 
-`build:browser` generates both normal and migration WASM artifacts required by a clean TypeScript build. This profile imports the normal browser artifact; it does not benchmark the migration bundle. Then follow the prototype's reproduction commands for Vite, recovery validation, the six-sample profile and report generator.
+`build:browser` generates the shared browser WASM used by both ordinary opening and maintenance, along with the TypeScript artifacts. The historical profiles at `38dd174` and `787b302` used the earlier separate runtime and migration bundles; their recorded binary identities remain unchanged. Then follow the prototype's reproduction commands for Vite, recovery validation, the six-sample profile and report generator.
 
 The disposable authority uses loopback `18309`, MinIO at `127.0.0.1:53623`, bucket `lixray`, and independent prefix `architecture-prototype-30-09-verified`. The preview uses port `8830`. The verified immutable running authority binary is `/tmp/lix-server-30-09-pinned`; its SHA-256 is recorded in the raw profile. Fixture authentication values are defined in the experiment's proxy and seed code. Runtime data and build logs under `/tmp` are machine-local; committed JSON evidence is the portable record. On this machine the final logs are `/tmp/lix-dev-30-09-final5-all-simulations.log`, `/tmp/lix-dev-30-09-final4-doctests.log`, `/tmp/lix-dev-30-09-final-{slatedb,rocksdb}.log`, `/tmp/lix-dev-30-09-final3-napi.log`, `/tmp/lix-dev-30-09-wasm-pinned.log`, `/tmp/lix-physical-clone-final-{demo,monorepo}.log`, `/tmp/lixray-30-09-recovery-verified.log`, and `/tmp/lixray-30-09-profile-verified.log`. Do not touch unrelated services or production storage.
 
 ## Remaining scope
 
-This development comparison is complete. Native browser Lix is the follow-up target. The schema-filtered native working-diff path can still scan unrelated identities within a requested schema before file/row filtering. These loaded-file scenarios do not establish arbitrary repository-wide offline readiness. Production rollout remains a separate decision. Native ownership-aware cache eviction, independent work recovery across incompatible formats, authentication lifecycle, multi-file/plugin preparation, and integration with the actual editing surface still need qualification. The historical application working-set draft is retained for comparison. Ordinary browser reload does not establish power-loss or storage-eviction durability. No production deployment or deployed PostHog end-to-end verification is included here.
+The historical A/B comparison is complete. Current production qualification is tracked at the top of this document. Prepared existing-file text/Markdown editing is the measured scope; it does not establish arbitrary repository-wide offline navigation or plugin readiness. General ownership-aware automatic cache eviction is disabled. Unsupported cross-format journal conversion preserves the source and requires explicit recovery. Ordinary OPFS close/reopen does not prove power-loss or browser storage-eviction durability. The schema-filtered native working-diff path can still inspect unrelated identities within a requested schema before file/row filtering. Deployed PostHog end-to-end verification is not part of these measurements.

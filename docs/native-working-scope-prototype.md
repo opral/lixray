@@ -2,6 +2,22 @@
 
 This prototype keeps the Rust Lix engine in the browser, with durable OPFS storage and native commits for offline work. Opening a document automatically loads its exact file content and prepares the native branch write frontier before enabling editing. Reads and saves then execute native SQL locally; native synchronization publishes committed work asynchronously. There is no application snapshot database, mutation replay layer, or separate application outbox.
 
+## 787b prepared-document profile baseline; Library qualification pending
+
+The 2026-10-01 prepared-document baseline used app revision `5844e3d413a9fb9dba65044858f7628cfd064c21`, vendored engine revision `787b30226c1c621b752334a1dbffe8993b752038`, and the matching SDK and server artifacts from successful full CI run `36841323230`. The server came from the CI release image; its extracted `lix-server` binary SHA-256 is `569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca`. The profile JSON records `productionScope: true` as the harness mode and carries source/build hashes. That flag does not mean the complete Library browser flow was qualified.
+
+This profile covers a deep-linked, already-selected plain-text document through preparation, offline reads and edits, close/reopen, and reconnect convergence. It does not exercise Library directory discovery or cold directory-registry recipes. Actual Library browser gates subsequently exposed a cold directory-registry recipe bug. Full Library release qualification is pending the guarded engine fix, a matching SDK/server pair from the exact passing CI run, and a fresh profile of those Library gates. The 787b results below remain a useful baseline for the narrower prepared-document flow; they are not evidence that the full Library release is qualified.
+
+All 24 prepared-document capability cases passed: six fresh Chromium contexts for each of 0, 500, and 5000 unrelated files, plus 500 unrelated history writes. Bootstrap used three measured responses totaling 2598–2624 bytes across the grid; workload medians ranged from 984.8 to 992.0 ms. The separate selected-file preparation medians ranged from 918.1 to 1440.7 ms, and all cases verified twenty local reads, three offline edits, close/reopen persistence, and authority convergence after reconnect. The 2/2 held-publication checks also passed with 63.7 ms and 70.6 ms durable edits while the actual publish request was blocked.
+
+One of six 500-file samples had a 27.7-second bootstrap and 28.7-second ready time. Its completed bootstrap responses took 83–85 ms and its selected-file responses took 82–92 ms; capability and convergence checks passed. This is a single browser-side open outlier in this sample set, and the raw report retains it. The authority, preview, and object store were all loopback-only fixtures. No production endpoint or deployment was used.
+
+- [24-case summary and observed outlier](experiments/native-production-scope-787b3022-summary.md)
+- [Raw profile JSON](experiments/native-production-scope-787b3022-profile.json)
+- [Held-publication validation](experiments/native-production-scope-787b3022-publication-validation.json)
+- [Runtime load context](experiments/native-production-scope-787b3022-runtime-context.json)
+- [CI artifact and build provenance](experiments/native-production-scope-787b3022-build-provenance.json)
+
 ## Opening and readiness
 
 The prototype measures two separate operations:
@@ -50,7 +66,7 @@ The profile records source and served bundle hashes, native SDK/authority identi
 
 For the Linux loopback cold-process run, create `/tmp/native-prototype-authority.pid` containing the PID of your own fixture authority. Add `PROTOTYPE_COLD_AUTHORITY=1` and `PROTOTYPE_AUTHORITY_PID_FILE=/tmp/native-prototype-authority.pid` to the full command. The helper verifies that `/proc/<pid>/exe` is the pinned authority binary before restarting it; its fixture S3 prefix is `native-prototype-01-10`. It must only be used with that disposable authority. Cold-process evidence is written separately as `profile-native-cold-authority.json`.
 
-## Evidence
+## Historical baseline evidence (engine `38dd174`)
 
 **48/48 profile cases passed** on 2026-10-01: six fresh browser/OPFS contexts per workload, with both a warm authority and a restarted authority process. Every case asserts the actual 80 ms delay on measured bootstrap/scope responses, twenty local reads, three offline native edits, offline close/reopen persistence, and authority convergence after reconnect. No successful offline protocol responses occurred. Native background publication attempts are permitted and recorded separately.
 

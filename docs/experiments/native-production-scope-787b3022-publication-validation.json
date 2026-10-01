@@ -1,0 +1,27 @@
+{
+  "scenario": "native local commit while publication is held",
+  "productionScope": true,
+  "results": [
+    {
+      "unrelatedFiles": 0,
+      "blockedPushes": 1,
+      "durableEditMs": 63.696689000000106,
+      "localReadPassedBeforeAck": true,
+      "authorityUnchangedBeforeRelease": true,
+      "convergedAfterRelease": true
+    },
+    {
+      "unrelatedFiles": 5000,
+      "blockedPushes": 1,
+      "durableEditMs": 70.56424800000059,
+      "localReadPassedBeforeAck": true,
+      "authorityUnchangedBeforeRelease": true,
+      "convergedAfterRelease": true
+    }
+  ],
+  "failures": 0,
+  "qualificationScope": "prepared-document baseline only",
+  "productionScopeMeaning": "Harness mode flag; the measured runtime used loopback-only fixtures and does not establish full Library release qualification.",
+  "libraryReleaseQualification": "pending cold directory-registry fix and fresh profile with exact matching SDK/server artifacts",
+  "deployment": "none"
+}
