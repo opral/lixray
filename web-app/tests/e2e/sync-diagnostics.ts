@@ -3,8 +3,60 @@ import type { BrowserContext, Page } from "@playwright/test";
 /** Read-only RPC probes on the existing session; no second engine or storage open. */
 export async function installSyncDiagnostics(context: BrowserContext) {
 	await context.addInitScript(() => {
-		if (typeof SharedWorker === "undefined") return;
-		const ports: MessagePort[] = [];
+		type DiagnosticPort = {
+			postMessage(message: unknown): void;
+			addEventListener(
+				type: "message",
+				listener: (event: MessageEvent) => void,
+			): void;
+			removeEventListener(
+				type: "message",
+				listener: (event: MessageEvent) => void,
+			): void;
+		};
+		const ports: DiagnosticPort[] = [];
+		// Current SDKs route the elected dedicated worker through BroadcastChannel.
+		// Reuse the application's client envelope for read-only probes.
+		const OriginalChannel = BroadcastChannel;
+		globalThis.BroadcastChannel = new Proxy(OriginalChannel, {
+			construct(target, args: ConstructorParameters<typeof BroadcastChannel>) {
+				const channel = new target(...args);
+				if (!args[0].startsWith("lix:repository-rpc:v1:")) return channel;
+				const listeners = new Set<(event: MessageEvent) => void>();
+				let envelope: { client: string; generation: string } | undefined;
+				const post = channel.postMessage.bind(channel);
+				channel.postMessage = (message) => {
+					if (message?.kind === "input")
+						envelope = {
+							client: message.client,
+							generation: message.generation,
+						};
+					post(message);
+				};
+				channel.addEventListener("message", (event) => {
+					if (
+						event.data?.kind !== "output" ||
+						event.data.client !== envelope?.client
+					)
+						return;
+					for (const listener of listeners)
+						listener(new MessageEvent("message", { data: event.data.message }));
+				});
+				ports.push({
+					postMessage: (message) => {
+						if (!envelope) throw new Error("Repository client is not ready");
+						post({ kind: "input", ...envelope, message });
+					},
+					addEventListener: (_type, listener) => {
+						listeners.add(listener);
+					},
+					removeEventListener: (_type, listener) => {
+						listeners.delete(listener);
+					},
+				});
+				return channel;
+			},
+		});
 		const lifecycle: unknown[] = [];
 		const recordLifecycle = (value: unknown) => {
 			lifecycle.push(value);
@@ -115,7 +167,10 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			},
 		});
 		let nextId = -1;
-		const request = (port: MessagePort, operation: Record<string, unknown>) =>
+		const request = (
+			port: DiagnosticPort,
+			operation: Record<string, unknown>,
+		) =>
 			new Promise<unknown>((resolve) => {
 				const id = nextId--;
 				const finish = (value: unknown) => {
@@ -146,7 +201,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		Object.assign(globalThis, {
 			__lixSyncFiles: async () => {
 				const port = ports.at(-1);
-				if (!port) throw new Error("No shared worker session");
+				if (!port) throw new Error("No repository worker session");
 				return request(port, {
 					kind: "execute",
 					sql: "SELECT id, path FROM lix_file",
@@ -155,7 +210,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			},
 			__lixSyncDiagnostic: async (path: string) => {
 				const port = ports.at(-1);
-				if (!port) return { error: "No shared worker session" };
+				if (!port) return { error: "No repository worker session" };
 				const [health, rows] = await Promise.all([
 					request(port, { kind: "syncHealth" }),
 					request(port, {
