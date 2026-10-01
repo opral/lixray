@@ -5,7 +5,7 @@ Use an account API token to connect Flashtype, scripts, or internal apps to Lixr
 1. Open your [account settings](https://lixray.com/settings), such as `/settings/@samuel`.
 2. Under **API tokens**, click **Generate token**.
 3. Copy the token. It is shown only once.
-4. Paste it into Flashtype's **Share** dialog, or save it in your app's server environment as `LIX_ACCESS_TOKEN`.
+4. Paste it into Flashtype's **Share** dialog, or save it in your app's server environment as `LIXRAY_ACCESS_TOKEN`.
 
 Each token has your account's permissions, including access to repositories you
 create later. Tokens expire after one year. Losing repository access also removes

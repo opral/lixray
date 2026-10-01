@@ -1,19 +1,35 @@
 # LixRay
 
-**A shared repository for your company's data and AI agents.**
+**Shared repository for you and your AI agents.**
 
-Files and database tables with version control. Every agent edit is a change you can review, merge, or roll back. Claude, ChatGPT, Gemini, and Codex connect over MCP.
+LixRay connects all your data in one place. Claude, ChatGPT, or any MCP agent reads and edits the same data, with full version control.
 
-## Why a company repository
+LixRay is the official host for [Lix](https://lix.dev/).
 
-One shared source of truth. AI agents, apps, and services read and write the same files and tables.
+## Why LixRay
 
-- **Change proposals.** Anyone, human or agent, can propose a change.
-- **Automations.** Checks and scripts run on every change.
-- **Contributors.** Services such as accounting write back.
-- **History.** See who changed what. Restore any version.
+- **All data for agents in one place.** Documents, files, and database tables live in one repository.
+- **No vendor lock-in.**
+  - Works with Claude, ChatGPT, Gemini, or any MCP agent.
+  - Built on [Lix](https://github.com/opral/lix), open-source (MIT) infrastructure. [Self-host it](./docs/self-host.md) if you want.
+  - Open formats first: Markdown, CSV, Excel, and plain SQL tables.
+- **Version control.**
+  - Change proposals: agents propose changes without breaking your work.
+  - History: agents learn from past changes, and you can trace who changed what.
+  - Automations (soon).
 
-Lix started at [inlang](https://inlang.com), where translation apps plug into the company's git repository. Lix adds what git was missing for company data: tables, any file format, and review that people who are not engineers can use.
+Connecting sources such as Google Drive, Notion, GitHub, and Granola is coming soon ([opral/lix#1934](https://github.com/opral/lix/issues/1934)).
+
+## Compared to
+
+- **ChatGPT Space** only works with ChatGPT.
+- **Anthropic Artifacts** only work with Claude.
+
+Notion, Google Drive, and GitHub are sources, not alternatives. LixRay connects to them.
+
+## Pricing
+
+Self-hosting is free. Individuals and small teams use LixRay for free. We plan to charge large enterprises. See [lixray.com/pricing](https://lixray.com/pricing).
 
 ## Connect an agent
 
@@ -44,7 +60,7 @@ const lix = await openLix({
     mode: "remote",
     url: `https://lixray.com/lix/${repositoryId}`,
     headers: async () => ({
-      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+      Authorization: `Bearer ${process.env.LIXRAY_ACCESS_TOKEN}`,
     }),
   },
 });
@@ -244,7 +260,7 @@ const lix = await openLix({
     mode: "remote", // default; opt into "partial_replica" with local storage
     url: `https://lixray.com/lix/${repositoryId}`,
     headers: async () => ({
-      Authorization: `Bearer ${process.env.LIXRAY_API_TOKEN}`,
+      Authorization: `Bearer ${process.env.LIXRAY_ACCESS_TOKEN}`,
     }),
   },
 });
@@ -274,8 +290,8 @@ The Streamable HTTP MCP endpoint is:
 https://lixray.com/mcp
 ```
 
-It exposes repository and branch discovery, file operations, and atomic raw Lix
-SQL execution. OAuth protected-resource metadata is served from
+It exposes repository discovery, branches, checkpoints, undo/redo, diff, and
+atomic SQL for reading and writing files and tables. OAuth protected-resource metadata is served from
 `/.well-known/oauth-protected-resource`; MCP access tokens are Supabase ES256
 tokens bound to `https://lixray.com`.
 

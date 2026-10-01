@@ -188,7 +188,9 @@
 	align-content: start;
 	gap: 24px;
 	width: 100%;
-	max-width: 1120px;
+	/* Matches SiteHeader `contained` (max-w-[1024px] px-6), so the logo lines up
+	   with the sidebar and the header actions with the article's right edge. */
+	max-width: 1024px;
 	margin-inline: auto;
 	padding: 32px 24px 120px;
 	flex: 1;
@@ -200,20 +202,34 @@
 .docs-content {
 	width: 100%;
 	max-width: 720px;
-	margin-inline: auto;
 }
-@media (min-width: 1024px) {
+/* Below 768px the sidebar collapses into a <details> menu above the article
+   (docs-page.tsx), so the article starts near the top on phones. */
+.docs-navigation {
+	display: none;
+}
+@media (min-width: 768px) {
 	.docs-layout {
-		grid-template-columns: 200px minmax(0, 1fr);
-		gap: 56px;
+		grid-template-columns: 176px minmax(0, 1fr);
+		gap: 40px;
 		padding-top: 40px;
 	}
 	.docs-navigation {
+		display: block;
 		position: sticky;
 		top: 110px;
 		align-self: start;
 		max-height: calc(100vh - 130px);
 		overflow-y: auto;
+	}
+	.docs-navigation-mobile {
+		display: none;
+	}
+}
+@media (min-width: 1024px) {
+	.docs-layout {
+		grid-template-columns: 200px minmax(0, 1fr);
+		gap: 56px;
 	}
 }
 
@@ -230,7 +246,7 @@
 .docs-article :is(h2, h3, h4):hover .anchor {
 	opacity: 1;
 }
-.docs-article pre .copy {
+.docs-article .copy {
 	position: absolute;
 	top: 10px;
 	right: 10px;
@@ -246,10 +262,76 @@
 	opacity: 0;
 	transition: opacity var(--atelier-duration-slow);
 }
-.docs-article pre:hover .copy {
+.docs-article pre:hover .copy,
+.docs-code:hover .copy,
+.docs-article .copy:focus-visible {
 	opacity: 1;
 }
-.docs-article pre .copy:hover {
+@media (hover: none) {
+	.docs-article .copy {
+		opacity: 1;
+	}
+}
+/* The copy button sits on a non-scrolling wrapper, so it stays put while a
+   wide code block scrolls sideways. */
+.docs-code {
+	position: relative;
+	margin-block: var(--atelier-doc-gap);
+}
+.docs-code > pre {
+	margin-block: 0;
+}
+/* macOS hides overlay scrollbars, so a clipped code block gives no hint that
+   it scrolls. Keep a thin, always-visible scrollbar. */
+.docs-article pre {
+	scrollbar-width: thin;
+	scrollbar-color: var(--atelier-fg-subtle) transparent;
+}
+.docs-article pre::-webkit-scrollbar {
+	height: 6px;
+}
+.docs-article pre::-webkit-scrollbar-thumb {
+	background: var(--atelier-border);
+	border-radius: 3px;
+}
+/* Syntax colours for docs code blocks (src/lib/docs-highlight.ts emits
+   @lezer/highlight's classHighlighter tok-* classes). Atelier's syntax tokens,
+   so docs and editor code look the same. */
+.docs-article pre .tok-keyword,
+.docs-article pre .tok-operator {
+	color: var(--atelier-syntax-keyword);
+}
+.docs-article pre .tok-string,
+.docs-article pre .tok-string2 {
+	color: var(--atelier-syntax-string);
+}
+.docs-article pre .tok-number {
+	color: var(--atelier-syntax-number);
+}
+.docs-article pre .tok-bool,
+.docs-article pre .tok-atom,
+.docs-article pre .tok-literal {
+	color: var(--atelier-syntax-constant);
+}
+.docs-article pre .tok-comment {
+	color: var(--atelier-syntax-comment);
+	font-style: italic;
+}
+.docs-article pre .tok-typeName,
+.docs-article pre .tok-className,
+.docs-article pre .tok-namespace {
+	color: var(--atelier-syntax-type);
+}
+.docs-article pre .tok-propertyName {
+	color: var(--atelier-syntax-property);
+}
+.docs-article pre .tok-invalid {
+	color: var(--atelier-syntax-invalid);
+}
+.docs-article :not(pre) > code {
+	overflow-wrap: anywhere;
+}
+.docs-article .copy:hover {
 	color: var(--atelier-fg);
 	background: var(--atelier-bg-active);
 }

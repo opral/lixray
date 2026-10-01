@@ -5,6 +5,8 @@
  * links. Relative *.md links resolve to their /docs/<slug> route.
  */
 
+import { highlightDocsCode } from "./docs-highlight.ts";
+
 interface DocsHeading {
 	level: number;
 	text: string;
@@ -70,7 +72,7 @@ export function renderDocsMarkdown(markdown: string): RenderedDocs {
 			}
 			i++;
 			out.push(
-				`<pre data-lang="${escapeHtml(lang)}"><code>${escapeHtml(buf.join("\n"))}</code></pre>`,
+				`<pre data-lang="${escapeHtml(lang)}"><code>${highlightDocsCode(buf.join("\n"), lang)}</code></pre>`,
 			);
 			continue;
 		}

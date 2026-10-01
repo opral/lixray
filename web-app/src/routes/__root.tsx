@@ -16,10 +16,9 @@ import pwaIcons from "../pwa-icons.json";
 import atelierCss from "@opral/atelier/style.css?url";
 import appCss from "../styles.css?url";
 
-const title =
-	"LixRay — A shared repository for your company’s data and AI agents.";
+const title = "LixRay — Shared repository for you and your AI agents.";
 const description =
-	"Files and database tables with version control. Every agent edit is a change you can review, merge, or roll back. Claude, ChatGPT, Gemini, and Codex connect over MCP.";
+	"LixRay connects all your data in one place. Claude, ChatGPT, or any MCP agent reads and edits the same data, with full version control.";
 // Absolute URL: link-preview crawlers do not resolve relative image paths.
 const ogImage = "https://lixray.com/og.png";
 
