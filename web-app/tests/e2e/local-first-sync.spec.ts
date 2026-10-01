@@ -1,3 +1,9 @@
+import {
+	showLibraryFiles,
+	libraryTab,
+	libraryRow,
+	libraryOpenButton,
+} from "./library-fixture";
 import { compatibility } from "@lix-js/sdk/compatibility";
 import { randomUUID } from "node:crypto";
 import {
@@ -143,14 +149,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 				checkpointIds.add(update.checkpointCommitId);
 		}
 	};
-	const grid = page.getByRole("grid", {
-		name: "Files and folders",
-		exact: true,
-	});
-	const row = (name: string) =>
-		grid
-			.getByRole("row")
-			.filter({ has: page.getByText(name, { exact: true }) });
+	const row = (name: string) => libraryOpenButton(page, name);
 	let primaryFailure = false;
 	try {
 		const directories = await execute(
@@ -268,10 +267,19 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			}
 		});
 		await page.goto(repository.path);
+		await showLibraryFiles(page);
 		// A cold browser worker compiles the SDK and downloads its initial replica.
 		// Match the startup budget used by the other repository-opening tests.
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${source}`,
+		);
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		expect(admissionRequests).toBe(2);
 		// First use may hydrate native inputs. Read the actual file and open
 		// working review online before asserting those workflows work offline.
@@ -309,8 +317,17 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			page.getByRole("button", { name: "Checkpoint", exact: true }),
 		).toHaveCount(0);
 		await page.goto(repository.path);
+		await showLibraryFiles(page);
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${source}`,
+		);
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		context.on("request", captureCheckpoint);
 		// Keep navigation/assets reachable so reload tests the persisted replica,
 		// while every protocol operation from browser workers is unavailable.
@@ -319,18 +336,30 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await expect(row(source)).toHaveCount(0, { timeout: 5_000 });
 		await row(target).click();
 		await expect(row(source)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${target}/${source}`,
+		);
 		await row(source).hover();
-		await row(source).locator("label").click();
+		await libraryRow(page, source).getByRole("checkbox").click();
 		await row(source).focus();
 		await page.keyboard.press("F2");
 		const renameInput = page.getByRole("dialog").getByRole("textbox");
 		await renameInput.fill(renamedSource);
 		await renameInput.press("Enter");
 		await expect(row(renamedSource)).toBeVisible();
+		await expect(libraryRow(page, renamedSource)).toHaveAttribute(
+			"data-path",
+			`/${target}/${renamedSource}`,
+		);
 		// Readable links retain the old path after a move, but resolve by ID and
 		// rewrite to the current path. Stored links remain unchanged.
 		await page.goto(displayDirectoryUrl);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await expect(page).toHaveURL(
 			new RegExp(
 				`/folder/${compactId(directoryId)}/${target}/${renamedSource}(?:\\?.*)?$`,
@@ -370,23 +399,44 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await page.reload();
 		// Request interception disables HTTP caching. CI must reload Vite's
 		// module graph and WASM before the persisted local replica can open.
-		// Wait for the restored file route before navigating Home; the route
+		// Wait for the restored file route before navigating Library; the route
 		// command must not race the folder listing we inspect next.
 		await expect(
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),
 		).toBeVisible({ timeout: 30_000 });
-		await page.getByRole("button", { name: "Home", exact: true }).click();
-		// Home restores its saved folder; opening the workspace does not reset
+		await libraryTab(page).click();
+		// Library restores its saved folder; opening the workspace does not reset
 		// tab state. The breadcrumb explicitly returns to the repository root.
 		const folderPath = page.getByRole("navigation", { name: "Folder path" });
-		await expect(folderPath).toContainText(renamedSource);
+		await expect(folderPath).toContainText(target);
+		await expect(
+			page.getByRole("heading", { name: renamedSource, exact: true }),
+		).toBeVisible();
 		await expect(row("note.txt")).toBeVisible();
-		await folderPath.getByRole("button", { name: "Home", exact: true }).click();
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
+		await folderPath
+			.getByRole("button", { name: "Files", exact: true })
+			.click();
 		await expect(row(target)).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		await row(target).click();
 		await expect(row(renamedSource)).toBeVisible();
+		await expect(libraryRow(page, renamedSource)).toHaveAttribute(
+			"data-path",
+			`/${target}/${renamedSource}`,
+		);
 		await row(renamedSource).click();
 		await expect(row("note.txt")).toBeVisible();
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await expect(
 			page.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
@@ -439,6 +489,10 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		);
 		await page.goto(renamedLinks.entities[0]!.url);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await page.goto(renamedLinks.entities[1]!.url);
 		await expect(
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),

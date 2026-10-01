@@ -68,9 +68,7 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 	const sdk = join(root, "vendor/lix/packages/js-sdk");
 	mkdirSync(join(sdk, "dist/wasm"), { recursive: true });
 	writeFileSync(join(sdk, "dist/index.js"), "export {};");
-	mkdirSync(join(sdk, "dist/migration-wasm"), { recursive: true });
 	writeFileSync(join(sdk, "dist/migration.js"), "export {};");
-	writeFileSync(join(sdk, "dist/migration-wasm/lix_js_sdk_bg.wasm"), "fixture");
 	writeFileSync(join(root, "vendor/lix/packages/storage-opfs/dist/migration.worker.js"), "export {};");
 	writeFileSync(join(sdk, "dist/wasm/lix_js_sdk_bg.wasm"), "fixture");
 	writeFileSync(
