@@ -3,6 +3,7 @@ export const REPOSITORY_OPEN_DIAGNOSTICS_PATH =
 	"/api/repository-open-diagnostics";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const MIGRATION_FAILURE_REASONS = [
+	"pending_conversion_journal",
 	"receipt_json_syntax",
 	"receipt_json_data",
 	"receipt_json_eof",
@@ -31,7 +32,10 @@ const MIGRATION_FAILURE_PATHS = [
 	"$.descriptor.globalBranch.createdAt",
 	"$.baselineLease",
 ] as const;
-const MIGRATION_PHASES = ["partial_receipt"] as const;
+const MIGRATION_PHASES = [
+	"partial_receipt",
+	"candidate_format_migration",
+] as const;
 const PAYLOAD_FAILURE_REASONS = [
 	"selected_change_payload_unavailable",
 	"exact_owner_point_read_budget_exhausted",
@@ -198,6 +202,7 @@ export function repositoryOpenDiagnostics(
 		"retryable",
 		"admissionRetryExhausted",
 		"recoveryDeadlineExceeded",
+		"sourcePreserved",
 		"payloadSourceDeferred",
 		"payloadPhysicalConflict",
 	]) {

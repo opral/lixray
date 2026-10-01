@@ -5,6 +5,16 @@ import {
 	isRepositoryStorageInUse,
 } from "./repository-open-error.ts";
 
+void test("a preserved conversion attempt explains recovery without suggesting storage reset", () => {
+	assert.equal(
+		formatRepositoryOpenError({
+			code: "LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED",
+			message: "pending journal",
+		}),
+		"Saved device changes need recovery before this copy can be upgraded. Download the saved device copy and contact support. Your original copy has been preserved; do not clear browser storage.",
+	);
+});
+
 void test("preserves the engine's unsupported repository protocol error", () => {
 	assert.equal(
 		formatRepositoryOpenError(

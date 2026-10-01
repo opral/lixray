@@ -16,6 +16,7 @@ export default tseslint.config(
 	{
 		ignores: [
 			"dist/**",
+			".architecture/**",
 			"node_modules/**",
 			"vendor/atelier/**",
 			".output/**",

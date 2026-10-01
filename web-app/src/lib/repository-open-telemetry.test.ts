@@ -6,6 +6,25 @@ import {
 	reportRepositoryOpenFailure,
 } from "./repository-open-telemetry.ts";
 
+void test("conversion recovery reports bounded preservation state without journal contents", () => {
+	assert.deepEqual(
+		repositoryOpenDiagnostics({
+			details: {
+				failureReason: "pending_conversion_journal",
+				migrationPhase: "candidate_format_migration",
+				sourcePreserved: true,
+				journal: "private pending work",
+				sourceBank: "private-bank",
+			},
+		}),
+		{
+			failureReason: "pending_conversion_journal",
+			migrationPhase: "candidate_format_migration",
+			sourcePreserved: true,
+		},
+	);
+});
+
 void test("payload provenance diagnostics accept only bounded structural states", () => {
 	assert.deepEqual(
 		repositoryOpenDiagnostics({

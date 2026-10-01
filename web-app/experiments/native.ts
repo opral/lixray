@@ -5,6 +5,7 @@ import {
 	type RemoteLixFetch,
 } from "@lix-js/sdk";
 import { OpfsStorage } from "@lix-js/storage-opfs";
+import { withNativeFileWorkingScope } from "../src/lib/native-file-working-scope.ts";
 
 // A document is prepared before becoming editable. Its pending work is stored
 // as native Lix commits, not an application snapshot or mutation outbox.
@@ -173,8 +174,10 @@ function open() {
 		const scopeStart = performance.now();
 		if ((await lix.activeBranchId()) !== branchId)
 			await lix.switchBranch({ branchId });
+		if (query.get("productionScope") === "1")
+			lix = withNativeFileWorkingScope(lix, { fileId });
 		content = await readContent();
-		await lix.prepareOfflineEditing();
+		if (query.get("productionScope") !== "1") await lix.prepareOfflineEditing();
 		timings.scopeMs = performance.now() - scopeStart;
 		timings.readyMs = performance.now() - start;
 		phase = "ready";

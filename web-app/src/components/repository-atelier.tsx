@@ -89,6 +89,7 @@ import {
 	createBrowserFileOpenTraceController,
 	type BrowserFileOpenTraceController,
 } from "~/lib/browser-file-open-trace";
+import { withNativeFileWorkingScope } from "~/lib/native-file-working-scope";
 import {
 	openRepositoryLixSession,
 	openRepositoryRemoteLix,
@@ -103,6 +104,8 @@ import {
 } from "~/lib/repository-open-error";
 import { RepositoryOpenFailure } from "./repository-open-failure";
 import { ReplicaRecovery } from "./replica-recovery";
+import { DeviceReplicaRecovery } from "./device-replica-recovery";
+import { DeviceStorageProtection } from "./device-storage-protection";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
@@ -1435,8 +1438,15 @@ export function RepositoryAtelier({
 						// Scope its shared Lix handle once so every initial SQL read joins
 						// the active file-open trace, regardless of which view starts it.
 						lix: fileOpenTrace.scopeRepositoryLix(session.lix),
-						scopeDocumentLix: (path, fileId, lix) =>
-							fileOpenTrace.scopeLix(path, fileId, lix),
+						scopeDocumentLix: (path, fileId, lix) => {
+							const scopedLix = fileOpenTrace.scopeLix(path, fileId, lix);
+							// Native writes are enabled only after the selected file and
+							// active branch frontier are locally prepared. Path-scoped
+							// public views use the remote read-only session above.
+							return isReadOnly
+								? scopedLix
+								: withNativeFileWorkingScope(scopedLix, { fileId });
+						},
 						onError: (error) =>
 							captureExceptionTelemetry(error, {
 								operation: "atelier_view_render",
@@ -1730,6 +1740,9 @@ export function RepositoryAtelier({
 											{shellProps.lix ? (
 												<ReplicaRecovery lix={shellProps.lix} />
 											) : null}
+											{shellProps.lix && canEdit && !publicPath ? (
+												<DeviceStorageProtection lix={shellProps.lix} />
+											) : null}
 										</RepositoryFileOpenTraceContext.Provider>
 									</RepositoryAtelierContext.Provider>
 								</RepositoryShellNavigationContext.Provider>
@@ -1758,6 +1771,13 @@ export function RepositoryAtelier({
 						setStorageBusy(false);
 						setOpenAttempt((attempt) => attempt + 1);
 					}}
+				/>
+			) : null}
+			{canEdit && !publicPath && atelierAccountId ? (
+				<DeviceReplicaRecovery
+					repositoryId={repositoryId}
+					authIdentity={atelierAccountId}
+					openingFailed={error !== null}
 				/>
 			) : null}
 		</div>

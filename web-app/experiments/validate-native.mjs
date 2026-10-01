@@ -30,6 +30,8 @@ try {
 				branchId: fixture.branchId,
 				fileId: fixture.fileId,
 			});
+			if (process.env.NATIVE_PRODUCTION_SCOPE === "1")
+				params.set("productionScope", "1");
 			await page.goto(`http://127.0.0.1:8830/native.html?${params}`);
 			await page.waitForFunction(
 				() => window.nativePrototype?.state().ready,
@@ -117,6 +119,7 @@ try {
 }
 const evidence = {
 	scenario: "native local commit while publication is held",
+	productionScope: process.env.NATIVE_PRODUCTION_SCOPE === "1",
 	results,
 	failures: 0,
 };

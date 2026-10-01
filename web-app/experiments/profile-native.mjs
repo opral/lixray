@@ -28,6 +28,7 @@ const samples = Number(process.env.PROTOTYPE_SAMPLES ?? 6);
 const historyWorkload = Number(process.env.PROTOTYPE_UNRELATED_HISTORY ?? 500);
 const smoke = process.env.PROTOTYPE_SMOKE === "1";
 const coldAuthority = process.env.PROTOTYPE_COLD_AUTHORITY === "1";
+const productionScope = process.env.NATIVE_PRODUCTION_SCOPE === "1";
 const workloads = smoke
 	? [{ bytes: 1024, unrelatedFiles: 0, unrelatedHistory: 0, delayMs }]
 	: [
@@ -55,6 +56,7 @@ assert.ok(
 );
 
 const sourceFiles = [
+	"web-app/src/lib/native-file-working-scope.ts",
 	"web-app/experiments/native.html",
 	"web-app/experiments/native.ts",
 	"web-app/experiments/profile-native.mjs",
@@ -206,6 +208,7 @@ function fixtureUrl(fixture) {
 		fileId: fixture.fileId,
 		delayMs: String(fixture.delayMs),
 	});
+	if (productionScope) params.set("productionScope", "1");
 	return `${previewOrigin}/native.html?${params}`;
 }
 
@@ -730,6 +733,7 @@ const provenance = {
 	samples,
 	smoke,
 	coldAuthority,
+	productionScope,
 	workloads,
 	source: await sourceProvenance(),
 	build: await buildProvenance(),
@@ -886,7 +890,7 @@ try {
 	}
 	await browser.close();
 	await mkdir(outputDir, { recursive: true });
-	const artifactStem = `${smoke ? "profile-native-smoke" : "profile-native"}${coldAuthority ? "-cold-authority" : ""}`;
+	const artifactStem = `${smoke ? "profile-native-smoke" : "profile-native"}${productionScope ? "-production-scope" : ""}${coldAuthority ? "-cold-authority" : ""}`;
 	await writeFile(
 		join(outputDir, `${artifactStem}.json`),
 		JSON.stringify(

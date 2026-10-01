@@ -10,8 +10,8 @@ import {
 	PrototypeWorkingSet,
 	IndexedDbPrototypeWorkingSetStore,
 	type PrototypeWorkingSetScope,
-} from "../src/lib/prototype-working-set.ts";
-import { createWorkingSetRemote } from "../src/lib/prototype-working-set-remote.ts";
+} from "./lib/prototype-working-set.ts";
+import { createWorkingSetRemote } from "./lib/prototype-working-set-remote.ts";
 import { repositoryOpenDiagnostics } from "../src/lib/repository-open-telemetry.ts";
 import protobuf from "protobufjs/light.js";
 import otlpSchema from "../src/worker/otlp-traces.schema.json" with { type: "json" };

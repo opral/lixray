@@ -5,6 +5,9 @@ export function isRepositoryStorageInUse(caught: unknown): boolean {
 export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
+	if (code === "LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED") {
+		return "Saved device changes need recovery before this copy can be upgraded. Download the saved device copy and contact support. Your original copy has been preserved; do not clear browser storage.";
+	}
 
 	if (
 		code === "LIX_ERROR_MIGRATION_FAILED" ||

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
 	activeReplicaStorage,
 	replaceRepositoryReplica,
+	retainedReplicaStorageNames,
 } from "./repository-replica-replacement.ts";
 
 void test("replacement retries lost replies and publishes one retained route across competing opens", async () => {
@@ -45,7 +46,8 @@ void test("replacement retries lost replies and publishes one retained route acr
 	try {
 		let replacement: string | undefined;
 		let requests = 0;
-		let loseReply = true;
+		let lostReplies = 2;
+		const requestedIds: string[] = [];
 		const options = {
 			source: "old",
 			failedName: "old",
@@ -65,9 +67,10 @@ void test("replacement retries lost replies and publishes one retained route acr
 						replacementId: string;
 					};
 					assert.equal(body.replicaId, "old");
+					requestedIds.push(body.replacementId);
 					replacement ??= body.replacementId;
-					if (loseReply) {
-						loseReply = false;
+					if (lostReplies > 0) {
+						lostReplies--;
 						throw new Error("lost acknowledgment");
 					}
 					return Response.json({ replicaId: replacement });
@@ -80,16 +83,26 @@ void test("replacement retries lost replies and publishes one retained route acr
 			/lost acknowledgment/,
 		);
 		assert.equal(activeReplicaStorage("old"), "old");
+		await assert.rejects(
+			replaceRepositoryReplica(options),
+			/lost acknowledgment/,
+		);
+		assert.equal(activeReplicaStorage("old"), "old");
 		const results = await Promise.all([
 			replaceRepositoryReplica(options),
 			replaceRepositoryReplica(options),
 		]);
 		assert.deepEqual(results, [replacement, replacement]);
-		assert.equal(requests, 2);
+		assert.equal(requests, 3);
+		assert.equal(new Set(requestedIds).size, 1);
 		assert.equal(activeReplicaStorage("old"), replacement);
+		assert.deepEqual(retainedReplicaStorageNames("old"), ["old"]);
 		assert.deepEqual(
-			(JSON.parse([...entries.values()][0]!) as { retainedSources: string[] })
-				.retainedSources,
+			(
+				JSON.parse(entries.get("lixray:replica-replacement:v1:old")!) as {
+					retainedSources: string[];
+				}
+			).retainedSources,
 			["old"],
 		);
 	} finally {
@@ -102,7 +115,9 @@ void test("replacement retries lost replies and publishes one retained route acr
 	}
 });
 
-async function withReplicaEnvironment(run: () => Promise<void>) {
+async function withReplicaEnvironment(
+	run: (entries: Map<string, string>) => Promise<void>,
+) {
 	const storage = Object.getOwnPropertyDescriptor(globalThis, "localStorage");
 	const navigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
 	const entries = new Map<string, string>();
@@ -126,7 +141,7 @@ async function withReplicaEnvironment(run: () => Promise<void>) {
 		},
 	});
 	try {
-		await run();
+		await run(entries);
 	} finally {
 		if (storage) Object.defineProperty(globalThis, "localStorage", storage);
 		else Reflect.deleteProperty(globalThis, "localStorage");
@@ -358,5 +373,168 @@ void test("retryable admission can finish after the initial backoff ramp", async
 		assert.equal(replacements, 1);
 		assert.equal(activeReplicaStorage("old"), result.value);
 		t.mock.timers.reset();
+	});
+});
+
+void test("a route-write failure retries with the durable replacement intent", async () => {
+	await withReplicaEnvironment(async (entries) => {
+		const browserStorage = globalThis.localStorage as Storage & {
+			setItem(key: string, value: string): void;
+		};
+		let rejectRouteWrite = true;
+		Object.defineProperty(browserStorage, "setItem", {
+			configurable: true,
+			value: (key: string, value: string) => {
+				if (rejectRouteWrite && !key.endsWith(":intent")) {
+					throw new Error("route storage is full");
+				}
+				entries.set(key, value);
+			},
+		});
+		const requestedIds: string[] = [];
+		let canonicalId: string | undefined;
+		const options = {
+			source: "old",
+			failedName: "old",
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch: async (_input: RequestInfo | URL, init?: RequestInit) => {
+				if (init?.method === "DELETE")
+					return new Response(null, { status: 204 });
+				if (init?.method === "POST") {
+					const body = JSON.parse(init.body as string) as {
+						replicaId: string;
+						replacementId: string;
+					};
+					assert.equal(body.replicaId, "old");
+					requestedIds.push(body.replacementId);
+					canonicalId ??= body.replacementId;
+					return Response.json({ replicaId: canonicalId });
+				}
+				return Response.json({ sessionId: "session" });
+			},
+		};
+
+		await assert.rejects(
+			replaceRepositoryReplica(options),
+			/route storage is full/,
+		);
+		assert.equal(activeReplicaStorage("old"), "old");
+		const intent = [...entries].find(([name]) => name.endsWith(":intent"));
+		assert.ok(intent);
+		assert.equal(
+			(JSON.parse(intent[1]) as { replacementId: string }).replacementId,
+			canonicalId,
+		);
+
+		rejectRouteWrite = false;
+		assert.equal(await replaceRepositoryReplica(options), canonicalId);
+		assert.deepEqual(requestedIds, [canonicalId, canonicalId]);
+		assert.equal(activeReplicaStorage("old"), canonicalId);
+	});
+});
+
+void test("a published route permits a new intent after a crash before stale-intent cleanup", async () => {
+	await withReplicaEnvironment(async () => {
+		const requestedIds: string[] = [];
+		const fetch = async (_input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === "DELETE") return new Response(null, { status: 204 });
+			if (init?.method === "POST") {
+				const body = JSON.parse(init.body as string) as {
+					replicaId: string;
+					replacementId: string;
+				};
+				requestedIds.push(body.replacementId);
+				return Response.json({ replicaId: body.replacementId });
+			}
+			return Response.json({ sessionId: "session" });
+		};
+		const first = await replaceRepositoryReplica({
+			source: "old",
+			failedName: "old",
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch,
+		});
+		assert.equal(activeReplicaStorage("old"), first);
+
+		const second = await replaceRepositoryReplica({
+			source: "old",
+			failedName: first,
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch,
+		});
+		assert.notEqual(second, first);
+		assert.notEqual(requestedIds[1], requestedIds[0]);
+		assert.deepEqual(retainedReplicaStorageNames("old"), ["old", first]);
+	});
+});
+
+void test("a source-scoped canonical server identity is adopted after a legacy lost acknowledgment", async () => {
+	await withReplicaEnvironment(async () => {
+		const canonicalId = "old:replacement:legacy-server-choice";
+		let requestedId = "";
+		const result = await replaceRepositoryReplica({
+			source: "old",
+			failedName: "old",
+			url: new URL("https://example.test/lix/repository"),
+			headers: async () => ({}),
+			fetch: async (_input, init) => {
+				if (init?.method === "DELETE")
+					return new Response(null, { status: 204 });
+				if (init?.method === "POST") {
+					requestedId = (
+						JSON.parse(init.body as string) as { replacementId: string }
+					).replacementId;
+					return Response.json({ replicaId: canonicalId });
+				}
+				return Response.json({ sessionId: "session" });
+			},
+		});
+		assert.notEqual(requestedId, canonicalId);
+		assert.equal(result, canonicalId);
+		assert.equal(activeReplicaStorage("old"), canonicalId);
+	});
+});
+
+void test("a foreign authority replacement identity never changes local routing", async () => {
+	await withReplicaEnvironment(async () => {
+		await assert.rejects(
+			replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				fetch: async (_input, init) => {
+					if (init?.method === "DELETE")
+						return new Response(null, { status: 204 });
+					if (init?.method === "POST")
+						return Response.json({
+							replicaId: "other:replacement:foreign",
+						});
+					return Response.json({ sessionId: "session" });
+				},
+			}),
+			/invalid replacement identity/,
+		);
+		assert.equal(activeReplicaStorage("old"), "old");
+		assert.deepEqual(retainedReplicaStorageNames("old"), []);
+	});
+});
+
+void test("retained replacement routes reject names outside their source namespace", async () => {
+	await withReplicaEnvironment(async (entries) => {
+		entries.set(
+			"lixray:replica-replacement:v1:old",
+			JSON.stringify({
+				activeName: "old:replacement:active",
+				retainedSources: ["other:replacement:foreign"],
+			}),
+		);
+		assert.throws(
+			() => retainedReplicaStorageNames("old"),
+			/Invalid replica replacement record/,
+		);
 	});
 });
