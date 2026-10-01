@@ -38,11 +38,11 @@ Exception events retain operation, release, trace/span correlation, bounded caus
 | Application CI check (before final binding-only JSON correction) | 56 analytics, 216 + 27 repository, 52 Railway, 443 worker/MCP; TypeScript and token checks passed |
 | Application lint, formatting and web build | Passed |
 | Actual PostHog Node-client receiver | 2 tests passed on the final pin; genuine JS and native SQL error through wrapped cause |
-| Actual PostHog browser/WASM wire qualification | Passed on the final pin; Chromium 1/1, 4.5s; actual WASM origin, code, safe frames and handled/uncaught/rejection events |
+| Actual PostHog browser/WASM wire qualification | Passed on the final pin; Chromium 1/1, 4.5s; actual WASM origin/code and handled/uncaught/rejection events |
 
 An incidental unfiltered Atelier run had one checkpoint layout failure among 2,928 passing tests. The same test passed in isolation; it is not claimed fixed.
 
-The Node receiver checks genuine callsites and native origin/cause metadata while excluding SQL, private values, credentials, the missing-table identifier and context. The browser fixture uses the installed PostHog SDK, opens real WASM Lix and queries an absent table; it does not assign an origin to that error. Outgoing payloads are captured locally so qualification does not create misleading production incidents.
+The Node receiver checks genuine callsites and native origin/cause metadata while excluding SQL, private values, credentials, the missing-table identifier and context. The browser fixture uses the installed PostHog SDK, opens real WASM Lix and queries an absent table; it does not assign an origin to that error. The actual worker-executed WASM error exposed `packages/lix/src/sql2/error.rs:66:16`; no safe application JavaScript frames were available for that specific error. The test preserves available genuine frames and separately requires the real Rust origin. JavaScript failure cases verify actual frames independently. Outgoing payloads are captured locally so qualification does not create misleading production incidents.
 
 ## Remaining incident uncertainty
 
