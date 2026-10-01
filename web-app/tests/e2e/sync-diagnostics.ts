@@ -144,6 +144,15 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				port.postMessage({ id, sessionId: 0, operation });
 			});
 		Object.assign(globalThis, {
+			__lixSyncFiles: async () => {
+				const port = ports.at(-1);
+				if (!port) throw new Error("No shared worker session");
+				return request(port, {
+					kind: "execute",
+					sql: "SELECT id, path FROM lix_file",
+					params: [],
+				});
+			},
 			__lixSyncDiagnostic: async (path: string) => {
 				const port = ports.at(-1);
 				if (!port) return { error: "No shared worker session" };
