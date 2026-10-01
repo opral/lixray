@@ -87,6 +87,240 @@ void test("cold route timing includes bootstrap and ends only after the initial 
 	);
 });
 
+void test("opening facts distinguish initialization, cached state, joined opens and session reuse", () => {
+	for (const state of [
+		"fresh",
+		"cached",
+		"joined_open",
+		"reused_session",
+		"remote",
+	] as const) {
+		const f = fixture();
+		f.controller.begin("repository");
+		const recorder = f.controller.recorder("repo-id")!;
+		if (state === "joined_open" || state === "reused_session")
+			recorder.reused(
+				state === "joined_open" ? "joined" : "reused",
+				"partial_replica",
+			);
+		else
+			recorder.opened(
+				{
+					format: 85,
+					initialized: state === "fresh",
+					migrations: [{ scope: "authority", fromFormat: 84, toFormat: 85 }],
+				},
+				state === "remote" ? "remote" : "partial_replica",
+			);
+		f.controller.finish("failed");
+		const root = f.exporter
+			.getFinishedSpans()
+			.find((s) => s.name === "lixray.repository.open")!;
+		assert.equal(
+			root.attributes["lixray.repository.open.replica_state"],
+			state,
+		);
+		if (state === "fresh" || state === "cached") {
+			assert.equal(
+				root.attributes["lixray.repository.open.initialized_this_open"],
+				state === "fresh",
+			);
+			assert.equal(
+				root.attributes["lixray.repository.open.authority_migration_count"],
+				1,
+			);
+			assert.equal(
+				root.attributes["lixray.repository.open.local_migration_count"],
+				0,
+			);
+		} else
+			assert.equal(
+				root.attributes["lixray.repository.open.initialized_this_open"],
+				undefined,
+			);
+	}
+});
+
+void test("same-route joined and reused handles cannot overwrite the native creator's classification", () => {
+	const f = fixture();
+	f.controller.begin("repository");
+	const creator = f.controller.recorder("repo-id")!;
+	const joiner = f.controller.recorder("repo-id")!;
+	creator.engineAttempt();
+	creator.opened(
+		{ format: 85, initialized: true, migrations: [] },
+		"partial_replica",
+	);
+	joiner.reused("joined", "partial_replica");
+	f.controller.recorder("repo-id")!.reused("reused", "partial_replica");
+	f.controller.finish("usable");
+	const root = f.exporter
+		.getFinishedSpans()
+		.find((s) => s.name === "lixray.repository.open")!;
+	assert.equal(
+		root.attributes["lixray.repository.open.replica_state"],
+		"fresh",
+	);
+	assert.equal(
+		root.attributes["lixray.repository.open.session_acquisition"],
+		"created",
+	);
+});
+
+void test("SDK host profile exports fixed timings and never charges historical work to reuse", () => {
+	const f = fixture();
+	f.controller.begin("first");
+	f.controller.recorder("repo-id")!.opened(
+		{
+			format: 85,
+			initialized: true,
+			migrations: [],
+			hostProfile: {
+				version: 1,
+				wasm: {
+					waitMs: 25,
+					realmReused: false,
+					source: "cache",
+					cacheStatus: "hit",
+					compileMs: 12,
+					initializeMs: 8,
+				},
+				componentCompiler: { importMs: 10, initializeMs: 1 },
+				provider: {
+					moduleImportMs: 2,
+					createMs: 5,
+					openMs: 4,
+					opfs: {
+						lockWaitMs: 1,
+						sqliteInitMs: 1,
+						poolOpenMs: 1,
+						schemaInitMs: 1,
+					},
+				},
+				nativeBindingOpenMs: 10,
+			},
+		},
+		"partial_replica",
+	);
+	f.controller.finish("usable");
+	f.controller.begin("next");
+	f.controller.recorder("repo-id")!.reused("reused", "partial_replica");
+	f.controller.finish("usable");
+	const roots = f.exporter
+		.getFinishedSpans()
+		.filter((s) => s.name === "lixray.repository.open");
+	assert.equal(
+		roots[0]!.attributes["lixray.repository.open.host.wasm.cache_status"],
+		"hit",
+	);
+	assert.equal(
+		roots[0]!.attributes["lixray.repository.open.host.wasm.compile_ms"],
+		12,
+	);
+	assert.equal(
+		roots[0]!.attributes[
+			"lixray.repository.open.host.provider.opfs.lock_wait_ms"
+		],
+		1,
+	);
+	assert.equal(
+		roots[1]!.attributes["lixray.repository.open.host.version"],
+		undefined,
+	);
+	assert.equal(
+		roots[1]!.attributes["lixray.repository.open.replica_state"],
+		"reused_session",
+	);
+});
+
+void test("native progress excludes retry waits and records repeated attempts and pending RPCs", () => {
+	const f = fixture();
+	f.controller.begin("repository");
+	const recorder = f.controller.recorder("repo-id")!;
+	recorder.engineAttempt();
+	recorder.progress({ phase: "inspecting", scope: "local", toFormat: 85 });
+	f.advance(20);
+	recorder.progress({ phase: "inspecting", scope: "local", toFormat: 85 });
+	f.advance(10);
+	recorder.retry(100);
+	f.advance(100);
+	recorder.engineAttempt();
+	recorder.progress({ phase: "inspecting", scope: "local", toFormat: 85 });
+	f.advance(15);
+	recorder.progress({ phase: "complete", scope: "local", toFormat: 85 });
+	const first = recorder.request();
+	f.advance(5);
+	const second = recorder.request();
+	f.advance(5);
+	first(503);
+	first(200);
+	recorder.request();
+	f.advance(5);
+	second(200);
+	f.controller.finish("failed");
+	const root = f.exporter
+		.getFinishedSpans()
+		.find((s) => s.name === "lixray.repository.open")!;
+	assert.equal(
+		root.attributes["lixray.repository.open.native.local.inspecting_ms"],
+		45,
+	);
+	assert.equal(root.attributes["lixray.repository.open.engine_attempts"], 2);
+	assert.equal(
+		root.attributes["lixray.repository.open.retry_backoff_scheduled_ms"],
+		100,
+	);
+	assert.equal(root.attributes["lixray.repository.open.rpc_count"], 3);
+	assert.equal(
+		root.attributes["lixray.repository.open.rpc_response_headers_pending"],
+		1,
+	);
+	assert.equal(root.attributes["lixray.repository.open.rpc_failed"], 1);
+	assert.equal(
+		root.attributes["lixray.repository.open.rpc_response_headers_total_ms"],
+		20,
+	);
+	assert.equal(
+		root.attributes["lixray.repository.open.rpc_response_headers_max_ms"],
+		10,
+	);
+});
+
+void test("stale and finished opening recorders cannot contaminate another attempt", () => {
+	const f = fixture();
+	f.controller.begin("first");
+	const stale = f.controller.recorder("repo-id")!;
+	const finished = stale.request();
+	f.controller.begin("second");
+	const current = f.controller.recorder("repo-id")!;
+	stale.opened(
+		{ format: 85, initialized: true, migrations: [] },
+		"partial_replica",
+	);
+	stale.replacement();
+	finished(503);
+	current.reused("reused", "partial_replica");
+	f.controller.finish("usable");
+	current.retry(100);
+	const roots = f.exporter
+		.getFinishedSpans()
+		.filter((s) => s.name === "lixray.repository.open");
+	assert.equal(
+		roots[0]!.attributes["lixray.repository.open.rpc_response_headers_pending"],
+		1,
+	);
+	assert.equal(
+		roots[1]!.attributes["lixray.repository.open.replica_state"],
+		"reused_session",
+	);
+	assert.equal(roots[1]!.attributes["lixray.repository.open.retry_count"], 0);
+	assert.equal(
+		roots[1]!.attributes["lixray.repository.open.replacement_count"],
+		0,
+	);
+	assert.equal(roots[1]!.attributes["lixray.repository.open.rpc_count"], 0);
+});
+
 void test("stale readiness and paint cannot complete another route; failures and retries remain samples", () => {
 	const f = fixture();
 	f.controller.begin("first");

@@ -4,16 +4,38 @@ import { beforeEach, mock, test } from "node:test";
 interface MockOpenOptions {
 	onProgress?: (progress: { phase: "migrating"; toFormat: number }) => void;
 	storage?: { options: { name: string } };
-	server: { mode: string; headers: () => Promise<Record<string, string>> };
+	server: {
+		mode: string;
+		headers: () => Promise<Record<string, string>>;
+		fetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+	};
 	telemetry?: { parentContext?: () => { traceparent: string } | undefined };
+}
+interface MockOpenReport {
+	format: number;
+	initialized: boolean;
+	migrations: Array<{
+		scope: "local" | "authority";
+		fromFormat: number;
+		toFormat: number;
+	}>;
+}
+interface RecorderEvent {
+	kind: string;
+	values: unknown[];
 }
 let activeTelemetryParent: { traceparent: string } | undefined;
 let observedOpeningParent: { traceparent: string } | undefined;
 const opens: MockOpenOptions[] = [];
+const recorderEvents: RecorderEvent[] = [];
 const routedNames: string[] = [];
 let replacementName: string | undefined;
 let replacements = 0;
 let failures: Error[] = [];
+let openReports: Array<MockOpenReport | undefined> = [];
+let issueOpenNetworkRequest = false;
+let openWait: Promise<void> | undefined;
+let finishOpenWait: (() => void) | undefined;
 let emitMigration = false;
 let branch = "main";
 let defaultBranch = "main";
@@ -32,13 +54,24 @@ mock.module("@lix-js/sdk", {
 		openLix: async (options: MockOpenOptions) => {
 			opens.push(options);
 			observedOpeningParent = options.telemetry?.parentContext?.();
+			if (issueOpenNetworkRequest) {
+				assert.ok(options.server.fetch);
+				const response = await options.server.fetch(
+					"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/sync/pull",
+					{ method: "GET" },
+				);
+				await response.body?.cancel();
+			}
+			if (openWait) await openWait;
 			if (emitMigration)
 				options.onProgress?.({ phase: "migrating", toFormat: 81 });
 			const failure = failures.shift();
 			if (failure) throw failure;
+			const report = openReports.shift();
 			const handle = (currentHandle = { closeCalls: 0 });
 			handles.push(handle);
 			return {
+				openReport: report,
 				activeBranchId: async () => branch,
 				execute: async () => ({ rows: [{ value: "selected-branch-shadow" }] }),
 				openAnotherSession: async ({ branchId }: { branchId: string }) => {
@@ -78,6 +111,53 @@ mock.module("@lix-js/sdk", {
 			};
 		},
 		networkFetch: globalThis.fetch.bind(globalThis),
+	},
+});
+mock.module("./repository-open-performance.ts", {
+	namedExports: {
+		REPOSITORY_OPEN_MARKS: {
+			start: "lixray:repository-open:start",
+			replicaIdentified: "lixray:repository-open:replica-identified",
+			lixOpened: "lixray:repository-open:lix-opened",
+			branchReady: "lixray:repository-open:branch-ready",
+			sessionReady: "lixray:repository-open:session-ready",
+			atelierReady: "lixray:repository-open:atelier-ready",
+			treeReady: "lixray:repository-open:tree-ready",
+		},
+		markRepositoryOpenPerformance() {},
+		repositoryOpenTrace: {
+			recorder() {
+				return {
+					opened: (report: MockOpenReport | undefined, mode: string) =>
+						recorderEvents.push({ kind: "opened", values: [report, mode] }),
+					reused: (acquisition: string, mode: string) =>
+						recorderEvents.push({
+							kind: "reused",
+							values: [acquisition, mode],
+						}),
+					engineAttempt: () =>
+						recorderEvents.push({ kind: "engineAttempt", values: [] }),
+					retry: (delayMs: number) =>
+						recorderEvents.push({ kind: "retry", values: [delayMs] }),
+					replacement: () =>
+						recorderEvents.push({ kind: "replacement", values: [] }),
+					progress: (progress: unknown) =>
+						recorderEvents.push({ kind: "progress", values: [progress] }),
+					request: () => {
+						recorderEvents.push({ kind: "request_started", values: [] });
+						let finished = false;
+						return (status?: number) => {
+							if (finished) return;
+							finished = true;
+							recorderEvents.push({
+								kind: "request_finished",
+								values: [status],
+							});
+						};
+					},
+				};
+			},
+		},
 	},
 });
 mock.module("../browser-telemetry.ts", {
@@ -154,6 +234,11 @@ beforeEach(() => {
 	emitMigration = false;
 	routedNames.length = 0;
 	failures = [];
+	openReports = [];
+	issueOpenNetworkRequest = false;
+	openWait = undefined;
+	finishOpenWait = undefined;
+	recorderEvents.length = 0;
 	branch = "main";
 	defaultBranch = "main";
 	defaultSessionCalls = 0;
@@ -224,6 +309,143 @@ await test("retries a recovering authority without remote fallback", async () =>
 	assert.ok(opens.every((open) => open.server.mode === "partial_replica"));
 	assert.equal(opens[0].storage!.options.name, opens[1].storage!.options.name);
 	await session.close();
+});
+
+await test("opening recorder receives fresh and cached SDK open reports", async () => {
+	const freshReport: MockOpenReport = {
+		format: 85,
+		initialized: true,
+		migrations: [{ scope: "local", fromFormat: 84, toFormat: 85 }],
+	};
+	const cachedReport: MockOpenReport = {
+		format: 85,
+		initialized: false,
+		migrations: [{ scope: "authority", fromFormat: 84, toFormat: 85 }],
+	};
+	openReports = [freshReport, cachedReport];
+
+	const fresh = await openRepositoryLixSession(options());
+	await fresh.close();
+	const cached = await openRepositoryLixSession(options());
+	await cached.close();
+
+	assert.deepEqual(
+		recorderEvents
+			.filter((event) => event.kind === "opened")
+			.map((event) => event.values),
+		[
+			[freshReport, "partial_replica"],
+			[cachedReport, "partial_replica"],
+		],
+	);
+});
+
+await test("opening recorder distinguishes joined and reused managed sessions", async () => {
+	const input = options();
+	openReports = [
+		{
+			format: 85,
+			initialized: true,
+			migrations: [],
+		},
+	];
+	openWait = new Promise<void>((resolve) => {
+		finishOpenWait = resolve;
+	});
+	const firstJoinedOpen = openRepositoryLixSession(input);
+	const secondJoinedOpen = openRepositoryLixSession(input);
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(opens.length, 1);
+	finishOpenWait?.();
+	const [joinedFirst, joinedSecond] = await Promise.all([
+		firstJoinedOpen,
+		secondJoinedOpen,
+	]);
+	await joinedFirst.close();
+	await joinedSecond.close();
+	assert.ok(
+		recorderEvents.some(
+			(event) =>
+				event.kind === "reused" &&
+				event.values[0] === "joined" &&
+				event.values[1] === "partial_replica",
+		),
+	);
+
+	const reusedInput = options();
+	openReports = [
+		{
+			format: 85,
+			initialized: false,
+			migrations: [],
+		},
+	];
+	const initial = await openRepositoryLixSession(reusedInput);
+	const reused = await openRepositoryLixSession(reusedInput);
+	assert.equal(opens.length, 2);
+	await initial.close();
+	await reused.close();
+	assert.ok(
+		recorderEvents.some(
+			(event) =>
+				event.kind === "reused" &&
+				event.values[0] === "reused" &&
+				event.values[1] === "partial_replica",
+		),
+	);
+});
+
+await test("opening recorder counts real wrapped RPC responses across an open retry", async () => {
+	issueOpenNetworkRequest = true;
+	failures = [
+		Object.assign(new Error("recovering"), {
+			code: "LIX_ERROR_RECOVERING",
+		}),
+	];
+	openReports = [
+		{
+			format: 85,
+			initialized: false,
+			migrations: [],
+		},
+	];
+	const networkStatuses = [503, 200];
+	const networkRequests: Request[] = [];
+	const input = {
+		...options(),
+		fetch: async (request: RequestInfo | URL, init?: RequestInit) => {
+			const normalized =
+				request instanceof Request
+					? new Request(request, init)
+					: new Request(new URL(request, "https://lixray.test"), init);
+			networkRequests.push(normalized);
+			const status = networkStatuses.shift();
+			assert.ok(status);
+			return new Response(null, { status });
+		},
+	};
+
+	const session = await openRepositoryLixSession(input);
+	await session.close();
+
+	assert.equal(networkRequests.length, 2);
+	assert.ok(networkRequests.every((request) => request.method === "GET"));
+	assert.equal(
+		recorderEvents.filter((event) => event.kind === "engineAttempt").length,
+		2,
+	);
+	assert.deepEqual(
+		recorderEvents
+			.filter((event) => event.kind === "request_finished")
+			.map((event) => event.values[0]),
+		[503, 200],
+	);
+	assert.deepEqual(
+		recorderEvents
+			.filter((event) => event.kind === "retry")
+			.map((event) => event.values[0]),
+		[100],
+	);
 });
 
 await test("unrelated opening failures do not trigger conversion", async () => {

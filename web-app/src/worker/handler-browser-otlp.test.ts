@@ -43,6 +43,18 @@ function performanceRequest() {
 												value: { doubleValue: 120 },
 											},
 											{
+												key: "lixray.repository.open.replica_state",
+												value: { stringValue: "fresh" },
+											},
+											{
+												key: "lixray.repository.open.profile.navigation_timing_supported",
+												value: { boolValue: true },
+											},
+											{
+												key: "lixray.repository.open.profile.resources.wasm.duration_ms",
+												value: { doubleValue: 12 },
+											},
+											{
 												key: "private.payload",
 												value: { stringValue: "must-not-forward" },
 											},
@@ -249,6 +261,15 @@ void test("public browser OTLP accepts only resolver-confirmed repository timing
 	);
 	assert.equal(payload.batch[0]?.properties.repository_id, repositoryId);
 	assert.equal(payload.batch[0]?.properties.duration_ms, 120);
+	assert.equal(payload.batch[0]?.properties.replica_state, "fresh");
+	assert.equal(
+		payload.batch[0]?.properties.profile_navigation_timing_supported,
+		true,
+	);
+	assert.equal(
+		payload.batch[0]?.properties.profile_resources_wasm_duration_ms,
+		12,
+	);
 });
 
 void test("public browser OTLP refuses private repositories before reading PostHog", async () => {

@@ -253,3 +253,5 @@ For anonymous opens, the gateway verifies the public repository and accepts only
 the bounded root timing sample. Failures before repository access is established
 are not performance samples through this gateway. Existing first-party opening
 failure diagnostics remain independent.
+
+The versioned [repository opening profile](./repository-opening-profile.md) adds native initialization versus cached/session reuse, retry/migration/RPC measurements, SDK startup boundaries and passive browser resource/long-task context. It defines the limits of each measurement and provides lifecycle-separated PostHog queries.

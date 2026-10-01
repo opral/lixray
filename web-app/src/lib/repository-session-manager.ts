@@ -13,6 +13,7 @@ interface ManagedResource {
 
 export interface ManagedResourceLease<T> {
 	readonly resource: T;
+	readonly acquisition: "created" | "joined" | "reused";
 	release(): void;
 }
 
@@ -34,6 +35,11 @@ export async function acquireManagedRepositoryResource<
 		}
 
 		const managed = existing ?? createManagedResource(key, open);
+		const acquisition = !existing
+			? "created"
+			: existing.resource
+				? "reused"
+				: "joined";
 		if (managed.closeTimer) {
 			clearTimeout(managed.closeTimer);
 			managed.closeTimer = undefined;
@@ -49,6 +55,7 @@ export async function acquireManagedRepositoryResource<
 			let released = false;
 			return {
 				resource,
+				acquisition,
 				release() {
 					if (released) return;
 					released = true;

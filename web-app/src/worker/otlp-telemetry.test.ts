@@ -1833,13 +1833,319 @@ void test("browser route attempts become replay-stable performance samples with 
 				key: "lixray.repository.open.duration_ms",
 				value: { doubleValue: 123.5 },
 			},
+			{ key: "lixray.repository.open.profile_version", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.replica_state",
+				value: { stringValue: "cached" },
+			},
+			{
+				key: "lixray.repository.open.replica_mode",
+				value: { stringValue: "partial_replica" },
+			},
+			{
+				key: "lixray.repository.open.session_acquisition",
+				value: { stringValue: "joined" },
+			},
+			{
+				key: "lixray.repository.open.initialized_this_open",
+				value: { boolValue: false },
+			},
+			{ key: "lixray.repository.open.storage_format", value: { intValue: 87 } },
+			{
+				key: "lixray.repository.open.local_migration_count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.authority_migration_count",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.engine_attempts", value: { intValue: 1 } },
+			{ key: "lixray.repository.open.retry_count", value: { intValue: 2 } },
+			{
+				key: "lixray.repository.open.retry_backoff_scheduled_ms",
+				value: { doubleValue: 350 },
+			},
+			{
+				key: "lixray.repository.open.replacement_count",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.rpc_count", value: { intValue: 5 } },
+			{
+				key: "lixray.repository.open.rpc_response_headers_pending",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.rpc_failed", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.rpc_response_headers_total_ms",
+				value: { doubleValue: 40.25 },
+			},
+			{
+				key: "lixray.repository.open.rpc_response_headers_max_ms",
+				value: { doubleValue: 20.5 },
+			},
+			{
+				key: "lixray.repository.open.terminal_phase",
+				value: { stringValue: "paint" },
+			},
+			{
+				key: "lixray.repository.open.longest_phase",
+				value: { stringValue: "engine" },
+			},
+			{
+				key: "lixray.repository.open.longest_phase_ms",
+				value: { doubleValue: 80.5 },
+			},
+			{
+				key: "lixray.repository.open.native.local.inspecting_ms",
+				value: { doubleValue: 3.5 },
+			},
+			{
+				key: "lixray.repository.open.native.local.opening_ms",
+				value: { doubleValue: 45 },
+			},
+			{
+				key: "lixray.repository.open.native.authority.migrating_ms",
+				value: { doubleValue: 5 },
+			},
 			{ key: "lixray.repository.open.engine_ms", value: { doubleValue: 80.5 } },
 			{ key: "lixray.repository.open.paint_ms", value: { intValue: 32 } },
+			{
+				key: "lixray.repository.open.profile.navigation_timing_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.resource_timing_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.interval_valid",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.page_persisted",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.truncated",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.truncated",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.navigation_type",
+				value: { stringValue: "reload" },
+			},
+			{
+				key: "lixray.repository.open.profile.hardware_concurrency_bucket",
+				value: { stringValue: "8" },
+			},
+			{
+				key: "lixray.repository.open.profile.device_memory_gb_bucket",
+				value: { stringValue: "4" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_effective_type",
+				value: { stringValue: "4g" },
+			},
+			{
+				key: "lixray.repository.open.profile.browser_family",
+				value: { stringValue: "chrome" },
+			},
+			{
+				key: "lixray.repository.open.profile.browser_major",
+				value: { intValue: 136 },
+			},
+			{
+				key: "lixray.repository.open.profile.dns_ms",
+				value: { doubleValue: 2.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.connect_ms",
+				value: { doubleValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.profile.tls_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.profile.ttfb_ms",
+				value: { doubleValue: 18 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_transfer_bytes",
+				value: { intValue: 2048 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_encoded_bytes",
+				value: { intValue: 1_000_000_000_001 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_decoded_bytes",
+				value: { intValue: 6021 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.total_ms",
+				value: { doubleValue: 16.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.max_ms",
+				value: { doubleValue: 16.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.duration_ms",
+				value: { doubleValue: 20 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.transfer_bytes",
+				value: { intValue: 512_000 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.count",
+				value: { intValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.duration_ms",
+				value: { doubleValue: 45 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.transfer_bytes",
+				value: { intValue: 150_000 },
+			},
+			{ key: "lixray.repository.open.host.version", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.host.wasm.wait_ms",
+				value: { doubleValue: 2 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.realm_reused",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.source",
+				value: { stringValue: "cache" },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.cache_status",
+				value: { stringValue: "hit" },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.fetch_ms",
+				value: { doubleValue: 0 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.compile_ms",
+				value: { doubleValue: 4.5 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.initialize_ms",
+				value: { doubleValue: 1.25 },
+			},
+			{
+				key: "lixray.repository.open.host.component_compiler.import_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.host.component_compiler.initialize_ms",
+				value: { doubleValue: 6 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.module_import_ms",
+				value: { doubleValue: 2 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.create_ms",
+				value: { doubleValue: 10 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.open_ms",
+				value: { doubleValue: 8 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.lock_wait_ms",
+				value: { doubleValue: 0.5 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.sqlite_init_ms",
+				value: { doubleValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.pool_open_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.schema_init_ms",
+				value: { doubleValue: 5 },
+			},
+			{
+				key: "lixray.repository.open.host.native_binding_open_ms",
+				value: { doubleValue: 12 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.debug_path",
+				value: { stringValue: "/private/location" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_cookie",
+				value: { stringValue: "https://private/?secret" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_effective_type_private",
+				value: { stringValue: "secret" },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.secret.count",
+				value: { stringValue: "private" },
+			},
+			{
+				key: "lixray.repository.open.replica_state_private",
+				value: { stringValue: "private" },
+			},
 			{ key: "private-url", value: { stringValue: "https://private/?secret" } },
 		],
 	};
+	const invalidEnumRoot = {
+		...root,
+		spanId: new Uint8Array(8).fill(4),
+		attributes: root.attributes.map((attribute) => {
+			if (attribute.key === "lixray.repository.open.profile.navigation_type")
+				return {
+					...attribute,
+					value: { stringValue: "https://private/?secret" },
+				};
+			if (attribute.key === "lixray.repository.open.profile.browser_family")
+				return { ...attribute, value: { stringValue: "unknown/private" } };
+			if (attribute.key === "lixray.repository.open.profile.browser_major")
+				return { ...attribute, value: { intValue: 1001 } };
+			return attribute;
+		}),
+	};
+	const nonFiniteMajorRoot = {
+		...root,
+		spanId: new Uint8Array(8).fill(6),
+		attributes: root.attributes.map((attribute) =>
+			attribute.key === "lixray.repository.open.profile.browser_major"
+				? { ...attribute, value: { doubleValue: Number.NaN } }
+				: attribute,
+		),
+	};
 	const bytes = encode([
 		root,
+		invalidEnumRoot,
+		nonFiniteMajorRoot,
 		{
 			...root,
 			attributes: [
@@ -1869,8 +2175,10 @@ void test("browser route attempts become replay-stable performance samples with 
 		);
 	assert.equal(batches.length, 2);
 	assert.deepEqual(batches[0]!.batch, batches[1]!.batch);
-	assert.equal(batches[0]!.batch.length, 1);
+	assert.equal(batches[0]!.batch.length, 3);
 	const event = batches[0]!.batch[0]!;
+	const invalidEnumEvent = batches[0]!.batch[1]!;
+	const nonFiniteMajorEvent = batches[0]!.batch[2]!;
 	assert.equal(event.event, "repository_open_performance");
 	assert.equal(event.distinct_id, "trusted-account");
 	assert.equal(event.properties.duration_ms, 123.5);
@@ -1879,7 +2187,82 @@ void test("browser route attempts become replay-stable performance samples with 
 	assert.equal(event.properties.outcome, "usable");
 	assert.equal(event.properties.entry, "navigation");
 	assert.equal(event.properties.visibility, "foreground");
+	assert.equal(event.properties.profile_version, 1);
+	assert.equal(event.properties.replica_state, "cached");
+	assert.equal(event.properties.replica_mode, "partial_replica");
+	assert.equal(event.properties.session_acquisition, "joined");
+	assert.equal(event.properties.initialized_this_open, false);
+	assert.equal(event.properties.storage_format, 87);
+	assert.equal(event.properties.local_migration_count, 1);
+	assert.equal(event.properties.authority_migration_count, 0);
+	assert.equal(event.properties.engine_attempts, 1);
+	assert.equal(event.properties.retry_count, 2);
+	assert.equal(event.properties.retry_backoff_scheduled_ms, 350);
+	assert.equal(event.properties.rpc_count, 5);
+	assert.equal(event.properties.rpc_response_headers_pending, 0);
+	assert.equal(event.properties.rpc_failed, 1);
+	assert.equal(event.properties.rpc_response_headers_total_ms, 40.25);
+	assert.equal(event.properties.rpc_response_headers_max_ms, 20.5);
+	assert.equal(event.properties.terminal_phase, "paint");
+	assert.equal(event.properties.longest_phase, "engine");
+	assert.equal(event.properties.longest_phase_ms, 80.5);
+	assert.equal(event.properties.native_local_inspecting_ms, 3.5);
+	assert.equal(event.properties.native_local_opening_ms, 45);
+	assert.equal(event.properties.native_authority_migrating_ms, 5);
+	assert.equal(event.properties.profile_navigation_timing_supported, true);
+	assert.equal(event.properties.profile_resource_timing_supported, true);
+	assert.equal(event.properties.profile_page_persisted, false);
+	assert.equal(event.properties.profile_navigation_type, "reload");
+	assert.equal(event.properties.profile_hardware_concurrency_bucket, "8");
+	assert.equal(event.properties.profile_device_memory_gb_bucket, "4");
+	assert.equal(event.properties.profile_network_effective_type, "4g");
+	assert.equal(event.properties.profile_browser_family, "chrome");
+	assert.equal(event.properties.profile_browser_major, 136);
+	assert.equal(event.properties.profile_dns_ms, 2.5);
+	assert.equal(event.properties.profile_response_transfer_bytes, 2048);
+	assert.equal("profile_response_encoded_bytes" in event.properties, false);
+	assert.equal(event.properties.profile_longtask_count, 1);
+	assert.equal(event.properties.profile_longtask_total_ms, 16.5);
+	assert.equal(event.properties.profile_resources_wasm_count, 1);
+	assert.equal(event.properties.profile_resources_wasm_duration_ms, 20);
+	assert.equal(event.properties.profile_resources_wasm_transfer_bytes, 512_000);
+	assert.equal(event.properties.profile_resources_lix_count, 4);
+	assert.equal(event.properties.profile_resources_lix_duration_ms, 45);
+	assert.equal(event.properties.profile_resources_lix_transfer_bytes, 150_000);
+	assert.equal(event.properties.host_version, 1);
+	assert.equal(event.properties.host_wasm_wait_ms, 2);
+	assert.equal(event.properties.host_wasm_realm_reused, true);
+	assert.equal(event.properties.host_wasm_source, "cache");
+	assert.equal(event.properties.host_wasm_cache_status, "hit");
+	assert.equal(event.properties.host_wasm_fetch_ms, 0);
+	assert.equal(event.properties.host_wasm_compile_ms, 4.5);
+	assert.equal(event.properties.host_wasm_initialize_ms, 1.25);
+	assert.equal(event.properties.host_component_compiler_import_ms, 3);
+	assert.equal(event.properties.host_component_compiler_initialize_ms, 6);
+	assert.equal(event.properties.host_provider_module_import_ms, 2);
+	assert.equal(event.properties.host_provider_create_ms, 10);
+	assert.equal(event.properties.host_provider_open_ms, 8);
+	assert.equal(event.properties.host_provider_opfs_lock_wait_ms, 0.5);
+	assert.equal(event.properties.host_provider_opfs_sqlite_init_ms, 4);
+	assert.equal(event.properties.host_provider_opfs_pool_open_ms, 3);
+	assert.equal(event.properties.host_provider_opfs_schema_init_ms, 5);
+	assert.equal(event.properties.host_native_binding_open_ms, 12);
+	assert.equal("host_provider_debug_path" in event.properties, false);
+	assert.equal(
+		"profile_network_effective_type_private" in event.properties,
+		false,
+	);
+	assert.equal("profile_resources_secret_count" in event.properties, false);
+	assert.equal("replica_state_private" in event.properties, false);
 	assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+	assert.equal("profile_navigation_type" in invalidEnumEvent.properties, false);
+	assert.equal("profile_browser_family" in invalidEnumEvent.properties, false);
+	assert.equal("profile_browser_major" in invalidEnumEvent.properties, false);
+	assert.doesNotMatch(JSON.stringify(invalidEnumEvent), /private|secret/);
+	assert.equal(
+		"profile_browser_major" in nonFiniteMajorEvent.properties,
+		false,
+	);
 	assert.doesNotMatch(JSON.stringify(event), /private|secret|unrelated/);
 });
 
