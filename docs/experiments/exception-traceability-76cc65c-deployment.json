@@ -1,0 +1,218 @@
+{
+  "release": "76cc65ce0495cdbd98b27ff87d0515335c12d105",
+  "engine": "98397ecf730587829fa3c115f2d62300724424cb",
+  "pull_requests": [
+    "https://github.com/opral/lixray/pull/543",
+    "https://github.com/opral/lixray/pull/548"
+  ],
+  "ci": {
+    "run": 36908584117,
+    "head": "7966c8ff811fba81e9498b104ff52c8ea9010979",
+    "conclusion": "success"
+  },
+  "production": {
+    "run": 36910416674,
+    "conclusion": "success",
+    "web_image": "ghcr.io/opral/lixray-web@sha256:561d0f7415d904af54fc69475363e4e4fdcc1fab4858c0e3ecfc7956d357948b",
+    "server_image": "ghcr.io/opral/lixray-server@sha256:ba65673e4e0080b8f22269c8cc18a038097498f9fb8688f91025865905615b86",
+    "completed_at_utc": "2026-10-01T19:07:18Z",
+    "completed_at_berlin": "2026-10-01T21:07:18+02:00",
+    "independent_canary": {
+      "passed": true,
+      "protocolVersion": 12
+    },
+    "browser_scenarios": {
+      "navigation": "2m03s",
+      "conflicts": "2m55s",
+      "editing": "3m36s",
+      "history": "4m22s"
+    },
+    "browser_setup": "15\u201317s",
+    "images_promoted_at_utc": "2026-10-01T19:07:02Z",
+    "live_canary_passed_at_utc": "2026-10-01T19:07:15Z"
+  },
+  "local_validation": {
+    "worker": 427,
+    "analytics": 55,
+    "mcp_and_runtime": 49,
+    "gateway_context": 26,
+    "ci_scripts": 120,
+    "browser_actual_sdk": "passed"
+  },
+  "telemetry_test_boundaries": {
+    "browser": "Actual installed posthog-js SDK and local HTTP receiver; snapshot 404 and successful retry, natural uncaught error, natural rejected promise; exactly one exception per trigger; matching OTLP trace/span and privacy assertions.",
+    "mcp": "Actual installed PostHog Node SDK and localhost HTTP batch receiver; adapter-owned typed conversion and serialization errors, verified actor, error ID, request and tool trace; no SQL, parameters or results.",
+    "gateway": "Actual OTLP projection payload with bounded types and native route templates; authenticated browser actor."
+  },
+  "limitations": [
+    "Old incompatible unpublished journals are preserved but not automatically replayed.",
+    "Actual affected macOS Safari persisted-copy recovery remains unconfirmed.",
+    "Nested native SQL error projections are not globally deduplicated by this release; issue546 remains partly open.",
+    "Headless live browser probe disables the SDK bot filter only in its ephemeral test instance. Production settings are unchanged."
+  ],
+  "live_native_and_mcp_posthog": [
+    {
+      "timestamp": "2026-10-01T19:08:12.125000Z",
+      "type": "McpAdapterError",
+      "error_id": "e4621853-d325-40d4-957e-af173639f434",
+      "correlation": "active_trace",
+      "operation": "mcp.tool",
+      "service": "lixray-mcp",
+      "client_release": null,
+      "server_release": "76cc65ce0495cdbd98b27ff87d0515335c12d105",
+      "trace_id": "1aa4b6e7772fc0b19c1251e38d5290cc",
+      "span_id": "0b86f316b797d9eb",
+      "route": "/mcp",
+      "method": "POST",
+      "status": null,
+      "request_id": "66387ac8-391e-470a-99cb-eb55d5432f62",
+      "failure_stage": "sdk_result_encoding",
+      "issue_id": "01a0f8dd-fa8d-77b1-b6ab-6d7eee8e354d",
+      "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f8dd-fa8d-77b1-b6ab-6d7eee8e354d"
+    },
+    {
+      "timestamp": "2026-10-01T19:08:08.347000Z",
+      "type": "LIX_COLUMN_NOT_FOUND",
+      "error_id": "2a433549-e182-829d-930d-e569b03bf62a",
+      "correlation": null,
+      "operation": "lix.protocol.request",
+      "service": "lix-server",
+      "client_release": null,
+      "server_release": "98397ecf730587829fa3c115f2d62300724424cb",
+      "trace_id": "8b86b073ec9859e6c3916749c72177d0",
+      "span_id": "bc139dbdb8feab43",
+      "route": "/lix/v1/{lix_id}/{*protocol_path}",
+      "method": "POST",
+      "status": "404.0",
+      "request_id": "ec80dcc5808e409852c2ee36",
+      "failure_stage": null,
+      "issue_id": "01a0f1fa-9cbf-70b3-8266-ebac19f515fb",
+      "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f1fa-9cbf-70b3-8266-ebac19f515fb"
+    },
+    {
+      "timestamp": "2026-10-01T19:08:08.347000Z",
+      "type": "LIX_COLUMN_NOT_FOUND",
+      "error_id": "33c2c0b9-1b21-842d-a04f-ac18a783abe1",
+      "correlation": null,
+      "operation": "SELECT",
+      "service": "lix-server",
+      "client_release": null,
+      "server_release": "98397ecf730587829fa3c115f2d62300724424cb",
+      "trace_id": "8b86b073ec9859e6c3916749c72177d0",
+      "span_id": "0795d997ce5aa632",
+      "route": null,
+      "method": null,
+      "status": null,
+      "request_id": null,
+      "failure_stage": null,
+      "issue_id": "01a0f1fa-9cbf-70b3-8266-ebac19f515fb",
+      "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f1fa-9cbf-70b3-8266-ebac19f515fb"
+    }
+  ],
+  "live_browser_posthog": {
+    "verified": true,
+    "probe_time_utc": "2026-10-01T19:08:01.609Z",
+    "method": "Production JavaScript SDK, original before_send and exception hooks; real ingestion endpoint returned200. Metadata-only PostHog query confirmed one capture per category on final release.",
+    "probe_configuration": {
+      "at": "2026-10-01T19:08:01.609Z",
+      "probeMarker": "lixray-browser-ingestion-20261001",
+      "page": "https://lixray.com/",
+      "method": "Production PostHog JavaScript SDK, original before_send and exception hooks",
+      "qualification": {
+        "reason": "Playwright Chromium advertises a HeadlessChrome client hint, so PostHog's default client-side bot filter drops its captures before before_send.",
+        "override": "Only the in-memory browser SDK config set opt_out_useragent_filter=true for this controlled probe. No production project or application configuration changed."
+      },
+      "runtime": {
+        "moduleFound": true,
+        "loaded": true,
+        "tokenPresent": true,
+        "apiHost": "https://us.i.posthog.com",
+        "optedOut": false,
+        "beforeSendPresent": true,
+        "captureExceptionType": "function",
+        "exceptionCapture": {
+          "unhandledErrors": true,
+          "unhandledRejections": true
+        },
+        "webdriver": false,
+        "headlessClientHint": true,
+        "initialUserAgentFilter": false,
+        "runtimeUserAgentFilter": true,
+        "clientRelease": "76cc65ce0495cdbd98b27ff87d0515335c12d105"
+      },
+      "browserErrors": [
+        {
+          "source": "pageerror",
+          "name": "LixRayBrowserUnhandledProbe"
+        },
+        {
+          "source": "console",
+          "name": "Unhandled Promise rejection"
+        }
+      ],
+      "network": [
+        {
+          "phase": "request",
+          "host": "us.i.posthog.com",
+          "path": "/i/v0/e/"
+        },
+        {
+          "phase": "request",
+          "host": "us.i.posthog.com",
+          "path": "/i/v0/e/"
+        },
+        {
+          "phase": "response",
+          "host": "us.i.posthog.com",
+          "path": "/i/v0/e/",
+          "status": 200
+        },
+        {
+          "phase": "response",
+          "host": "us.i.posthog.com",
+          "path": "/i/v0/e/",
+          "status": 200
+        }
+      ]
+    },
+    "events": [
+      {
+        "type": "LixRayBrowserHandledProbe",
+        "captures": 1,
+        "error_correlation": "standalone_trace",
+        "error_id": "0abf60f3-50d6-431a-86bc-d059745b3220",
+        "trace_id": "d5179ec2a7c8865637554fce793482d5",
+        "span_id": "f40e3d82e5934b20",
+        "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f8a8-2dcd-7581-9b75-0add6819334d",
+        "event_id": "01a0f8dd-e296-7694-8f06-f3a0f4592a58",
+        "timestamp": "2026-10-01T19:08:06.423Z"
+      },
+      {
+        "type": "LixRayBrowserUnhandledProbe",
+        "captures": 1,
+        "error_correlation": "standalone_trace",
+        "error_id": "e88d72c7-40df-4661-8fd1-89641522464e",
+        "trace_id": "5c62b68d3b40c38bfb9eb643423e9be6",
+        "span_id": "fd9ec8dbba32374c",
+        "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f8a8-2dcd-7581-9b75-0aec8ad61e16",
+        "raw_event_issue_id": "01a0f8dd-f226-7861-907f-180e7a7feca0",
+        "event_id": "01a0f8dd-e303-742d-9833-4b052b51f683",
+        "timestamp": "2026-10-01T19:08:06.532Z"
+      },
+      {
+        "type": "LixRayBrowserRejectionProbe",
+        "captures": 1,
+        "error_correlation": "standalone_trace",
+        "error_id": "18ffd896-59e9-4b04-ae47-19d730f52341",
+        "trace_id": "39ba714565fab4755fb58242d8a0bf61",
+        "span_id": "e5b62fae84c0051b",
+        "issue_url": "https://us.posthog.com/project/512495/error_tracking/01a0f8dd-f226-7861-907f-181131c8e859",
+        "event_id": "01a0f8dd-e4f6-7940-8e77-24304137875d",
+        "timestamp": "2026-10-01T19:08:07.031Z"
+      }
+    ],
+    "issue_url_note": "The unhandled event raw issue ID differs from the canonical Error Tracking list/sample issue. The canonical issue URL is used; the raw event property is preserved separately.",
+    "verified_at": "2026-10-01T19:13:51Z",
+    "exact_exception_event_count": 3
+  }
+}
