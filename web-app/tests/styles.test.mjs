@@ -148,20 +148,20 @@ test("the development URL alias serves isolated library CSS", async () => {
 			path.join(root, "src/routes/__root.tsx"),
 		);
 		assert.equal(resolved.id, path.join(library, "src/index.css") + "?url");
-		const urlRequest = "/@fs/" + resolved.id;
+		const urlRequest = "/@fs" + resolved.id;
 		const module = await server.transformRequest(urlRequest);
 		assert.match(module.code, /export default/);
 		const ssrModule = await server.ssrLoadModule(urlRequest);
 		assert.equal(
 			ssrModule.default,
-			"/@fs/" + path.join(library, "src/index.css"),
+			"/@fs" + path.join(library, "src/index.css"),
 		);
 		const rawModule = await server.ssrLoadModule(
-			"/@fs/" + path.join(library, "src/index.css") + "?raw",
+			"/@fs" + path.join(library, "src/index.css") + "?raw",
 		);
 		assert.match(rawModule.default, /@import/);
 		const transformed = await server.transformRequest(
-			"/@fs/" + path.join(library, "src/index.css") + "?direct",
+			"/@fs" + path.join(library, "src/index.css") + "?direct",
 		);
 		assert.ok(transformed.code.includes(".atw\\:flex"));
 		assert.ok(transformed.code.includes("--atw-tw-enter-opacity"));
