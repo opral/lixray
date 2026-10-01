@@ -993,10 +993,12 @@ export async function createSyncFixture({
 			const newButton = page.getByTestId("home-new-button");
 			const gettingStarted = page.getByTestId("home-getting-started");
 			if (!(await newButton.or(gettingStarted).first().isVisible())) {
-				const homeTab = page.getByRole("button", {
-					name: "Home",
-					exact: true,
-				}).and(page.locator('[data-view-key="atelier_library"]'));
+				const homeTab = page
+					.getByRole("button", {
+						name: "Home",
+						exact: true,
+					})
+					.and(page.locator('[data-view-key="atelier_library"]'));
 				await homeTab.waitFor({ timeout: 120_000 });
 				await homeTab.click();
 			}
