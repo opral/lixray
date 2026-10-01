@@ -127,9 +127,25 @@ mock.module("./repository-replica-replacement.ts", {
 		},
 	},
 });
-const { openRepositoryLixSession } =
+let idleAllowed = true;
+let idleNames: string[] = [];
+mock.module("./repository-device-backup.ts", {
+	namedExports: {
+		withIdleDeviceReplica: async (
+			name: string,
+			callback: () => Promise<string>,
+		) => {
+			idleNames.push(name);
+			if (!idleAllowed) throw new Error("Close other LixRay tabs");
+			return callback();
+		},
+	},
+});
+const { openRepositoryLixSession, resetRepositoryLocalReplica } =
 	await import("./repository-lix-session.ts");
 beforeEach(() => {
+	idleAllowed = true;
+	idleNames = [];
 	activeTelemetryParent = undefined;
 	observedOpeningParent = undefined;
 	replacementName = undefined;
@@ -538,4 +554,50 @@ await test("persistent compatible-owner fencing opens a fresh server-backed repl
 	);
 	assert.equal(session.retainedReplicaCount, 1);
 	await session.close();
+});
+
+await test("explicit reset fences the failed source and replaces it without opening or migrating it", async () => {
+	const input = options();
+	const name = `lixray:local-first-v1:${input.repositoryId}:${input.authIdentity}:replica:format81:current`;
+	const result = await resetRepositoryLocalReplica({
+		...input,
+		expectedStorageName: name,
+	});
+	assert.equal(result, `${name}:replacement:test`);
+	assert.deepEqual(idleNames, [name]);
+	assert.equal(replacements, 1);
+	assert.equal(opens.length, 0);
+});
+await test("reset refuses an active owner without retiring or replacing its replica", async () => {
+	const input = options();
+	idleAllowed = false;
+	const name = `lixray:local-first-v1:${input.repositoryId}:${input.authIdentity}:replica:format81:current`;
+	await assert.rejects(
+		resetRepositoryLocalReplica({ ...input, expectedStorageName: name }),
+		/Close other LixRay tabs/,
+	);
+	assert.equal(replacements, 0);
+	assert.equal(opens.length, 0);
+});
+await test("reset refuses a stale target or aborted request before authority retirement", async () => {
+	const input = options();
+	await assert.rejects(
+		resetRepositoryLocalReplica({
+			...input,
+			expectedStorageName: "other-copy",
+		}),
+		/local replica changed/,
+	);
+	const controller = new AbortController();
+	controller.abort();
+	const name = `lixray:local-first-v1:${input.repositoryId}:${input.authIdentity}:replica:format81:current`;
+	await assert.rejects(
+		resetRepositoryLocalReplica({
+			...input,
+			expectedStorageName: name,
+			signal: controller.signal,
+		}),
+		{ name: "AbortError" },
+	);
+	assert.equal(replacements, 0);
 });

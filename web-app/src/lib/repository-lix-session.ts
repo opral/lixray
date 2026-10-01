@@ -1,3 +1,4 @@
+import { withIdleDeviceReplica } from "./repository-device-backup.ts";
 import {
 	openLix,
 	networkFetch,
@@ -82,6 +83,40 @@ export function openRepositoryRemoteLix(
 				refreshAccessToken: options.refreshAccessToken,
 			}),
 		},
+	});
+}
+
+/** User-confirmed reset: bootstrap a fresh replica while retaining its physical source.
+ * Never open, migrate, or delete the incompatible source to perform recovery.
+ */
+export async function resetRepositoryLocalReplica(
+	options: OpenRepositoryLixSessionOptions & { expectedStorageName: string },
+): Promise<string> {
+	if (options.publicPath)
+		throw new Error("This repository does not use a local replica.");
+	const replicaId = await repositoryBrowserReplicaId(options);
+	const original = repositoryOpfsCacheName({
+		repositoryId: options.repositoryId,
+		replicaId,
+	});
+	const source = currentReplicaStorage(original);
+	if (activeReplicaStorage(source) !== options.expectedStorageName)
+		throw new Error("The local replica changed. Reload before resetting it.");
+	return withIdleDeviceReplica(options.expectedStorageName, async () => {
+		options.signal?.throwIfAborted();
+		return replaceRepositoryReplica({
+			source,
+			failedName: options.expectedStorageName,
+			url: repositoryUrl(options),
+			headers: () => repositoryRequestHeaders(options),
+			fetch: createTelemetryFetch(options.fetch ?? networkFetch, {
+				repositoryId: options.repositoryId,
+				refreshAccessToken: options.refreshAccessToken,
+				signal: options.signal,
+				shouldCaptureRequestFailures: () => true,
+			}),
+			signal: options.signal,
+		});
 	});
 }
 
