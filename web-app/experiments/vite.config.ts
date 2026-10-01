@@ -19,7 +19,12 @@ export default defineConfig({
 		outDir: "../.architecture/dist",
 		emptyOutDir: true,
 		rollupOptions: {
-			input: fileURLToPath(new URL("architecture.html", import.meta.url)),
+			input: {
+				architecture: fileURLToPath(
+					new URL("architecture.html", import.meta.url),
+				),
+				native: fileURLToPath(new URL("native.html", import.meta.url)),
+			},
 		},
 	},
 	plugins: [
