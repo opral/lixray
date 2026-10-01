@@ -437,6 +437,122 @@ void test("standard OTel exceptions preserve the cause without inventing a stack
 	]);
 });
 
+void test("authenticated browser exception identity overrides untrusted span identity while server identity is preserved", async () => {
+	const browserUserId = "99999999-9999-4999-8999-999999999999";
+	const makeError = (account: string) =>
+		encode([
+			{
+				...span("lix.protocol.request", account),
+				events: [
+					{
+						name: "exception",
+						attributes: [
+							{ key: "exception.type", value: { stringValue: "TypeError" } },
+							{
+								key: "exception.message",
+								value: { stringValue: "request failed" },
+							},
+						],
+					},
+				],
+			},
+		]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(
+				request(makeError("spoofed-browser-account")),
+				env,
+				{ fetch: fetcher, authenticatedBrowser: true, browserUserId },
+			)
+		).status,
+		200,
+	);
+	assert.equal(
+		(
+			await handleOtlpTelemetry(
+				request(makeError("verified-server-account")),
+				env,
+				{ fetch: fetcher },
+			)
+		).status,
+		200,
+	);
+	assert.equal(batches[0]!.batch[0]!.distinct_id, browserUserId);
+	assert.equal(batches[0]!.batch[0]!.properties.$exception_source, "browser");
+	assert.equal(batches[1]!.batch[0]!.distinct_id, "verified-server-account");
+	assert.equal(batches[1]!.batch[0]!.properties.$exception_source, "server");
+	assert.doesNotMatch(JSON.stringify(batches[0]), /spoofed-browser-account/);
+});
+
+void test("gateway exception types reject oversized, credential, response-body and SQL content", async () => {
+	const unsafeTypes = [
+		"Bearer browser-secret-token",
+		"response body: private document content",
+		"SELECT secret FROM private_repository",
+		`PrivateError${"X".repeat(256)}`,
+	];
+	const body = encode(
+		unsafeTypes.map((type, index) => ({
+			...span("lix.protocol.request", "spoofed-browser-account"),
+			spanId: Array(8).fill(index + 3),
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: type } },
+						{
+							key: "exception.message",
+							value: { stringValue: "safe diagnostic message" },
+						},
+					],
+				},
+			],
+		})),
+	);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(body), env, {
+				fetch: fetcher,
+				authenticatedBrowser: true,
+				browserUserId: "99999999-9999-4999-8999-999999999999",
+			})
+		).status,
+		200,
+	);
+	assert.deepEqual(
+		batch!.batch.map(
+			(event) =>
+				(event.properties.$exception_list as Array<{ type: string }>)[0]!.type,
+		),
+		Array(unsafeTypes.length).fill("LixBrowserError"),
+	);
+	assert.equal(
+		batch!.batch.every(
+			(event) => event.distinct_id === "99999999-9999-4999-8999-999999999999",
+		),
+		true,
+	);
+	assert.doesNotMatch(
+		JSON.stringify(batch),
+		/Bearer browser-secret-token|private document content|SELECT secret|PrivateErrorX{256}|spoofed-browser-account/,
+	);
+	assert.match(JSON.stringify(batch), /safe diagnostic message/);
+});
+
 void test("auth, malformed protobuf, unsupported formats, and compressed expansion are rejected before export", async () => {
 	const fetcher: typeof fetch = async () => {
 		assert.fail("must not export");
@@ -552,6 +668,7 @@ void test("status-only admission failures reach PostHog with code, versions, HTT
 		);
 	assert.deepEqual(batches[0], batches[1]);
 	const props = batches[0]!.batch[0]!.properties;
+	assert.equal(batches[0]!.batch[0]!.distinct_id, "account-123");
 	assert.equal(props.lix_error_code, "LIX_ERROR_RECOVERING");
 	assert.equal(props.operation, "lix.protocol.request");
 	assert.equal(props.httpStatus, 503);

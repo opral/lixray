@@ -5,6 +5,23 @@ import {
 
 const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const FIXED_EXCEPTION_TYPES = new Set([
+	"AggregateError",
+	"DOMException",
+	"Error",
+	"EvalError",
+	"LixBrowserError",
+	"LixOperationError",
+	"LixServerError",
+	"RangeError",
+	"ReferenceError",
+	"RepositorySnapshotDownloadError",
+	"SyntaxError",
+	"TypeError",
+	"URIError",
+]);
+const EXCEPTION_CLASS =
+	/^(?:[a-z][A-Za-z0-9_]{0,63}(?:::|\.)+)*[A-Z][A-Za-z0-9_]{0,63}$/;
 
 /** Project operation diagnostics at the authenticated gateway, never in HTTP errors. */
 export interface OtlpAttribute {
@@ -70,6 +87,20 @@ function boundedId(value: string | undefined): string | undefined {
 
 function safeUuid(value: string | undefined): string | undefined {
 	return value && UUID.test(value) ? value.toLowerCase() : undefined;
+}
+
+/** Exception types are class labels, never free-form diagnostics. */
+function safeExceptionType(
+	value: string | undefined,
+	fallback: string,
+): string {
+	if (
+		value &&
+		value.length <= 128 &&
+		(FIXED_EXCEPTION_TYPES.has(value) || EXCEPTION_CLASS.test(value))
+	)
+		return value;
+	return fallback;
 }
 
 function safeOperation(value: string | undefined): string {
@@ -199,6 +230,8 @@ export async function serverErrorEvents(
 	options: {
 		source?: "server" | "browser";
 		resourceAttributes?: OtlpAttribute[];
+		/** Verified by the authenticated browser route; span identity is untrusted. */
+		browserUserId?: string;
 	} = {},
 ) {
 	if (
@@ -379,15 +412,19 @@ export async function serverErrorEvents(
 				const lixId = boundedId(
 					fields.lix_id ?? context["lix.id"] ?? context["lix.lix.id"],
 				);
-				const account = context["lix.account_id"];
+				const account =
+					source === "browser"
+						? safeUuid(options.browserUserId)
+						: context["lix.account_id"];
 				const value = diagnostic(message);
 				const summary = diagnostic(
 					fields.message ?? event.name ?? "Server error",
 				);
-				const type =
-					fields["exception.type"] ??
+				const type = safeExceptionType(
+					fields["exception.type"],
 					failureCode ??
-					(source === "server" ? "LixServerError" : "LixBrowserError");
+						(source === "server" ? "LixServerError" : "LixBrowserError"),
+				);
 				const digest = new Uint8Array(
 					await crypto.subtle.digest(
 						"SHA-256",
