@@ -11,6 +11,59 @@ const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(
 	"opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest",
 );
 
+type PostHogWireEvent = {
+	event?: string;
+	properties?: Record<string, unknown>;
+};
+
+function decodePostHogCaptureRequest(route: Route): PostHogWireEvent[] {
+	const request = route.request();
+	const body = request.postDataBuffer() ?? Buffer.alloc(0);
+	const candidates = [body];
+	if (body[0] === 0x1f && body[1] === 0x8b) {
+		candidates.unshift(gunzipSync(body));
+	}
+	const bodyText = body.toString("utf8");
+	if (/^[A-Za-z0-9+/]+=*$/.test(bodyText)) {
+		const base64 = Buffer.from(bodyText, "base64");
+		if (base64[0] === 0x1f && base64[1] === 0x8b)
+			candidates.unshift(gunzipSync(base64));
+	}
+	for (const candidate of candidates) {
+		try {
+			const payload: unknown = JSON.parse(candidate.toString("utf8"));
+			if (Array.isArray(payload)) return payload as PostHogWireEvent[];
+			if (!payload || typeof payload !== "object") continue;
+			const record = payload as {
+				batch?: unknown;
+				events?: unknown;
+				event?: unknown;
+				properties?: unknown;
+			};
+			if (Array.isArray(record.batch))
+				return record.batch as PostHogWireEvent[];
+			if (Array.isArray(record.events))
+				return record.events as PostHogWireEvent[];
+			if (typeof record.event === "string" && record.properties)
+				return [record as PostHogWireEvent];
+		} catch {
+			// Try the next supported wire encoding without retaining the raw body.
+		}
+	}
+	throw new Error(
+		"PostHog capture request did not contain a readable JSON payload",
+	);
+}
+
+function firstException(event: PostHogWireEvent) {
+	const exceptions = event.properties?.$exception_list;
+	return Array.isArray(exceptions) &&
+		exceptions[0] &&
+		typeof exceptions[0] === "object"
+		? (exceptions[0] as Record<string, unknown>)
+		: undefined;
+}
+
 function flattenAttributes(
 	attributes: Array<{ key?: string; value?: Record<string, unknown> }> = [],
 ): Record<string, unknown> {
@@ -61,7 +114,30 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		status?: { code?: number };
 		attributes: Record<string, unknown>;
 	}> = [];
+	const posthogWireEvents: PostHogWireEvent[] = [];
+	const posthogCaptureRequests: Array<{
+		method: string;
+		path: string;
+		eventCount: number;
+		status: number;
+	}> = [];
+	const externalRequests: Array<{ host: string; path: string }> = [];
+	const posthogTraffic: string[] = [];
+	const fixtureOrigin = `http://127.0.0.1:${process.env.LIXRAY_SNAPSHOT_PORT ?? 8796}`;
 	let snapshotAttempts = 0;
+	page.on("request", (request) => {
+		const url = new URL(request.url());
+		if (
+			request.method() === "POST" &&
+			/\/(?:i\/v\d+\/e|e|flags|decide|array|v1\/traces)(?:\/|$)/u.test(
+				url.pathname,
+			)
+		) {
+			posthogTraffic.push(
+				`${url.hostname}${url.pathname.replace(/\/array\/[^/]+\/config\.js$/u, "/array/:token/config.js")}`,
+			);
+		}
+	});
 
 	await page.route(`**/lix/v1/${REPOSITORY_ID}**`, async (route: Route) => {
 		const request = route.request();
@@ -139,10 +215,50 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 			body: Buffer.alloc(0),
 		});
 	});
+	await page.route("https://**/*", async (route) => {
+		const url = new URL(route.request().url());
+		externalRequests.push({
+			host: url.hostname,
+			path: url.pathname.replace(
+				/\/array\/[^/]+\/config\.js$/u,
+				"/array/:token/config.js",
+			),
+		});
+		await route.abort();
+	});
+	await page.route("**/*", async (route) => {
+		const request = route.request();
+		const url = new URL(request.url());
+		if (
+			request.method() === "POST" &&
+			url.origin === fixtureOrigin &&
+			/\/(?:i\/v\d+\/e|e)\/?$/u.test(url.pathname)
+		) {
+			const events = decodePostHogCaptureRequest(route).map(
+				({ event, properties }) => ({
+					event,
+					properties,
+				}),
+			);
+			posthogWireEvents.push(...events);
+			await route.fulfill({
+				status: 200,
+				contentType: "application/json",
+				body: JSON.stringify({ status: "Ok" }),
+			});
+			posthogCaptureRequests.push({
+				method: request.method(),
+				path: url.pathname,
+				eventCount: events.length,
+				status: 200,
+			});
+			return;
+		}
+		await route.fallback();
+	});
 
-	// SDK-shaped exception records are passed through the same before-send
-	// callback. The local receiver below captures OTLP spans; this does not claim
-	// a live PostHog ingestion request.
+	// The fixture initializes the installed full.no-external PostHog SDK against
+	// this local receiver and preserves the application's before_send callback.
 	await page.goto("/snapshot.html");
 	await page.getByRole("button", { name: "Download remote snapshot" }).click();
 	await expect(page.getByRole("alert")).toHaveText(
@@ -314,6 +430,148 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	await expect(page.getByTestId("snapshot-status")).toHaveText(
 		"Downloaded 21 bytes",
 	);
+
+	await page.evaluate(() =>
+		(
+			window as Window & {
+				triggerPostHogWireExceptions: () => void;
+			}
+		).triggerPostHogWireExceptions(),
+	);
+	const posthogStatus = await page.evaluate(() => {
+		const testWindow = window as Window & {
+			snapshotPostHogStatus: () => Record<string, unknown>;
+			snapshotPostHogCaptureExceptionCalls: number;
+		};
+		return {
+			...testWindow.snapshotPostHogStatus(),
+			captureExceptionCalls: testWindow.snapshotPostHogCaptureExceptionCalls,
+		};
+	});
+	await expect
+		.poll(
+			() =>
+				posthogWireEvents.filter(({ event }) => event === "$exception").length,
+		)
+		.toBeGreaterThanOrEqual(3);
+	expect(posthogCaptureRequests.length).toBeGreaterThan(0);
+	expect(posthogCaptureRequests.every(({ status }) => status === 200)).toBe(
+		true,
+	);
+	expect(externalRequests).toEqual([]);
+
+	const wireExceptions = posthogWireEvents.filter(
+		(event) => event.event === "$exception",
+	);
+	const wireExceptionSummary = wireExceptions.map((event) => {
+		const exception = firstException(event);
+		const mechanism = exception?.mechanism as
+			| { handled?: boolean; type?: string }
+			| undefined;
+		return {
+			errorType: exception?.type,
+			operation: event.properties?.operation,
+			mechanism: mechanism?.type,
+			handled: mechanism?.handled,
+		};
+	});
+	expect(
+		wireExceptions,
+		JSON.stringify({ posthogStatus, posthogTraffic, wireExceptionSummary }),
+	).toHaveLength(3);
+	const handledWireException = wireExceptions.find(
+		(event) =>
+			event.properties?.operation === "repository_remote_snapshot_download",
+	);
+	expect(handledWireException).toBeDefined();
+	const handledWireProperties = handledWireException!.properties!;
+	const handledWireError = firstException(handledWireException!);
+	expect(handledWireError?.type).toBe("RepositorySnapshotDownloadError");
+	expect(handledWireError?.value).toBe(
+		"Remote snapshot download failed (http_response, HTTP 404)",
+	);
+	expect(handledWireProperties).toMatchObject({
+		operation: "repository_remote_snapshot_download",
+		service_name: "lixray-web",
+		client_release: "snapshot-fixture-release",
+		failure_stage: "http_response",
+		lix_http_status: 404,
+		httpStatus: 404,
+		request_id: "snapshot_req_404",
+		reproduction: {
+			action: "download_remote_snapshot",
+			repository_id: REPOSITORY_ID,
+			method: "GET",
+			endpoint: "/lix/v1/{lix_id}/snapshot",
+		},
+	});
+	expect(handledWireProperties.error_id).toMatch(
+		/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/,
+	);
+	expect(handledWireProperties.error_correlation).toBe("provided_trace");
+	expect(handledWireProperties.$otel_trace_id).toBe(
+		failedProperties.$otel_trace_id,
+	);
+	expect(handledWireProperties.$otel_span_id).toBe(
+		failedProperties.$otel_span_id,
+	);
+
+	const uncaughtWireException = wireExceptions.find(
+		(event) => firstException(event)?.type === "SnapshotFixtureUncaughtError",
+	);
+	const rejectionWireException = wireExceptions.find(
+		(event) => firstException(event)?.type === "SnapshotFixtureRejectionError",
+	);
+	expect(uncaughtWireException).toBeDefined();
+	const unhandledRejectionEvents = await page.evaluate(
+		() =>
+			(
+				window as Window & {
+					snapshotUnhandledRejectionEvents: Array<{
+						isTrusted: boolean;
+						reasonType: string;
+					}>;
+				}
+			).snapshotUnhandledRejectionEvents,
+	);
+	expect(
+		rejectionWireException,
+		JSON.stringify({ wireExceptionSummary, unhandledRejectionEvents }),
+	).toBeDefined();
+	for (const event of [uncaughtWireException!, rejectionWireException!]) {
+		const properties = event.properties!;
+		const exception = firstException(event);
+		const mechanism = exception?.mechanism as
+			| { handled?: boolean; type?: string }
+			| undefined;
+		expect(properties).toMatchObject({
+			operation: "browser.exception",
+			error_correlation: "standalone_trace",
+			service_name: "lixray-web",
+			client_release: "snapshot-fixture-release",
+		});
+		expect(properties.error_id).toMatch(
+			/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/,
+		);
+		expect(properties.$otel_trace_id).toMatch(/^[a-f0-9]{32}$/);
+		expect(properties.$otel_span_id).toMatch(/^[a-f0-9]{16}$/);
+		expect(mechanism).toMatchObject({ handled: false });
+		await expect
+			.poll(() =>
+				otlpSpans.some(
+					({ name, traceId, spanId, attributes }) =>
+						name === "browser.exception" &&
+						traceId === properties.$otel_trace_id &&
+						spanId === properties.$otel_span_id &&
+						attributes["exception.capture_id"] === properties.error_id,
+				),
+			)
+			.toBe(true);
+	}
+	expect(JSON.stringify(wireExceptions)).not.toContain(AUTH_SECRET);
+	expect(JSON.stringify(wireExceptions)).not.toContain(QUERY_SECRET);
+	expect(JSON.stringify(wireExceptions)).not.toContain(BODY_SECRET);
+	expect(JSON.stringify(wireExceptions)).not.toContain("download_secret");
 
 	await page.evaluate(() =>
 		(

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { createRoot } from "react-dom/client";
+import posthog from "posthog-js/dist/module.full.no-external.js";
 import {
 	configureBrowserTelemetryRepository,
 	installBrowserTelemetry,
@@ -11,6 +12,7 @@ import {
 import { downloadRepositorySnapshot } from "../../src/lib/repository-snapshot-telemetry";
 import { downloadRepositoryRemoteSnapshot } from "../../src/lib/repository-lix-session";
 import { tracer } from "../../src/telemetry.ts";
+import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "../../src/lib/telemetry-exceptions.ts";
 import type { Properties } from "posthog-js";
 import type { ProductEvent } from "../../src/lib/telemetry-events";
 
@@ -36,15 +38,106 @@ declare global {
 		snapshotPreparedExceptions: PreparedException[];
 		snapshotExpectedTraces: Record<string, TraceContext>;
 		runExceptionTraceability: () => Promise<void>;
+		triggerPostHogWireExceptions: () => void;
+		snapshotPostHogCaptureExceptionCalls: number;
+		snapshotPostHogBeforeSendCalls: number;
+		snapshotPostHogBeforeSendEvents: string[];
+		snapshotUnhandledRejectionEvents: Array<{
+			isTrusted: boolean;
+			reasonType: string;
+		}>;
+		snapshotPostHogStatus: () => Record<string, unknown>;
 	}
 }
 
 installBrowserTelemetry();
 configureBrowserTelemetryRepository(REPOSITORY_ID, async () => ACCESS_TOKEN);
+window.snapshotPostHogCaptureExceptionCalls = 0;
+window.snapshotPostHogBeforeSendCalls = 0;
+window.snapshotPostHogBeforeSendEvents = [];
+window.snapshotUnhandledRejectionEvents = [];
+window.addEventListener("unhandledrejection", (event) => {
+	window.snapshotUnhandledRejectionEvents.push({
+		isTrusted: event.isTrusted,
+		reasonType:
+			event.reason instanceof Error ? event.reason.name : typeof event.reason,
+	});
+});
+posthog.init("phc_0123456789abcdef0123456789abcdef", {
+	api_host: window.location.origin,
+	defaults: "2026-05-30",
+	advanced_disable_flags: true,
+	autocapture: false,
+	capture_pageview: false,
+	capture_pageleave: false,
+	capture_exceptions: BROWSER_EXCEPTION_CAPTURE_CONFIG,
+	disable_persistence: true,
+	disable_session_recording: true,
+	disable_surveys: true,
+	opt_out_useragent_filter: true,
+	person_profiles: "identified_only",
+	request_batching: false,
+	before_send: (event) => {
+		window.snapshotPostHogBeforeSendCalls += 1;
+		window.snapshotPostHogBeforeSendEvents.push(event?.event ?? "null");
+		return preparePostHogEvent(event);
+	},
+});
+window.snapshotPostHogStatus = () => {
+	const client = posthog as unknown as {
+		__loaded?: boolean;
+		config: {
+			token?: string;
+			api_host?: string;
+			capture_disabled?: boolean;
+			capture_exceptions?: {
+				capture_unhandled_errors?: boolean;
+				capture_unhandled_rejections?: boolean;
+			};
+			before_send?: unknown;
+			opt_out_useragent_filter?: boolean;
+		};
+		has_opted_out_capturing: () => boolean;
+		has_opted_in_capturing: () => boolean;
+	};
+	return {
+		loaded: client.__loaded === true,
+		tokenPresent: Boolean(client.config.token),
+		apiHost: client.config.api_host,
+		captureDisabled: client.config.capture_disabled ?? false,
+		optedOut: client.has_opted_out_capturing(),
+		optedIn: client.has_opted_in_capturing(),
+		beforeSendPresent: typeof client.config.before_send === "function",
+		beforeSendCalls: window.snapshotPostHogBeforeSendCalls,
+		beforeSendEvents: [...window.snapshotPostHogBeforeSendEvents],
+		unhandledRejectionEvents: [...window.snapshotUnhandledRejectionEvents],
+		optOutUserAgentFilter: client.config.opt_out_useragent_filter,
+		captureUnhandledErrors:
+			client.config.capture_exceptions?.capture_unhandled_errors,
+		captureUnhandledRejections:
+			client.config.capture_exceptions?.capture_unhandled_rejections,
+	};
+};
 window.snapshotEvents = [];
 window.snapshotExceptions = [];
 window.snapshotPreparedExceptions = [];
 window.snapshotExpectedTraces = {};
+
+window.triggerPostHogWireExceptions = () => {
+	setTimeout(() => {
+		const error = new Error("Controlled snapshot fixture uncaught failure");
+		error.name = "SnapshotFixtureUncaughtError";
+		throw error;
+	}, 0);
+	setTimeout(() => {
+		void Promise.reject(
+			Object.assign(
+				new Error("Controlled snapshot fixture rejection failure"),
+				{ name: "SnapshotFixtureRejectionError" },
+			),
+		);
+	}, 25);
+};
 
 window.runExceptionTraceability = async () => {
 	tracer.startActiveSpan("snapshot.fixture.handled", (span) => {
@@ -185,6 +278,8 @@ function SnapshotFixture() {
 				REPOSITORY_ID,
 				(error, properties) => {
 					const traceable = exceptionTraceability(properties ?? {});
+					posthog.captureException(error, traceable);
+					window.snapshotPostHogCaptureExceptionCalls += 1;
 					window.snapshotExceptions.push({
 						name: error instanceof Error ? error.name : "UnknownError",
 						message: error instanceof Error ? error.message : "",

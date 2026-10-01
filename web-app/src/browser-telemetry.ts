@@ -1,3 +1,4 @@
+import { installZonePromiseRejectionInterop } from "./lib/zone-promise-rejection-interop.ts";
 import { createRepositorySpanExporter } from "./lib/repository-span-exporter.ts";
 import { context, propagation, type Context } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
@@ -42,6 +43,7 @@ const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(
 export function installBrowserTelemetry(): void {
 	if (providerInstalled || isDemoModeEnabled || typeof window === "undefined")
 		return;
+	installZonePromiseRejectionInterop(window);
 	providerInstalled = true;
 	const exporter = createRepositorySpanExporter(
 		(repositoryId) =>
