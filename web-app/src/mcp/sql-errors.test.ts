@@ -156,3 +156,43 @@ void test("a guard conflict is a definite rollback", () => {
 	);
 	assert.equal(error.outcome, "not_committed");
 });
+
+void test("structured execution outcomes take precedence over code inference", () => {
+	for (const outcome of ["not_committed", "committed", "unknown"]) {
+		const error = sqlToolError(
+			{
+				code: "LIX_ERROR_READ_ONLY",
+				message: "read-only surface",
+				details: { outcome, executionPhase: "binding" },
+			},
+			running,
+		);
+		assert.equal(error.outcome, outcome);
+		assert.match(
+			error.hint!,
+			outcome === "unknown"
+				? /do not blindly repeat/
+				: outcome === "committed"
+					? /Do not repeat/
+					: /not committed/,
+		);
+	}
+});
+
+void test("unsupported query content insertion keeps capability guidance without irrelevant casts", () => {
+	const error = sqlToolError(
+		{
+			code: "LIX_UNSUPPORTED_SQL",
+			message: "query-based INSERT into lix_file.content is not supported",
+			hint: "Use INSERT ... VALUES or SELECT commit_id FROM lix_restore($1, ARRAY[lix_row_ref('lix_file', NULL, $2)]).",
+			details: {
+				outcome: "not_committed",
+				capability: "file_content_query_insert",
+			},
+		},
+		running,
+	);
+	assert.equal(error.outcome, "not_committed");
+	assert.match(error.hint!, /lix_restore/);
+	assert.doesNotMatch(error.hint!, /CAST|REPLACE|CONCAT/);
+});

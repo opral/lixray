@@ -488,3 +488,33 @@ These are navigation links, not capabilities: they do not publish private data
 or grant access. Resolution uses the encrypted context's repository and branch,
 and current namespace/repository names. Link resolution remains a separate
 read-only operation so a failure cannot misreport a successful write as failed.
+
+### Restore selected historical rows
+
+To restore one deleted file without changing unrelated later work, use
+`execute_sql` with this statement and two `kind: "text"` parameters: the source
+commit ID and the file ID.
+
+```sql
+SELECT commit_id FROM lix_restore(
+  $1,
+  ARRAY[lix_row_ref('lix_file', NULL, $2)]
+);
+```
+
+This creates a commit on the current context branch, preserves the selected
+file's ID and historical bytes, and returns a commit receipt. It also supports
+restoring selected ordinary rows. `lix_history` and `lix_diff` return opaque
+`kind: "row_ref"` values with canonical `lix_row_ref:v2:` strings; pass these
+back as `kind: "row_ref"` parameters rather than interpreting their contents.
+
+Query-based `INSERT` into `lix_file.content` is unsupported. Adding a BYTEA cast
+does not enable that route. For new file bytes use `INSERT ... VALUES` with bound
+binary content; for historical recovery use `lix_restore` as above.
+
+Scoped SQL restoration differs from the `restore` tool, which moves the branch
+head, and from `undo`/`redo`, which reverse or replay the undoable action. Scoped
+restoration applies historical state to the selected rows; it is not a
+conditional reversal protecting against concurrent writers. Check for later
+changes and use a guarded write when reversal must preserve concurrent changes.
+The retired `lix_revert` SQL write sink is read-only and must not be used.

@@ -1,3 +1,4 @@
+import { unreachableValue } from "./wire-value.ts";
 import { context, trace, type SpanContext } from "@opentelemetry/api";
 import { withSpan, fetchLixWithTrace, failSpan } from "../telemetry.ts";
 import {
@@ -275,10 +276,22 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					})),
 					{ ...request.options, rowMode: "array" },
 				);
-				return {
-					results: results.results.map(encodeStatementResult),
-					commit: results.commit,
-				};
+				try {
+					return {
+						results: results.results.map(encodeStatementResult),
+						commit: results.commit,
+					};
+				} catch (caught) {
+					const error = asLixError(caught);
+					throw createLixError(error.code ?? "upstream_error", error.message, {
+						details: {
+							...(error.details && typeof error.details === "object"
+								? error.details
+								: {}),
+							outcome: results.commit ? "committed" : "not_committed",
+						},
+					});
+				}
 			});
 		} catch (caught) {
 			throw asLixError(caught);
@@ -657,6 +670,10 @@ function decodeWireParam(
 			return Value.jsonb(value.value as JsonValue);
 		case "blob":
 			return Value.blob(base64ToBytes(value.base64));
+		case "row_ref":
+			return Value.rowRef(value.value);
+		default:
+			return unreachableValue(value);
 	}
 }
 
@@ -701,6 +718,10 @@ function encodeLixValue(
 		case "text":
 			if (typeof value === "string") return { kind: "text", value };
 			break;
+		case "row_ref":
+			if (typeof value === "string" && /^lix_row_ref:v2:[^\s]+$/.test(value))
+				return { kind: "row_ref", value };
+			break;
 		case "timestamptz":
 			if (typeof value === "string") return { kind: "timestamp", value };
 			break;
@@ -711,14 +732,30 @@ function encodeLixValue(
 				throw createLixError(
 					"upstream_error",
 					"Lix returned an invalid blob value.",
+					{
+						details: {
+							exceptionOwner: "mcp",
+							failureReason: "invalid_result_value",
+							valueType: "blob",
+						},
+					},
 				);
 			}
 			return { kind: "blob", base64: bytesToBase64(value) };
 		}
+		default:
+			return unreachableValue(type);
 	}
 	throw createLixError(
 		"upstream_error",
 		`Lix returned an invalid ${type} value.`,
+		{
+			details: {
+				exceptionOwner: "mcp",
+				failureReason: "invalid_result_value",
+				valueType: type,
+			},
+		},
 	);
 }
 

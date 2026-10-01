@@ -618,6 +618,35 @@
 								"properties": {
 									"kind": {
 										"type": "string",
+										"const": "timestamp"
+									},
+									"value": {
+										"type": "string"
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
+										"const": "row_ref"
+									},
+									"value": {
+										"type": "string",
+										"pattern": "^lix_row_ref:v2:[^\\s]+$"
+									}
+								},
+								"required": ["kind", "value"],
+								"additionalProperties": false
+							},
+							{
+								"type": "object",
+								"properties": {
+									"kind": {
+										"type": "string",
 										"const": "blob"
 									},
 									"base64": {
@@ -668,7 +697,137 @@
 							"type": "array",
 							"items": {
 								"type": "array",
-								"items": {}
+								"items": {
+									"anyOf": [
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "null"
+												},
+												"value": {
+													"type": "null"
+												}
+											},
+											"required": ["kind"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "bool"
+												},
+												"value": {
+													"type": "boolean"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "int"
+												},
+												"value": {
+													"type": "integer",
+													"minimum": -9007199254740991,
+													"maximum": 9007199254740991
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "float"
+												},
+												"value": {
+													"type": "number"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "text"
+												},
+												"value": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "timestamp"
+												},
+												"value": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "row_ref"
+												},
+												"value": {
+													"type": "string",
+													"pattern": "^lix_row_ref:v2:[^\\s]+$"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "blob"
+												},
+												"base64": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "base64"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "json"
+												},
+												"value": {}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										}
+									]
+								}
 							},
 							"description": "Rows of wire values in the same {kind, value} shape as params"
 						},
@@ -836,6 +995,35 @@
 											"properties": {
 												"kind": {
 													"type": "string",
+													"const": "timestamp"
+												},
+												"value": {
+													"type": "string"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
+													"const": "row_ref"
+												},
+												"value": {
+													"type": "string",
+													"pattern": "^lix_row_ref:v2:[^\\s]+$"
+												}
+											},
+											"required": ["kind", "value"],
+											"additionalProperties": false
+										},
+										{
+											"type": "object",
+											"properties": {
+												"kind": {
+													"type": "string",
 													"const": "blob"
 												},
 												"base64": {
@@ -936,7 +1124,137 @@
 								"type": "array",
 								"items": {
 									"type": "array",
-									"items": {}
+									"items": {
+										"anyOf": [
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "null"
+													},
+													"value": {
+														"type": "null"
+													}
+												},
+												"required": ["kind"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "bool"
+													},
+													"value": {
+														"type": "boolean"
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "int"
+													},
+													"value": {
+														"type": "integer",
+														"minimum": -9007199254740991,
+														"maximum": 9007199254740991
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "float"
+													},
+													"value": {
+														"type": "number"
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "text"
+													},
+													"value": {
+														"type": "string"
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "timestamp"
+													},
+													"value": {
+														"type": "string"
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "row_ref"
+													},
+													"value": {
+														"type": "string",
+														"pattern": "^lix_row_ref:v2:[^\\s]+$"
+													}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "blob"
+													},
+													"base64": {
+														"type": "string"
+													}
+												},
+												"required": ["kind", "base64"],
+												"additionalProperties": false
+											},
+											{
+												"type": "object",
+												"properties": {
+													"kind": {
+														"type": "string",
+														"const": "json"
+													},
+													"value": {}
+												},
+												"required": ["kind", "value"],
+												"additionalProperties": false
+											}
+										]
+									}
 								},
 								"description": "Rows of wire values in the same {kind, value} shape as params"
 							},

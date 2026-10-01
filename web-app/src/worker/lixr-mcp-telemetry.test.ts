@@ -314,3 +314,49 @@ void test("getFileExtension extracts file extensions", () => {
 	assert.equal(getFileExtension("/no-extension"), "");
 	assert.equal(getFileExtension("/file.with.multiple.dots.json"), "json");
 });
+
+void test("local MCP failures capture one sanitized exception with actor and stable replay identity", async () => {
+	const captured: EventMessage[] = [];
+	const session = createLixrMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		{ userId: "canonical-account", clientId: "client" },
+		{
+			createClient: () => ({
+				captureImmediate: async (event) => {
+					captured.push(event);
+				},
+				shutdown: async () => {},
+			}),
+		},
+	)!;
+	const failure = {
+		requestId: "request",
+		toolName: "query_sql",
+		surfaceVersion: "test",
+		outcome: "error" as const,
+		exceptionOwner: "mcp" as const,
+		errorCode: "upstream_error",
+		traceId: "01".repeat(16),
+		spanId: "02".repeat(8),
+		lixId: LIX_ID,
+		rawStatements: [{ sql: "SELECT private", params: ["secret"] }],
+	};
+	session.captureToolFailure(failure);
+	session.captureToolFailure(failure);
+	session.captureToolFailure({ ...failure, spanId: "03".repeat(8) });
+	session.captureToolFailure({ ...failure, exceptionOwner: "protocol" });
+	await session.flush();
+	assert.equal(captured.length, 3);
+	assert.equal(captured[0]!.uuid, captured[1]!.uuid);
+	assert.notEqual(captured[0]!.uuid, captured[2]!.uuid);
+	for (const event of captured) {
+		assert.equal(event.event, "$exception");
+		assert.equal(event.distinctId, "canonical-account");
+		assert.equal(event.properties?.$otel_trace_id, failure.traceId);
+		assert.equal(event.properties?.repository_id, LIX_ID);
+		assert.doesNotMatch(JSON.stringify(event), /SELECT private|secret/);
+	}
+});

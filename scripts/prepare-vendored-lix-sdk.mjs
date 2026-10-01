@@ -36,7 +36,8 @@ const tsc = join(
 const modeArguments = process.argv.slice(2);
 if (
 	modeArguments.some(
-		(argument) => !["--native", "--resolve-only"].includes(argument),
+		(argument) =>
+			!["--native", "--resolve-only", "--source"].includes(argument),
 	)
 ) {
 	throw new Error(
@@ -44,8 +45,9 @@ if (
 	);
 }
 const buildNative = modeArguments.includes("--native");
+const buildSource = modeArguments.includes("--source");
 const resolveOnly = modeArguments.includes("--resolve-only");
-if (resolveOnly && buildNative)
+if (resolveOnly && (buildNative || buildSource))
 	throw new Error("Resolve-only mode cannot build native binaries.");
 const lixRoot = join(sdkRoot, "..", "..");
 const sourceRevision = requiredOutput(
@@ -65,6 +67,57 @@ await requireDirectory(
 
 console.log(`[lix-sdk] Selected vendored Lix ${sourceRevision}.`);
 
+if (buildSource) {
+	// Explicit local builds never claim tested cloud artifact provenance.
+	if (process.env.LIXRAY_LIX_ARTIFACTS === "only")
+		throw new Error("Source builds cannot satisfy artifact-only validation.");
+	const clean = spawnSync(
+		"git",
+		["-C", lixRoot, "diff", "HEAD", "--exit-code"],
+		{ stdio: "ignore" },
+	);
+	if (clean.status !== 0)
+		throw new Error(
+			"Commit engine changes before building a revision-pinned SDK from source.",
+		);
+	const toolchainEnv = await vendoredLixToolchainEnv({
+		requireWasmBindgen: true,
+	});
+	run(
+		process.execPath,
+		[join(sdkRoot, "scripts", "build-wasm.js")],
+		toolchainEnv,
+		sdkRoot,
+	);
+	run(
+		process.execPath,
+		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
+		toolchainEnv,
+		sdkRoot,
+	);
+	run(
+		process.execPath,
+		[join(sdkRoot, "scripts", "build-compatibility.js")],
+		toolchainEnv,
+		sdkRoot,
+	);
+	run(
+		process.execPath,
+		[tsc, "-p", join(opfsStorageRoot, "tsconfig.json")],
+		toolchainEnv,
+		opfsStorageRoot,
+	);
+	await writeBuildMarker(browserMarker, {
+		source: "source-build",
+		sourceRevision,
+		sourceTree: requiredOutput(
+			"git",
+			["-C", lixRoot, "rev-parse", "HEAD^{tree}"],
+			process.env,
+			"Lix source tree",
+		),
+	});
+}
 let browserReady = await preparedBrowserMatches(sourceRevision);
 
 if (browserReady) {
@@ -91,9 +144,7 @@ if (browserReady) {
 		}
 	} catch (error) {
 		if (process.env.LIXRAY_LIX_ARTIFACTS === "only") throw error;
-		console.log(
-			`[lix-sdk] Artifact install failed (${errorMessage(error)}).`,
-		);
+		console.log(`[lix-sdk] Artifact install failed (${errorMessage(error)}).`);
 	}
 }
 
@@ -101,13 +152,17 @@ if (resolveOnly) {
 	if (process.env.GITHUB_OUTPUT)
 		await appendFile(process.env.GITHUB_OUTPUT, `ready=${browserReady}\n`);
 	if (!browserReady) {
-		console.log("[lix-sdk] Pinned browser SDK artifact is missing; build it in https://github.com/opral/lix/actions/workflows/ci.yml.");
+		console.log(
+			"[lix-sdk] Pinned browser SDK artifact is missing; build it in https://github.com/opral/lix/actions/workflows/ci.yml.",
+		);
 		process.exit(0);
 	}
 }
 
 if (!browserReady) {
-	throw new Error(`Missing browser SDK for ${sourceRevision}. Build it in https://github.com/opral/lix/actions/workflows/ci.yml using the artifact-only action, then retry.`);
+	throw new Error(
+		`Missing browser SDK for ${sourceRevision}. Build it in https://github.com/opral/lix/actions/workflows/ci.yml using the artifact-only action, then retry.`,
+	);
 }
 await ensureWasmSourceLink();
 
@@ -143,12 +198,31 @@ if (buildNative) {
 	verifyNativeSdk();
 }
 
-
 async function preparedBrowserMatches(revision) {
 	const marker = await readBuildMarker(browserMarker);
+	if (marker?.source === "source-build") {
+		const clean = spawnSync(
+			"git",
+			["-C", lixRoot, "diff", "HEAD", "--exit-code"],
+			{ stdio: "ignore" },
+		);
+		if (
+			clean.status !== 0 ||
+			marker.sourceTree !==
+				requiredOutput(
+					"git",
+					["-C", lixRoot, "rev-parse", "HEAD^{tree}"],
+					process.env,
+					"Lix source tree",
+				)
+		)
+			return false;
+	}
 	return (
 		marker?.sourceRevision === revision &&
-		marker.source === "lix-ci-artifact" &&
+		(marker.source === "lix-ci-artifact" ||
+			(marker.source === "source-build" &&
+				process.env.LIXRAY_LIX_ARTIFACTS !== "only")) &&
 		(await browserFilesExist())
 	);
 }
@@ -175,10 +249,17 @@ async function preparedNativeMatches(revision, target) {
 async function ensureWasmSourceLink() {
 	await rm(join(sdkRoot, "src", "wasm"), { recursive: true, force: true });
 	await symlink(join(sdkDist, "wasm"), join(sdkRoot, "src", "wasm"), "dir");
-	await rm(join(sdkRoot, "src", "migration-wasm"), { recursive: true, force: true });
+	await rm(join(sdkRoot, "src", "migration-wasm"), {
+		recursive: true,
+		force: true,
+	});
 	// Older vendored SDKs still import the detached engine from source.
 	if (await isFile(join(sdkDist, "migration-wasm", "lix_js_sdk_bg.wasm"))) {
-		await symlink(join(sdkDist, "migration-wasm"), join(sdkRoot, "src", "migration-wasm"), "dir");
+		await symlink(
+			join(sdkDist, "migration-wasm"),
+			join(sdkRoot, "src", "migration-wasm"),
+			"dir",
+		);
 	}
 }
 

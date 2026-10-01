@@ -1,3 +1,4 @@
+import { wireValue } from "./wire-value.ts";
 /*
  * The MCP SDK exposes dynamically registered tool arguments as `any`. Keep
  * this exception at the adapter boundary; the individual Zod schemas and
@@ -130,6 +131,9 @@ export interface McpToolCallObservation {
 	spanId?: string;
 	surfaceVersion: string;
 	errorCode?: string;
+	exceptionOwner?: "mcp" | "protocol";
+	resultEncodingType?: string;
+	commitOutcome?: "not_committed" | "committed" | "unknown";
 	lixId?: string;
 	commit?: CommitSpan | null;
 	inventoryCommitId?: string;
@@ -361,15 +365,7 @@ const context = z
 const branchId = z.string().min(1).describe("Lix branch id");
 const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
-const wireValue = z.union([
-	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
-	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
-	z.object({ kind: z.literal("int"), value: z.number().int() }).strict(),
-	z.object({ kind: z.literal("float"), value: z.number() }).strict(),
-	z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
-	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
-]);
+
 const executeOptions = z
 	.object({
 		origin_key: z.string().optional(),
@@ -382,7 +378,7 @@ const sqlStatement = z
 // Rows carry the same {kind, value} wire shape as params; the output schema
 // says so once instead of inlining the union again per tool.
 const wireRows = z
-	.array(z.array(z.unknown()))
+	.array(z.array(wireValue))
 	.describe("Rows of wire values in the same {kind, value} shape as params");
 
 const listLixesOutput = withError(
@@ -644,6 +640,9 @@ function traceToolDispatch(
 								surfaceVersion: mcpSurfaceVersion(toolSurfaceDescriptions()),
 								...state.observation,
 								outcome,
+								...(state.commitOutcome
+									? { commitOutcome: state.commitOutcome }
+									: {}),
 								traceId: span.spanContext().traceId,
 								spanId: span.spanContext().spanId,
 							};
@@ -1725,6 +1724,32 @@ function registerTool(
 					outcome: "error",
 					surfaceVersion,
 					errorCode: error.code,
+					exceptionOwner:
+						baseError.details &&
+						typeof baseError.details === "object" &&
+						"exceptionOwner" in baseError.details &&
+						baseError.details.exceptionOwner === "protocol"
+							? "protocol"
+							: "mcp",
+					...(baseError.details &&
+					typeof baseError.details === "object" &&
+					"failureReason" in baseError.details &&
+					baseError.details.failureReason === "invalid_result_value" &&
+					"valueType" in baseError.details &&
+					typeof baseError.details.valueType === "string" &&
+					[
+						"null",
+						"boolean",
+						"integer",
+						"real",
+						"text",
+						"timestamptz",
+						"jsonb",
+						"row_ref",
+						"blob",
+					].includes(baseError.details.valueType)
+						? { resultEncodingType: baseError.details.valueType }
+						: {}),
 					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
 					...(rawStatements ? { rawStatements } : {}),

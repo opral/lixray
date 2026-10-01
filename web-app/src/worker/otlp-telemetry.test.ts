@@ -1092,3 +1092,81 @@ void test("browser route attempts become replay-stable performance samples with 
 	assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
 	assert.doesNotMatch(JSON.stringify(event), /private|secret|unrelated/);
 });
+
+void test("nested SQL failures have one boundary exception, independent requests and stable delivery IDs", async () => {
+	const attr = (key: string, value: string) => ({
+		key,
+		value: { stringValue: value },
+	});
+	const failed = (name: string, id: number, owner: string) => ({
+		...span(name),
+		spanId: Array(8).fill(id),
+		status: { code: 2 },
+		attributes: [
+			...span(name).attributes,
+			attr("lix.error.owner", owner),
+			attr("lix.error.code", "LIX_TYPE_MISMATCH"),
+			attr("db.query.text", "private SQL"),
+			attr("parameters", "secret content"),
+		],
+		events: [
+			{
+				name: "exception",
+				attributes: [
+					attr("exception.type", "LIX_TYPE_MISMATCH"),
+					attr("exception.message", "LIX_TYPE_MISMATCH"),
+				],
+			},
+			{
+				name: "duplicate log",
+				attributes: [
+					attr("level", "ERROR"),
+					attr("message", "private repeated detail"),
+				],
+			},
+		],
+	});
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	// Export child and boundary separately: no reliance on export ordering or batch membership.
+	for (let retry = 0; retry < 2; retry++) {
+		for (const spans of [
+			[failed("INSERT", 2, "diagnostic")],
+			[
+				failed("Lix protocol request", 3, "boundary"),
+				failed("Lix protocol request", 4, "boundary"),
+			],
+		]) {
+			assert.equal(
+				(
+					await handleOtlpTelemetry(request(encode(spans)), env, {
+						fetch: fetcher,
+					})
+				).status,
+				200,
+			);
+		}
+	}
+	const exceptions = batches
+		.flatMap((batch) => batch.batch)
+		.filter((event) => event.event === "$exception");
+	assert.equal(exceptions.length, 4);
+	assert.equal(new Set(exceptions.map((event) => event.uuid)).size, 2);
+	assert.deepEqual(
+		exceptions.slice(0, 2).map((event) => event.uuid),
+		exceptions.slice(2).map((event) => event.uuid),
+	);
+	for (const event of exceptions) {
+		assert.equal(event.distinct_id, "account-123");
+		assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+		assert.doesNotMatch(
+			JSON.stringify(event),
+			/private SQL|secret content|private repeated detail/,
+		);
+	}
+});

@@ -812,6 +812,7 @@ export async function handleRequest(
 			const pendingTelemetryCaptures: Array<Promise<void>> = [];
 
 			const onToolCall = (observation: McpToolCallObservation): void => {
+				lixrTelemetry?.captureToolFailure(observation);
 				if (
 					observation.outcome === "success" &&
 					observation.lixId &&

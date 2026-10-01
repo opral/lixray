@@ -16,15 +16,8 @@ const QUALIFIED_LIX_REF_PATTERN =
 const DEFAULT_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEVELOPMENT_CONTEXT_SIGNING_KEY = "lixray-development-context-key";
 
-export type WireValue =
-	| { kind: "null"; value?: null }
-	| { kind: "bool"; value: boolean }
-	| { kind: "int"; value: number }
-	| { kind: "float"; value: number }
-	| { kind: "text"; value: string }
-	| { kind: "timestamp"; value: string }
-	| { kind: "blob"; base64: string }
-	| { kind: "json"; value: unknown };
+import type { WireValue } from "./wire-value.ts";
+export type { WireValue } from "./wire-value.ts";
 
 export interface ExecuteOptions {
 	originKey?: string;

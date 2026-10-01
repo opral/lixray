@@ -89,6 +89,9 @@ export async function serverErrorEvents(
 	const traceId = hex(span.traceId);
 	const spanId = hex(span.spanId);
 	const context = attributes(span.attributes);
+	// Ownership is explicit and travels with each span, even across export batches.
+	// A diagnostic child remains available in OTLP but is not another exception.
+	if (context["lix.error.owner"] === "diagnostic") return [];
 	const resource = attributes(options.resourceAttributes);
 	const source = options.source ?? "server";
 	const candidateCode = context["lix.error.code"] ?? context["error.type"];
@@ -130,6 +133,13 @@ export async function serverErrorEvents(
 				},
 			],
 		});
+	}
+	if (context["lix.error.owner"] === "boundary") {
+		const failure = events.find((event) => {
+			const fields = attributes(event.attributes);
+			return fields.level === "ERROR" || event.name === "exception";
+		});
+		events.splice(0, events.length, ...(failure ? [failure] : []));
 	}
 	const details: Record<string, unknown> = {};
 	for (const [key, field] of [
@@ -187,6 +197,11 @@ export async function serverErrorEvents(
 					failureCode ?? "Lix operation failed",
 				)
 			: undefined;
+	const outcome = context["lix.commit.outcome"];
+	if (outcome && ["not_committed", "committed", "unknown"].includes(outcome))
+		structural.commit_outcome = outcome;
+	const executionPhase = context["lix.execution.phase"];
+	if (executionPhase === "binding") structural.execution_phase = executionPhase;
 	const phase = context["lix.request.phase"];
 	if (
 		phase &&
