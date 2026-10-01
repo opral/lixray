@@ -2312,7 +2312,7 @@ export function GettingStarted({
 					<button
 						type="button"
 						onClick={() => setConnectDialogOpen(true)}
-						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
+						className="mt-5.5 mb-10.5 inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-accent hover:brightness-105"
 					>
 						<Link2 className="size-3.5" aria-hidden="true" />
 						Connect an agent
@@ -2385,7 +2385,7 @@ function AgentConnectionDialog({
 					<button
 						type="button"
 						onClick={() => void copyPrompt()}
-						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-shadow-accent hover:brightness-105"
+						className="inline-flex items-center gap-2 rounded-[10px] bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] px-4.5 py-2.75 text-sm font-bold text-accent-on shadow-accent hover:brightness-105"
 					>
 						{/* Icon crossfade per Atelier's copy-markdown button: the Copy
 						    glyph gives way to a green check, then swaps back so the

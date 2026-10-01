@@ -47,6 +47,10 @@ for (const command of ["serve", "build"]) {
 		]);
 		assert.equal([...host.matchAll(/(?:^|})\.flex\{/g)].length, 1);
 		assert.ok(host.includes(".bg-panel"), "missing host bg-panel utility");
+		assert.ok(
+			host.includes(".shadow-accent"),
+			"missing host accent shadow utility",
+		);
 		assert.ok(!host.includes(".atw\\:"), "host generated library utilities");
 		assert.ok(css.includes(".atw\\:flex"), "missing private library utility");
 		assert.ok(
@@ -66,6 +70,8 @@ for (const command of ["serve", "build"]) {
 			]) {
 				await page.setContent(`<style>${sheets.join("\n")}</style>
 <div id="rail" class="flex sm:hidden">Phone rail</div>
+<div id="conflict" class="atw:flex sm:hidden">Host override</div>
+<button id="cta" class="shadow-accent">Call to action</button>
 <div id="grid" class="grid grid-cols-1 sm:grid-cols-2">Comparison</div>
 <div class="atelier-root"><button id="control" class="atw:border atw:bg-panel">Atelier</button></div>`);
 				for (const [width, hidden, columns] of [
@@ -73,6 +79,18 @@ for (const command of ["serve", "build"]) {
 					[1440, true, 2],
 				]) {
 					await page.setViewportSize({ width, height: 900 });
+					assert.equal(
+						await page
+							.locator("#conflict")
+							.evaluate((n) => getComputedStyle(n).display),
+						hidden ? "none" : "flex",
+					);
+					assert.notEqual(
+						await page
+							.locator("#cta")
+							.evaluate((n) => getComputedStyle(n).boxShadow),
+						"none",
+					);
 
 					assert.equal(
 						await page
