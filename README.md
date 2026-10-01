@@ -2,21 +2,18 @@
 
 **A shared repository for your company's data and AI agents.**
 
-Files and SQL tables with version control. Every agent edit is a change you can review, merge, or roll back. Claude, ChatGPT, Gemini, and Codex connect over MCP.
+Files and database tables with version control. Every agent edit is a change you can review, merge, or roll back. Claude, ChatGPT, Gemini, and Codex connect over MCP.
 
 ## Why a company repository
 
-A company repository holds all company data: files, tables, and history. Apps and agents connect to the repository. They do not keep their own copy:
+One shared source of truth. AI agents, apps, and services read and write the same files and tables.
 
-- **Internal apps.** Dashboards, scripts, and apps that your team builds.
-- **External apps.** Products from other companies, for example a translation app or a CRM.
-- **AI agents.** Claude, ChatGPT, Gemini, or the next model.
+- **Change proposals.** Anyone, human or agent, can propose a change.
+- **Automations.** Checks and scripts run on every change.
+- **Contributors.** Services such as accounting write back.
+- **History.** See who changed what. Restore any version.
 
-We learned this at [inlang](https://inlang.com), where Lix started. Inlang stores translations in the company's git repository, next to the source code. Inlang did not build its own storage, automation, or review. It uses what the company already has:
-
-- **Data.** Translations are files in the repository, next to the code that uses them.
-- **Automation.** The company's CI/CD checks and translates on each commit.
-- **Review.** Translation changes go through the same pull requests as code changes.
+Lix started at [inlang](https://inlang.com), where translation apps plug into the company's git repository. Lix adds what git was missing for company data: tables, any file format, and review that people who are not engineers can use.
 
 ## Connect an agent
 
@@ -63,14 +60,6 @@ Or open a repository in memory to try the SDK without an account:
 ```ts
 const lix = await openLix();
 ```
-
-## How it compares
-
-In the future, LixRay will mount external data, with Google Drive, Notion, and GitHub as sources.
-
-- **GitHub** has version control, but can't store tables and is hard to use.
-- **Notion** has tables, but no real files. Uploads are attachments you can't edit in place.
-- **Google Drive** has files, but no tables and no version control across them.
 
 ## Development
 

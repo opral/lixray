@@ -4,12 +4,11 @@ import {
 	Folder,
 	GitPullRequest,
 	History,
-	Smile,
 	Table2,
 	UsersRound,
 } from "lucide-react";
 import { SiteHeader, useRepositoryCta } from "~/components/site-header";
-import { WhyRepositoryIllustration } from "~/components/why-repository-illustration";
+import { SharedSourceIllustration } from "~/components/shared-source-illustration";
 
 const iconPath = (name: string) => "/landing/" + name + ".svg";
 
@@ -172,12 +171,6 @@ function RepositoryPreview() {
 
 const featureCopy = [
 	{
-		title: "Simple to use",
-		description:
-			"Web-based, with real-time collaboration and automatic commits.",
-		icon: <Smile className="size-[18px]" strokeWidth={2} aria-hidden="true" />,
-	},
-	{
 		title: "Any file format",
 		description: "Documents, spreadsheets, PDFs, and video.",
 		icon: (
@@ -191,77 +184,20 @@ const featureCopy = [
 		),
 	},
 	{
-		title: "Even supports tables",
+		title: "Database tables",
 		description: "For customer lists, orders, and more.",
 		icon: (
 			<Table2 className="size-[18px]" strokeWidth={1.8} aria-hidden="true" />
 		),
 	},
-] as const;
-
-const connectedApps = [
 	{
-		title: "Internal apps",
-		description: "Dashboards, scripts, and apps that your team builds.",
-	},
-	{
-		title: "External apps",
-		description:
-			"Products from other companies, for example a translation app or a CRM.",
-	},
-	{
-		title: "AI agents",
-		description: "Claude, ChatGPT, Gemini, or the next model.",
+		title: "Version control",
+		description: "See every change, and undo anything.",
+		icon: (
+			<History className="size-[18px]" strokeWidth={1.8} aria-hidden="true" />
+		),
 	},
 ] as const;
-
-const inlangReuse = [
-	{
-		title: "Data",
-		description:
-			"Translations are files in the repository, next to the code that uses them.",
-	},
-	{
-		title: "Automation",
-		description: "The company’s CI/CD checks and translates on each commit.",
-	},
-	{
-		title: "Review",
-		description:
-			"Translation changes go through the same pull requests as code changes.",
-	},
-] as const;
-
-const codexSetup = `codex mcp add LixRay --url https://lixray.com/mcp --oauth-resource https://lixray.com
-codex mcp login LixRay`;
-
-const sdkExample = `import { openLix } from "@lix-js/sdk";
-
-const lix = await openLix({
-  server: {
-    mode: "remote",
-    url: \`https://lixray.com/lix/\${repositoryId}\`,
-    headers: async () => ({
-      Authorization: \`Bearer \${process.env.LIXRAY_API_TOKEN}\`,
-    }),
-  },
-});
-
-await lix.execute("INSERT INTO lix_file (path, content) VALUES ($1, $2)", [
-  "/notes/status.txt",
-  new TextEncoder().encode("ready"),
-]);`;
-
-function CodeBlock({ code, label }: { code: string; label: string }) {
-	return (
-		<pre
-			className="m-0 max-w-full overflow-x-auto rounded-[10px] border border-border bg-panel px-4 py-3.5 text-[13px] leading-[1.6]"
-			aria-label={label}
-		>
-			<code className="font-mono">{code}</code>
-		</pre>
-	);
-}
 
 const sectionTitle =
 	"m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em] text-balance";
@@ -270,22 +206,22 @@ const sectionText = "m-0 text-[18px] leading-[1.65] text-fg-muted";
 const reviewBenefits = [
 	{
 		title: "Change proposals",
-		description: "Anyone can propose a change.",
+		description: "Anyone, human or agent, can propose a change.",
 		icon: GitPullRequest,
 	},
 	{
-		title: "Checks",
-		description: "Tests run before merge.",
+		title: "Automations",
+		description: "Checks and scripts run on every change.",
 		icon: CircleCheck,
 	},
 	{
 		title: "Contributors",
-		description: "Services and partners write back.",
+		description: "Services such as accounting write back.",
 		icon: UsersRound,
 	},
 	{
 		title: "History",
-		description: "AI agents can learn from history.",
+		description: "See who changed what. Restore any version.",
 		icon: History,
 	},
 ] as const;
@@ -313,8 +249,8 @@ export function LandingPage() {
 						A shared repository for your company’s data and AI agents.
 					</h1>
 					<p className="mt-7 mb-0 text-[19px] leading-[1.6] text-fg-muted text-pretty">
-						Files and SQL tables with version control. Every agent edit is a
-						change you can review, merge, or roll back.
+						Files and database tables with version control. Every agent edit is
+						a change you can review, merge, or roll back.
 					</p>
 					<div className="mt-7 flex flex-wrap items-center gap-2.5 text-[15px] text-fg-subtle">
 						<span>Works with</span>
@@ -375,50 +311,19 @@ export function LandingPage() {
 				</section>
 
 				<section
-					className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-8 pt-[120px] pb-24"
+					className="mx-auto flex w-full max-w-[800px] flex-col gap-8 px-8 pt-[120px] pb-[140px]"
 					aria-labelledby="why-title"
 				>
-					<h2
-						id="why-title"
-						className="m-0 text-[30px] leading-[1.2] font-bold tracking-[-.02em] text-balance"
-					>
-						Why a company repository?
-					</h2>
-					<p className="m-0 text-[18px] leading-[1.65] text-fg-muted">
-						A company repository holds all company data: files, tables, and
-						history. Apps and agents connect to the repository. They do not keep
-						their own copy.
-					</p>
-					<ul className="m-0 flex list-none flex-col gap-3 p-0 text-[17px] leading-[1.55] text-fg-muted">
-						{connectedApps.map(({ title, description }) => (
-							<li key={title}>
-								<strong className="text-fg">{title}.</strong> {description}
-							</li>
-						))}
-					</ul>
-					<p className={sectionText}>
-						We learned this at{" "}
-						<a
-							className="font-semibold text-fg underline-offset-2"
-							href="https://inlang.com"
-							target="_blank"
-							rel="noreferrer"
-						>
-							inlang
-						</a>
-						, where Lix started. Inlang stores translations in the company’s git
-						repository, next to the source code. Inlang did not build its own
-						storage, automation, or review. It uses what the company already
-						has:
-					</p>
-					<ul className="m-0 flex list-none flex-col gap-3 p-0 text-[17px] leading-[1.55] text-fg-muted">
-						{inlangReuse.map(({ title, description }) => (
-							<li key={title}>
-								<strong className="text-fg">{title}.</strong> {description}
-							</li>
-						))}
-					</ul>
-					<WhyRepositoryIllustration />
+					<div className="flex flex-col gap-3">
+						<h2 id="why-title" className={sectionTitle}>
+							Why a company repository?
+						</h2>
+						<p className={sectionText}>
+							One shared source of truth. AI agents, apps, and services read and
+							write the same files and tables.
+						</p>
+					</div>
+					<SharedSourceIllustration />
 					<div className="grid grid-cols-2 gap-x-5 gap-y-7 sm:grid-cols-4">
 						{reviewBenefits.map(({ title, description, icon: Icon }) => (
 							<div key={title} className="flex min-w-0 flex-col gap-1.5">
@@ -436,66 +341,19 @@ export function LandingPage() {
 							</div>
 						))}
 					</div>
-				</section>
-
-				<section
-					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-24"
-					aria-labelledby="connect-title"
-				>
-					<h2 id="connect-title" className={sectionTitle}>
-						Connect an agent
-					</h2>
-					<p className={sectionText}>
-						The MCP endpoint is{" "}
-						<code className="font-mono text-[16px] text-fg">
-							https://lixray.com/mcp
-						</code>
-						. It uses OAuth. In Codex:
-					</p>
-					<CodeBlock code={codexSetup} label="Codex setup commands" />
-					<p className={sectionText}>
-						In other clients, add the endpoint as a remote MCP server.
-					</p>
-				</section>
-
-				<section
-					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-24"
-					aria-labelledby="sdk-title"
-				>
-					<h2 id="sdk-title" className={sectionTitle}>
-						Use the SDK
-					</h2>
-					<p className={sectionText}>
-						Install{" "}
-						<code className="font-mono text-[16px] text-fg">@lix-js/sdk</code>,
-						create an API token in a repository under Settings → API tokens, and
-						connect:
-					</p>
-					<CodeBlock code={sdkExample} label="SDK example" />
-				</section>
-
-				<section
-					className="mx-auto flex w-full max-w-[800px] flex-col gap-6 px-8 pb-[140px]"
-					aria-labelledby="comparison-title"
-				>
-					<h2 id="comparison-title" className={sectionTitle}>
-						How it compares
-					</h2>
-					<p className={sectionText}>
-						In the future, LixRay will mount external data, with Google Drive,
-						Notion, and GitHub as sources.
-					</p>
-					<p className={sectionText}>
-						<strong className="text-fg">GitHub</strong> has version control, but
-						can’t store tables and is hard to use.
-					</p>
-					<p className={sectionText}>
-						<strong className="text-fg">Notion</strong> has tables, but no real
-						files. Uploads are attachments you can’t edit in place.
-					</p>
-					<p className={sectionText}>
-						<strong className="text-fg">Google Drive</strong> has files, but no
-						tables and no version control across them.
+					<p className="m-0 text-[15px] leading-[1.6] text-fg-subtle">
+						Lix started at{" "}
+						<a
+							className="text-fg-muted underline-offset-2"
+							href="https://inlang.com"
+							target="_blank"
+							rel="noreferrer"
+						>
+							inlang
+						</a>
+						, where translation apps plug into the company’s git repository. Lix
+						adds what git was missing for company data: tables, any file format,
+						and review that people who are not engineers can use.
 					</p>
 				</section>
 			</main>
