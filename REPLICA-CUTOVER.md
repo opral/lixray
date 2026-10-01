@@ -7,7 +7,7 @@ Target: storage format 81, sync protocol 16, SQL protocol 10, internal OPFS RPC 
 1. Run the engine simulations, doctests, storage conformance, composed Chromium authority/SharedWorker/OPFS/migration tests, and Lixray checks. Test the optimized artifacts that will ship.
 2. Inventory the authority object store with the detached server's `inventory-authorities` command. Export all control-plane `lixes` records (including tombstones), then run `node scripts/reconcile-authority-inventory.mjs CONTROL.json AUTHORITIES.json`. A nonzero result is an unresolved migration cohort, not permission to skip those records. Physical prefixes are not repository identity. Preserve the catalog’s hosted resource ID separately from the portable identity validated inside repository contents; restored snapshots can legitimately have a different embedded ID.
 3. Qualify recognized source profiles on isolated copies. A copy made while production remains live is a qualification input, never the final cutover backup. Exclude changed/incomplete copies. Do not initialize missing stores or adopt orphaned stores without resolving their control-plane identity and provenance.
-4. Prepare the complete matched deployment, including `@lix-js/sdk/migration`, its separate WASM, and `@lix-js/storage-opfs/migration` and its worker. Keep versioned same-origin historical migration assets available for returning offline devices.
+4. Prepare the complete matched deployment, including `@lix-js/sdk/migration`, the shared SDK WASM, and `@lix-js/storage-opfs/migration` and its worker. Keep versioned same-origin historical migration assets available for returning offline devices.
 
 ## Write barrier and authority migration
 
