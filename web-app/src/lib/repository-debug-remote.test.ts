@@ -8,7 +8,8 @@ import {
 } from "./repository-debug-remote.ts";
 
 void test("remote snapshots fetch the canonical endpoint without a protocol handshake", async () => {
-	const requestUrl = "https://example.test/lix/v1/123e4567-e89b-12d3-a456-426614174000/snapshot";
+	const requestUrl =
+		"https://example.test/lix/v1/123e4567-e89b-12d3-a456-426614174000/snapshot";
 	const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
 	const snapshot = await fetchRepositoryRemoteSnapshot({
 		url: requestUrl,
@@ -54,8 +55,7 @@ void test("remote snapshot HTTP failures retain status and a safe request id", a
 						status: 404,
 						headers: { "x-request-id": "req_123" },
 					},
-				)
-			) as typeof fetch,
+				)) as typeof fetch,
 		}),
 		(error: unknown) => {
 			assert.ok(error instanceof RepositoryRemoteSnapshotError);
@@ -83,8 +83,7 @@ void test("remote snapshot stream failures retain the original cause and request
 						},
 					}),
 					{ headers: { "x-request-id": "body_123" } },
-				)
-			) as typeof fetch,
+				)) as typeof fetch,
 		}),
 		(error: unknown) => {
 			assert.ok(error instanceof RepositoryRemoteSnapshotError);
@@ -120,7 +119,7 @@ void test("remote snapshot header failures are classified before fetch", async (
 	await assert.rejects(
 		fetchRepositoryRemoteSnapshot({
 			url: "https://example.test/lix/v1/repo-id/snapshot",
-		headers: async () => {
+			headers: async () => {
 				throw headerFailure;
 			},
 			fetch: (async () => {

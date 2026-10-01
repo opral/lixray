@@ -1,8 +1,6 @@
 import { gunzipSync } from "node:zlib";
 import protobuf from "protobufjs/light.js";
-import schema from "../../src/worker/otlp-traces.schema.json" with {
-	type: "json",
-};
+import schema from "../../src/worker/otlp-traces.schema.json" with { type: "json" };
 import { expect, test, type Route } from "@playwright/test";
 
 const REPOSITORY_ID = "123e4567-e89b-12d3-a456-426614174000";
@@ -74,7 +72,10 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 			authorization: request.headers().authorization,
 		});
 		if (url.pathname !== `/lix/v1/${REPOSITORY_ID}/snapshot`) {
-			await route.fulfill({ status: 404, body: "Unexpected protocol handshake" });
+			await route.fulfill({
+				status: 404,
+				body: "Unexpected protocol handshake",
+			});
 			return;
 		}
 		snapshotAttempts += 1;
@@ -147,15 +148,22 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	await expect(page.getByRole("alert")).toHaveText(
 		"Remote Lix snapshot request failed with status 404",
 	);
-	await expect(page.getByTestId("snapshot-status")).toHaveText("Download failed");
+	await expect(page.getByTestId("snapshot-status")).toHaveText(
+		"Download failed",
+	);
 
 	await expect
 		.poll(() =>
 			page.evaluate(
 				() =>
-					(window as Window & {
-						snapshotEvents: Array<{ event: string; properties: Record<string, unknown> }>;
-					}).snapshotEvents.length,
+					(
+						window as Window & {
+							snapshotEvents: Array<{
+								event: string;
+								properties: Record<string, unknown>;
+							}>;
+						}
+					).snapshotEvents.length,
 			),
 		)
 		.toBe(2);
@@ -163,9 +171,14 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		.poll(() => {
 			return page.evaluate(
 				() =>
-					(window as Window & {
-						snapshotEvents: Array<{ event: string; properties: Record<string, unknown> }>;
-					}).snapshotEvents.filter(
+					(
+						window as Window & {
+							snapshotEvents: Array<{
+								event: string;
+								properties: Record<string, unknown>;
+							}>;
+						}
+					).snapshotEvents.filter(
 						({ event, properties }) =>
 							event === "repository_snapshot_download" &&
 							properties.outcome === "started",
@@ -177,9 +190,14 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		.poll(() => {
 			return page.evaluate(
 				() =>
-					(window as Window & {
-						snapshotEvents: Array<{ event: string; properties: Record<string, unknown> }>;
-					}).snapshotEvents.filter(
+					(
+						window as Window & {
+							snapshotEvents: Array<{
+								event: string;
+								properties: Record<string, unknown>;
+							}>;
+						}
+					).snapshotEvents.filter(
 						({ event, properties }) =>
 							event === "repository_snapshot_download" &&
 							properties.outcome === "failed",
@@ -188,21 +206,40 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		})
 		.toBe(1);
 	await expect
-		.poll(() => otlpSpans.filter(({ name }) => name === "repository.snapshot.download").length)
+		.poll(
+			() =>
+				otlpSpans.filter(({ name }) => name === "repository.snapshot.download")
+					.length,
+		)
 		.toBe(1);
 
 	const recorded = await page.evaluate(
 		() =>
-			(window as Window & {
-				snapshotEvents: Array<{ event: string; properties: Record<string, unknown> }>;
-				snapshotExceptions: Array<{ name: string; message: string; properties: Record<string, unknown> }>;
-			}).snapshotEvents,
+			(
+				window as Window & {
+					snapshotEvents: Array<{
+						event: string;
+						properties: Record<string, unknown>;
+					}>;
+					snapshotExceptions: Array<{
+						name: string;
+						message: string;
+						properties: Record<string, unknown>;
+					}>;
+				}
+			).snapshotEvents,
 	);
 	const exceptions = await page.evaluate(
 		() =>
-			(window as Window & {
-				snapshotExceptions: Array<{ name: string; message: string; properties: Record<string, unknown> }>;
-			}).snapshotExceptions,
+			(
+				window as Window & {
+					snapshotExceptions: Array<{
+						name: string;
+						message: string;
+						properties: Record<string, unknown>;
+					}>;
+				}
+			).snapshotExceptions,
 	);
 	const failedEvents = recorded.filter(
 		({ event, properties }) =>
@@ -210,15 +247,23 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 			(properties.outcome === "started" || properties.outcome === "failed"),
 	);
 	expect(failedEvents).toHaveLength(2);
-	const started = failedEvents.find(({ properties }) => properties.outcome === "started")!;
-	const failed = failedEvents.find(({ properties }) => properties.outcome === "failed")!;
+	const started = failedEvents.find(
+		({ properties }) => properties.outcome === "started",
+	)!;
+	const failed = failedEvents.find(
+		({ properties }) => properties.outcome === "failed",
+	)!;
 	const startedProperties = started.properties!;
 	const failedProperties = failed.properties!;
 	expect(startedProperties.snapshot_attempt_id).toEqual(
 		failedProperties.snapshot_attempt_id,
 	);
-	expect(startedProperties.$otel_trace_id).toEqual(failedProperties.$otel_trace_id);
-	expect(startedProperties.$otel_span_id).toEqual(failedProperties.$otel_span_id);
+	expect(startedProperties.$otel_trace_id).toEqual(
+		failedProperties.$otel_trace_id,
+	);
+	expect(startedProperties.$otel_span_id).toEqual(
+		failedProperties.$otel_span_id,
+	);
 	expect(failedProperties.failure_stage).toBe("http_response");
 	expect(failedProperties.lix_http_status).toBe(404);
 	expect(failedProperties.httpStatus).toBe(404);
@@ -284,7 +329,10 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 				event: string;
 				properties: Record<string, unknown>;
 			}>;
-			snapshotExpectedTraces: Record<string, { traceId: string; spanId: string }>;
+			snapshotExpectedTraces: Record<
+				string,
+				{ traceId: string; spanId: string }
+			>;
 		};
 		return {
 			prepared: typedWindow.snapshotPreparedExceptions,
@@ -340,12 +388,18 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	const automatic = traceability.prepared.slice(3);
 	expect(automatic).toHaveLength(2);
 	expect(
-		(automatic[0].properties.$exception_list as Array<{ mechanism?: { type?: string } }>)[0]
-			?.mechanism?.type,
+		(
+			automatic[0].properties.$exception_list as Array<{
+				mechanism?: { type?: string };
+			}>
+		)[0]?.mechanism?.type,
 	).toBe("onerror");
 	expect(
-		(automatic[1].properties.$exception_list as Array<{ mechanism?: { type?: string } }>)[0]
-			?.mechanism?.type,
+		(
+			automatic[1].properties.$exception_list as Array<{
+				mechanism?: { type?: string };
+			}>
+		)[0]?.mechanism?.type,
 	).toBe("unhandledrejection");
 	for (const { properties } of automatic) {
 		expect(properties).toMatchObject({
@@ -401,9 +455,7 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	expect(trace.spanId).toBe(failedProperties.$otel_span_id);
 	expect(httpTrace.parentSpanId).toBe(trace.spanId);
 	expect(httpTrace.traceId).toBe(trace.traceId);
-	expect(httpTrace.attributes["http.route"]).toBe(
-		"/lix/v1/{lix_id}/snapshot",
-	);
+	expect(httpTrace.attributes["http.route"]).toBe("/lix/v1/{lix_id}/snapshot");
 	expect(httpTrace.attributes["http.response.status_code"]).toBe(404);
 	expect(trace.status?.code).toBe(2);
 	expect(JSON.stringify(trace)).not.toContain(AUTH_SECRET);

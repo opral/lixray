@@ -36,9 +36,7 @@ export class RepositoryRemoteSnapshotError extends Error {
 export interface FetchRepositoryRemoteSnapshotOptions {
 	/** The canonical `/lix/v1/{id}/snapshot` application route. */
 	url: string | URL;
-	headers?:
-		| HeadersInit
-		| (() => HeadersInit | Promise<HeadersInit>);
+	headers?: HeadersInit | (() => HeadersInit | Promise<HeadersInit>);
 	/** Supply the app's authenticated, telemetry-aware fetch implementation. */
 	fetch: typeof globalThis.fetch;
 	signal?: AbortSignal;

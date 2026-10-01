@@ -92,8 +92,7 @@ window.runExceptionTraceability = async () => {
 								{
 									filename: "file:///private/snapshot-fixture-secret.ts",
 									vars: {
-										document_content:
-										"snapshot-fixture-private-response-body",
+										document_content: "snapshot-fixture-private-response-body",
 									},
 								},
 							],
@@ -115,10 +114,10 @@ window.runExceptionTraceability = async () => {
 			operation: "snapshot.fixture.standalone",
 			$exception_list: [
 				{
-				type: "Error",
-				value: "Standalone fixture failure",
-				mechanism: { handled: false, type: "unhandledrejection" },
-			},
+					type: "Error",
+					value: "Standalone fixture failure",
+					mechanism: { handled: false, type: "unhandledrejection" },
+				},
 			],
 		},
 	});
@@ -128,7 +127,11 @@ window.runExceptionTraceability = async () => {
 
 	for (const [key, kind, message] of [
 		["uncaught", "onerror", "Uncaught fixture failure"],
-		["unhandledRejection", "unhandledrejection", "Unhandled rejection fixture failure"],
+		[
+			"unhandledRejection",
+			"unhandledrejection",
+			"Unhandled rejection fixture failure",
+		],
 	] as const) {
 		const exception = preparePostHogEvent({
 			uuid: `fixture-${key}`,
@@ -172,7 +175,10 @@ function SnapshotFixture() {
 						fetch: (input, init) => {
 							const request = new Request(input, init);
 							const url = new URL(request.url);
-							url.searchParams.set("download_secret", "snapshot-fixture-query-secret");
+							url.searchParams.set(
+								"download_secret",
+								"snapshot-fixture-query-secret",
+							);
 							return window.fetch(new Request(url, request));
 						},
 					}),
