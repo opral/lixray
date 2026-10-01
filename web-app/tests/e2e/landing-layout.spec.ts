@@ -8,7 +8,9 @@ for (const width of [1440, 390, 320]) {
 			await page.goto("/");
 
 			await expect(
-				page.getByRole("heading", { name: "Simple to use repository." }),
+				page.getByRole("heading", {
+					name: "A shared repository for your company’s data and AI agents.",
+				}),
 			).toBeVisible();
 			await expect(page.getByRole("banner")).toBeVisible();
 			await expect(
