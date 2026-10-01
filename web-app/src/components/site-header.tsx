@@ -14,8 +14,8 @@ export function useRepositoryCta() {
 }
 
 /**
- * The marketing-surface navbar shared by the landing page and the docs site:
- * "LixRay | Docs" on the left, GitHub / auth / CTA on the right.
+ * The marketing-surface navbar shared by the landing, pricing, and docs pages:
+ * "LixRay | Docs Pricing Self-host" on the left, auth / CTA on the right.
  */
 export function SiteHeader({
 	sticky = false,
@@ -51,19 +51,32 @@ export function SiteHeader({
 				>
 					Docs
 				</Link>
-				<a
-					className="hidden text-[15px] font-semibold text-fg-muted no-underline hover:text-fg sm:block"
-					href="https://github.com/opral"
-					target="_blank"
-					rel="noreferrer"
+				<Link
+					className="text-[15px] font-semibold text-fg-muted no-underline hover:text-fg max-[520px]:hidden"
+					to="/pricing"
 				>
-					GitHub ↗
-				</a>
+					Pricing
+				</Link>
+				<Link
+					className="hidden text-[15px] font-semibold text-fg-muted no-underline hover:text-fg sm:block"
+					to="/docs/$slug"
+					params={{ slug: "self-host" }}
+				>
+					Self-host
+				</Link>
 			</div>
 			<nav
 				className="flex items-center gap-5 text-[15px] font-semibold whitespace-nowrap sm:gap-6"
 				aria-label="Primary navigation"
 			>
+				<a
+					className="hidden text-fg-muted no-underline hover:text-fg md:block"
+					href="https://github.com/opral/lix"
+					target="_blank"
+					rel="noreferrer"
+				>
+					GitHub ↗
+				</a>
 				{user ? (
 					<button
 						className="cursor-pointer border-0 bg-transparent p-0 text-fg hover:text-link"
@@ -86,5 +99,50 @@ export function SiteHeader({
 			</nav>
 			{children}
 		</header>
+	);
+}
+
+/** The marketing-surface footer shared by the landing and pricing pages. */
+export function SiteFooter() {
+	return (
+		<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
+			<span className="inline-flex items-center gap-2">
+				<img className="size-4" src="/lixray-mark.svg" alt="" />
+				<span className="font-semibold text-fg-muted">LixRay</span>
+			</span>
+			<a
+				className="no-underline hover:text-fg-muted"
+				href="https://opral.com"
+				target="_blank"
+				rel="noreferrer"
+			>
+				© 2026 Opral
+			</a>
+			<nav className="flex flex-wrap items-center gap-4" aria-label="Footer">
+				<Link className="no-underline hover:text-fg-muted" to="/docs">
+					Docs
+				</Link>
+				<Link className="no-underline hover:text-fg-muted" to="/pricing">
+					Pricing
+				</Link>
+				<Link className="no-underline hover:text-fg-muted" to="/privacy">
+					Privacy
+				</Link>
+				<Link className="no-underline hover:text-fg-muted" to="/terms">
+					Terms
+				</Link>
+				<Link className="no-underline hover:text-fg-muted" to="/support">
+					Support
+				</Link>
+				<a
+					className="font-semibold text-fg-muted no-underline"
+					href="https://github.com/opral"
+					target="_blank"
+					rel="noreferrer"
+				>
+					GitHub ↗
+				</a>
+			</nav>
+		</footer>
 	);
 }

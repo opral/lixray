@@ -19,7 +19,11 @@ void test("landing and header CTAs use the repository entry route", () => {
 	assert.doesNotMatch(header, /repositoryPath/);
 	assert.doesNotMatch(header, /activeRepository/);
 
-	for (const file of ["landing-page.tsx", "vs-github-page.tsx"] as const) {
+	for (const file of [
+		"landing-page.tsx",
+		"pricing-page.tsx",
+		"vs-github-page.tsx",
+	] as const) {
 		const source = readFileSync(join(src, "components", file), "utf8");
 		assert.match(source, /href=\{repositoryTo\}/, file);
 		assert.doesNotMatch(source, /repositoryPath/, file);
