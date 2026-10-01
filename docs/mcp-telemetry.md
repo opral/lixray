@@ -53,6 +53,12 @@ product import detection. Native tracing does not capture document contents,
 credentials, context tokens or exception messages. Unknown tool names are
 recorded as `unknown` rather than copying arbitrary input into traces.
 
+Handled MCP tool failures produce one `$exception` through the worker-owned
+telemetry path. It includes bounded ownership and result-type metadata plus
+project-relative source locations parsed from the thrown error and its causes;
+error messages, SQL, result values and credentials are omitted. Protocol-owned
+output validation failures stay out of this local exception projection.
+
 The existing engine-owned `lix.repository.opened` product projection and
 reference-server error projections remain separate from MCP performance
 instrumentation. See [SQL telemetry](./sql-telemetry.md).

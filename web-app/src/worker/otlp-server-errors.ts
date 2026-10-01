@@ -2,6 +2,11 @@ import {
 	repositoryOpenDiagnostics,
 	repositoryOpenFailureMessage,
 } from "../lib/repository-open-telemetry.ts";
+import {
+	applicationExceptionFrames,
+	safeLixErrorCode,
+	safeRustErrorOrigin,
+} from "../lib/exception-stack-trace.ts";
 
 const UUID =
 	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -103,6 +108,13 @@ function safeExceptionType(
 	return fallback;
 }
 
+function safeRustOriginCauseIndex(
+	value: string | undefined,
+): number | undefined {
+	if (value === undefined || !/^[0-3]$/.test(value)) return undefined;
+	return Number(value);
+}
+
 function safeOperation(value: string | undefined): string {
 	if (!value || value.length > 128) return "unknown";
 	if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(value)) return value;
@@ -177,12 +189,21 @@ function diagnostic(value: string): string {
 		.replace(/\x1b\[[0-9;]*m/g, "")
 		.replace(/\bBearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
 		.replace(/\bBasic\s+[A-Za-z0-9+/]+=*/gi, "Basic [REDACTED]")
+		.replace(
+			/\b((?:authorization|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|secret)\s*[:=]\s*)[^\s,;"']+/gi,
+			"$1[REDACTED]",
+		)
 		.replace(/\blixray_pat_[A-Za-z0-9_-]+\b/gi, "[REDACTED_TOKEN]")
 		.replace(
 			/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
 			"[REDACTED_TOKEN]",
 		)
 		.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+		.replace(
+			/\/(?:Users|Volumes|private|tmp|var|home|root)\/[^\s)"'<>[\]{}]+/g,
+			"[REDACTED_PATH]",
+		)
+		.replace(/[A-Za-z]:\\[^\s)"'<>[\]{}]+/g, "[REDACTED_PATH]")
 		.replace(
 			/([?&](?:[^=\s&]*(?:token|secret|password|signature|credential|key)[^=\s&]*)=)[^\s&#"']*/gi,
 			"$1[REDACTED]",
@@ -264,10 +285,7 @@ export async function serverErrorEvents(
 	const httpRoute = safeHttpRoute(context["http.route"]);
 	const httpStatus = safeHttpStatus(context["http.response.status_code"]);
 	const candidateCode = context["lix.error.code"] ?? context["error.type"];
-	const failureCode =
-		candidateCode && /^LIX_[A-Z0-9_]{1,100}$/.test(candidateCode)
-			? candidateCode
-			: undefined;
+	const failureCode = safeLixErrorCode(candidateCode);
 	const migrationCause = repositoryOpenDiagnostics({
 		details: {
 			failureReason: context["lix.migration.failure_reason"],
@@ -405,13 +423,6 @@ export async function serverErrorEvents(
 				const fields = attributes(event.attributes);
 				// Ignore informational events; the fallback above captures failed status.
 				if (fields.level !== "ERROR" && event.name !== "exception") return null;
-				const message =
-					structuredFailureMessage ??
-					fields["exception.message"] ??
-					fields.error ??
-					fields.message ??
-					event.name;
-				if (!message) return null;
 				let timestamp: string;
 				try {
 					const eventNanos = BigInt(event.timeUnixNano?.toString() ?? "0");
@@ -431,14 +442,65 @@ export async function serverErrorEvents(
 					source === "browser"
 						? safeUuid(options.browserUserId)
 						: context["lix.account_id"];
-				const value = diagnostic(message);
-				const summary = diagnostic(
-					fields.message ?? event.name ?? "Server error",
-				);
-				const type = safeExceptionType(
+				const suppliedType = safeExceptionType(
 					fields["exception.type"],
 					failureCode ??
 						(source === "server" ? "LixServerError" : "LixBrowserError"),
+				);
+				const eventCode = safeLixErrorCode(
+					fields["lix.error.code"] ??
+						fields["exception.code"] ??
+						fields["exception.type"] ??
+						context["lix.error.code"] ??
+						context["error.type"],
+				);
+				const nativeError =
+					suppliedType === "LixError" ||
+					safeLixErrorCode(suppliedType) !== undefined ||
+					eventCode !== undefined;
+				const type =
+					suppliedType === "LixError"
+						? (eventCode ?? failureCode ?? suppliedType)
+						: suppliedType;
+				const message = nativeError
+					? (eventCode ?? failureCode ?? type)
+					: (structuredFailureMessage ??
+						fields["exception.message"] ??
+						fields.error ??
+						fields.message ??
+						event.name);
+				if (!message) return null;
+				const value = diagnostic(message);
+				const summary = nativeError
+					? value
+					: diagnostic(fields.message ?? event.name ?? "Server error");
+				const rustOriginKind =
+					fields["exception.rust_origin.kind"] ?? context["rust_origin.kind"];
+				const rustOrigin =
+					rustOriginKind === "source_location"
+						? safeRustErrorOrigin({
+								rustOrigin: {
+									kind: "source_location",
+									file:
+										fields["exception.rust_origin.file"] ??
+										context["code.filepath"],
+									line: Number(
+										fields["exception.rust_origin.line"] ??
+											context["code.lineno"],
+									),
+									column: Number(
+										fields["exception.rust_origin.column"] ??
+											context["code.column"],
+									),
+								},
+							})
+						: undefined;
+				const rustStacktraceStatus =
+					fields["exception.rust_stacktrace_status"] ??
+					context["rust_stacktrace_status"];
+				const rustOriginCauseIndex = safeRustOriginCauseIndex(
+					fields["exception.rust_origin.cause_index"] ??
+						context["rust_origin_cause_index"],
 				);
 				const digest = new Uint8Array(
 					await crypto.subtle.digest(
@@ -458,9 +520,7 @@ export async function serverErrorEvents(
 					uuid: eventId,
 					timestamp,
 					properties: {
-						$exception_list: [
-							{ type, value, mechanism: { type: "generic", handled: true } },
-						],
+						$exception_list: exceptionList(fields, type, value, nativeError),
 						$exception_level: "error",
 						$exception_source: source,
 						$process_person_profile: false,
@@ -485,6 +545,13 @@ export async function serverErrorEvents(
 						error_id: errorId ?? eventId,
 						...(httpMethod ? { http_method: httpMethod } : {}),
 						...(httpRoute ? { http_route: httpRoute } : {}),
+						...(rustOrigin ? { rust_origin: rustOrigin } : {}),
+						...(rustOriginCauseIndex !== undefined
+							? { rust_origin_cause_index: rustOriginCauseIndex }
+							: {}),
+						...(rustStacktraceStatus === "not_captured"
+							? { rust_stacktrace_status: rustStacktraceStatus }
+							: {}),
 						...snapshot,
 						server_span_name: operation,
 						server_log_message: summary,
@@ -498,6 +565,70 @@ export async function serverErrorEvents(
 			}),
 		)
 	).filter((event) => event !== null);
+}
+
+/** Project safe app frames and a bounded cause chain into PostHog's shape. */
+function exceptionList(
+	fields: Record<string, string>,
+	type: string,
+	message: string,
+	suppressCauseMessages = false,
+): Array<Record<string, unknown>> {
+	const result = [
+		exceptionEntry(
+			type,
+			message,
+			fields["exception.stacktrace"],
+			fields["exception.type"],
+			fields["exception.message"],
+		),
+	];
+	const count = Number(fields["exception.cause.count"]);
+	if (!Number.isInteger(count) || count < 1 || count > 4) return result;
+	for (let index = 0; index < count; index++) {
+		const prefix = `exception.cause.${index}`;
+		const causeType = safeExceptionType(fields[`${prefix}.type`], "Error");
+		const causeMessage = fields[`${prefix}.message`];
+		const stacktrace = fields[`${prefix}.stacktrace`];
+		const frames = applicationExceptionFrames(
+			stacktrace,
+			causeType,
+			causeMessage,
+		);
+		if (!causeMessage && !stacktrace && frames.length === 0) continue;
+		result.push(
+			exceptionEntry(
+				causeType,
+				causeMessage && !suppressCauseMessages
+					? diagnostic(causeMessage)
+					: `Caused by ${causeType}`,
+				stacktrace,
+				causeType,
+				causeMessage,
+			),
+		);
+	}
+	return result;
+}
+
+function exceptionEntry(
+	type: string,
+	value: string,
+	stacktrace: string | undefined,
+	stackName?: string,
+	stackMessage?: string,
+): Record<string, unknown> {
+	const frames = applicationExceptionFrames(
+		stacktrace,
+		stackName,
+		stackMessage,
+	);
+	return {
+		type,
+		value,
+		mechanism: { type: "generic", handled: true },
+		...(frames.length > 0 ? { stacktrace: { type: "raw", frames } } : {}),
+	};
 }
 
 /** Application-owned fields sufficient to replay a download without its private bytes. */

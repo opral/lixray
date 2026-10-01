@@ -39,6 +39,9 @@ export type RepositoryTree = {
 
 type ObservedRow = Record<string, unknown>;
 
+/** Whole-history reads use the authority, never the partial working replica. */
+export type RepositoryHistorySource = () => Promise<Lix>;
+
 type ObservedRowsState<TRow> = {
 	readonly rows: TRow[] | null;
 	readonly error: Error | null;
@@ -52,56 +55,74 @@ export function preserveObservedRowsAfterError<TRow>(
 }
 
 function useObservedRows(
-	lix: Lix,
+	lix: Lix | RepositoryHistorySource | null,
 	sql: string,
 	params: ReadonlyArray<string>,
 	enabled = true,
-	retryAttempt = 0,
+	retryAttempt: number | string = 0,
 ): ObservedRowsState<ObservedRow> {
-	const [state, setState] = useState<ObservedRowsState<ObservedRow>>({
-		rows: null,
-		error: null,
-	});
 	const paramsKey = JSON.stringify(params);
+	const request = useMemo(
+		() => ({ enabled, lix, sql, paramsKey, retryAttempt }),
+		[enabled, lix, sql, paramsKey, retryAttempt],
+	);
+	const [state, setState] = useState<
+		ObservedRowsState<ObservedRow> & { request: typeof request }
+	>({ request, rows: null, error: null });
 	useEffect(() => {
-		if (!enabled) {
-			setState({ rows: null, error: null });
+		if (!request.enabled || !request.lix) {
+			setState({ request, rows: null, error: null });
 			return;
 		}
+		const readerSource = request.lix;
 		const controller = new AbortController();
 		// Remote observe reconciles every stream's first frame through execute,
 		// including reconnects, so event.result is safe to publish directly.
 		if (typeof performance !== "undefined") {
 			performance.mark("lixray:query:observe");
 		}
-		setState({ rows: null, error: null });
+		setState({ request, rows: null, error: null });
 		void consumeObservedRowsWithRetry({
-			observe: () =>
-				lix.observe(sql, JSON.parse(paramsKey) as string[], {
-					signal: controller.signal,
-				}),
+			observe: async function* () {
+				const reader =
+					typeof readerSource === "function"
+						? await readerSource()
+						: readerSource;
+				if (controller.signal.aborted) return;
+				yield* reader.observe(
+					request.sql,
+					JSON.parse(request.paramsKey) as string[],
+					{
+						signal: controller.signal,
+					},
+				);
+			},
 			onFrame: (event) => {
-				setState({ rows: event.result.rows, error: null });
+				setState({ request, rows: event.result.rows, error: null });
 			},
 			onError: (error) => {
-				const unavailable = isOptionalHistoryInventoryUnavailable(sql, error);
-				if (!unavailable)
-					console.error("repository-home: lix observe failed", error);
+				console.error("repository-home: lix observe failed", error);
 				const failure =
 					error instanceof Error ? error : new Error(String(error));
-				setState((current) =>
-					unavailable
-						? { rows: null, error: failure }
-						: preserveObservedRowsAfterError(current, failure),
-				);
+				setState((current) => ({
+					request,
+					...preserveObservedRowsAfterError(
+						current.request === request ? current : { rows: null, error: null },
+						failure,
+					),
+				}));
 			},
 			signal: controller.signal,
 		});
 		return () => {
 			controller.abort();
 		};
-	}, [enabled, lix, sql, paramsKey, retryAttempt]);
-	return state;
+	}, [request]);
+	// A changed source or branch invalidates prior rows in this render, before
+	// effects clean up the previous stream or begin the next acquisition.
+	return request.enabled && request.lix && state.request === request
+		? state
+		: { rows: null, error: null };
 }
 
 const asText = (value: unknown): string =>
@@ -141,27 +162,34 @@ export const WORKING_CHANGE_SQL =
 export const CHANGE_SUMMARY_SQL =
 	"WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10";
 
-/** Only these optional totals require an authoritative, repository-wide inventory. */
-export function isOptionalHistoryInventoryUnavailable(
-	sql: string,
-	error: unknown,
-): boolean {
-	return (
-		(sql === CHECKPOINT_SUMMARY_SQL || sql === CHANGE_SUMMARY_SQL) &&
-		typeof error === "object" &&
-		error !== null &&
-		"code" in error &&
-		error.code === "LIX_PARTIAL_REPLICA_SCOPE_UNSUPPORTED"
-	);
-}
-
 /** Live, repository-derived facts used by the Home control-plane rail. */
 export function useRepositoryControlPlaneData(
 	lix: Lix,
+	historySource: RepositoryHistorySource | null,
 	enabled = true,
 ): RepositoryControlPlaneData | null {
-	const checkpoints = useObservedRows(lix, CHECKPOINT_SUMMARY_SQL, [], enabled);
-	const changeSummary = useObservedRows(lix, CHANGE_SUMMARY_SQL, [], enabled);
+	const branch = useObservedRows(
+		lix,
+		"SELECT lix_active_branch_id() AS id",
+		[],
+		enabled && historySource !== null,
+	);
+	const branchId = asNullableText(branch.rows?.[0]?.id);
+	const historyEnabled = enabled && historySource !== null && branchId !== null;
+	const checkpoints = useObservedRows(
+		historySource,
+		CHECKPOINT_SUMMARY_SQL,
+		[],
+		historyEnabled,
+		branchId ?? "",
+	);
+	const changeSummary = useObservedRows(
+		historySource,
+		CHANGE_SUMMARY_SQL,
+		[],
+		historyEnabled,
+		branchId ?? "",
+	);
 	const workingChanges = useObservedRows(lix, WORKING_CHANGE_SQL, [], enabled);
 	const tables = useObservedRows(
 		lix,
@@ -172,8 +200,8 @@ export function useRepositoryControlPlaneData(
 	const tableCount = tables.rows ? asNumber(tables.rows[0]?.n) : null;
 
 	return useMemo(() => {
-		const observations = [checkpoints, changeSummary, workingChanges];
-		if (observations.some(({ rows, error }) => rows === null && !error)) {
+		// Background authority reads must not hold the local control plane pending.
+		if (!enabled || (workingChanges.rows === null && !workingChanges.error)) {
 			return null;
 		}
 		// Full change history is optional for Home. A failed first frame settles to
@@ -204,11 +232,21 @@ export function useRepositoryControlPlaneData(
 			createdAt: changeSummary.rows
 				? asNullableText(changeSummaryRows[0]?.created_at)
 				: null,
-			changeHistoryUnavailable: observations.some(
-				({ error }) => error !== null,
-			),
+			changeHistoryUnavailable:
+				historySource === null ||
+				branch.error !== null ||
+				checkpoints.error !== null ||
+				changeSummary.error !== null,
 		};
-	}, [changeSummary, checkpoints, tableCount, workingChanges]);
+	}, [
+		branch.error,
+		changeSummary,
+		checkpoints,
+		enabled,
+		historySource,
+		tableCount,
+		workingChanges,
+	]);
 }
 
 /** Home counts the logical files displayed in the working diff. */

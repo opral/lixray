@@ -12,6 +12,7 @@ const tracerProvider = new NodeTracerProvider({
 });
 tracerProvider.register();
 import assert from "node:assert/strict";
+import { openLix, type SqlParam } from "@lix-js/sdk";
 import { DIFF_CARD_META } from "./diff-card-app.ts";
 import type { DiffCardPayload } from "./diff-card.ts";
 import test from "node:test";
@@ -21,7 +22,6 @@ import {
 } from "@modelcontextprotocol/client";
 import {
 	createLixError,
-	markMcpLocalAdapterFailure,
 	LixService,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -29,6 +29,7 @@ import {
 	type LixRuntimeClient,
 } from "./lix-service.ts";
 import { PostHog } from "posthog-node";
+import { createLixrMcpTelemetrySession } from "../worker/lixr-mcp-telemetry.ts";
 import {
 	type McpToolCallObservation,
 	attachMcpToolCallObservationProperties,
@@ -216,7 +217,12 @@ class FakeRuntime implements LixRuntimeClient {
 	}
 	async execute(_lixId: string, _branchId: string, request: ExecuteRequest) {
 		if (request.sql === "SELECT internal_error") {
-			throw new Error("private implementation detail");
+			throw new Error("private implementation detail with bearer-token");
+		}
+		if (request.sql === "SELECT object_error") {
+			// Intentionally exercise a non-Error throw to check log sanitization.
+			// eslint-disable-next-line @typescript-eslint/only-throw-error
+			throw { privateValue: "object-secret bearer-token" };
 		}
 		if (request.sql === "SELECT error") {
 			throw createLixError(
@@ -1188,11 +1194,76 @@ void test("modern MCP discover and tool calls work without a session id", async 
 			},
 		});
 		assert.equal(mixedExecute.isError, undefined);
-		const internalFailure = await client.callTool({
-			name: "query_sql",
-			arguments: { context, sql: "SELECT internal_error" },
-		});
+		const capturedInternalFailure = await captureConsoleErrorLogs(() =>
+			client.callTool({
+				name: "query_sql",
+				arguments: { context, sql: "SELECT internal_error" },
+			}),
+		);
+		const internalFailure = capturedInternalFailure.result;
 		assert.equal(internalFailure.isError, true);
+		const internalFailureLogs = JSON.stringify(capturedInternalFailure.logs);
+		assert.match(internalFailureLogs, /LixRay MCP tool failed/);
+		assert.equal(
+			internalFailureLogs.includes("web-app/src/mcp/server.test.ts"),
+			true,
+		);
+		assert.doesNotMatch(
+			internalFailureLogs,
+			/private implementation detail|bearer-token/,
+		);
+		const capturedObjectFailure = await captureConsoleErrorLogs(() =>
+			client.callTool({
+				name: "query_sql",
+				arguments: { context, sql: "SELECT object_error" },
+			}),
+		);
+		assert.equal(capturedObjectFailure.result.isError, true);
+		const objectFailureLogs = JSON.stringify(capturedObjectFailure.logs);
+		assert.match(objectFailureLogs, /NonErrorThrow/);
+		assert.doesNotMatch(objectFailureLogs, /object-secret|bearer-token/);
+		const originalFileChanges = service.fileChanges.bind(service);
+		let failFirstFileChanges = true;
+		service.fileChanges = async (...args) => {
+			if (failFirstFileChanges) {
+				failFirstFileChanges = false;
+				throw new Error("private file-change result with bearer-token");
+			}
+			return originalFileChanges(...args);
+		};
+		let capturedResourceFailure;
+		try {
+			capturedResourceFailure = await captureConsoleErrorLogs(() =>
+				client.callTool({
+					name: "execute_sql",
+					arguments: {
+						context,
+						statements: [
+							{
+								sql: "INSERT INTO lix_file (path, content) VALUES ($1, $2) RETURNING id, path",
+								params: [
+									{ kind: "text", value: "/skills/log-test.md" },
+									{ kind: "text", value: "private file content" },
+								],
+							},
+						],
+					},
+				}),
+			);
+		} finally {
+			service.fileChanges = originalFileChanges;
+		}
+		assert.equal(capturedResourceFailure.result.isError, undefined);
+		const resourceFailureLogs = JSON.stringify(capturedResourceFailure.logs);
+		assert.match(resourceFailureLogs, /LixRay MCP file changes failed/);
+		assert.equal(
+			resourceFailureLogs.includes("web-app/src/mcp/server.test.ts"),
+			true,
+		);
+		assert.doesNotMatch(
+			resourceFailureLogs,
+			/private file-change result|bearer-token|private file content/,
+		);
 		const internalContent = toolErrorContent(internalFailure) as {
 			request_id: string;
 			error: { message: string; hint: string };
@@ -2030,6 +2101,20 @@ function stubPosthogCapture(captured: CapturedMcpEvent[]): () => void {
 	};
 }
 
+async function captureConsoleErrorLogs<T>(work: () => Promise<T>): Promise<{
+	result: T;
+	logs: Array<Parameters<typeof console.error>>;
+}> {
+	const logs: Array<Parameters<typeof console.error>> = [];
+	const originalError = console.error;
+	console.error = (...args) => logs.push(args);
+	try {
+		return { result: await work(), logs };
+	} finally {
+		console.error = originalError;
+	}
+}
+
 async function drainPosthogMcp(): Promise<void> {
 	await Promise.resolve();
 	await Promise.resolve();
@@ -2844,6 +2929,7 @@ async function telemetryClient(
 	calls: McpToolCallObservation[],
 	options: NonNullable<Parameters<typeof handleMcpTransport>[2]> = {},
 ) {
+	const onToolCall = options.onToolCall;
 	const client = new Client(
 		{ name: "telemetry-regression", version: "1" },
 		{
@@ -2857,7 +2943,10 @@ async function telemetryClient(
 					...options,
 					authMode: "none",
 					requestId: "same-http-id",
-					onToolCall: (call) => calls.push(call),
+					onToolCall: (call) => {
+						calls.push(call);
+						onToolCall?.(call);
+					},
 				}),
 		}),
 	);
@@ -2978,6 +3067,10 @@ void test("late serialization and SDK output validation publish only terminal er
 		assert.equal(result.isError, true);
 		assert.equal(calls.length, before + 1);
 		assert.equal(calls.at(-1)?.outcome, "error");
+		assert.equal(
+			calls.at(-1)?.exceptionOwner,
+			invalidName === 123 ? "protocol" : "mcp",
+		);
 		const span = spanExporter
 			.getFinishedSpans()
 			.find((span) => span.spanContext().spanId === calls.at(-1)?.spanId)!;
@@ -2985,13 +3078,11 @@ void test("late serialization and SDK output validation publish only terminal er
 	}
 });
 
-void test("captures typed MCP adapter conversion failures once without private values", async (t) => {
+void test("captures SDK JS and Rust failures with safe sources through the Node PostHog wire", async (t) => {
 	const received: CapturedMcpEvent[] = [];
 	const receiver = createServer((request, response) => {
 		const chunks: Buffer<ArrayBufferLike>[] = [];
-		request.on("data", (chunk: Uint8Array) => {
-			chunks.push(Buffer.from(chunk));
-		});
+		request.on("data", (chunk: Uint8Array) => chunks.push(Buffer.from(chunk)));
 		request.on("end", () => {
 			try {
 				const body = Buffer.concat(chunks);
@@ -3002,7 +3093,7 @@ void test("captures typed MCP adapter conversion failures once without private v
 				const payload = JSON.parse(decoded.toString("utf8")) as {
 					batch?: unknown;
 				};
-				const events = Array.isArray(payload.batch) ? payload.batch : [];
+				const events = Array.isArray(payload.batch) ? payload.batch : [payload];
 				for (const rawEvent of events) {
 					if (!rawEvent || typeof rawEvent !== "object") continue;
 					const event = rawEvent as Record<string, unknown>;
@@ -3041,18 +3132,30 @@ void test("captures typed MCP adapter conversion failures once without private v
 				receiver.close((error) => (error ? reject(error) : resolve())),
 			),
 	);
+	const host = `http://127.0.0.1:${address.port}`;
 	const posthogFlushes: Promise<void>[] = [];
+	const telemetry = createLixrMcpTelemetrySession(
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+			POSTHOG_HOST: host,
+		},
+		{ userId: "verified-user-123", clientId: "client-private" },
+	);
+	assert.ok(telemetry);
 	const service = new LixService(new FakeRuntime(), {
 		contextSigningKey: "test",
 		principal: { userId: "verified-user-123", clientId: "client-private" },
 	});
+	const sdkLix = await openLix();
+	t.after(() => sdkLix.close());
 	const calls: McpToolCallObservation[] = [];
 	const client = await telemetryClient(service, calls, {
 		posthogToken: "phc_test",
-		posthogHost: `http://127.0.0.1:${address.port}`,
+		posthogHost: host,
 		posthogDistinctId: "verified-user-123",
 		posthogClientId: "client-private",
-		serverRelease: "release-2026.10.01",
+		onToolCall: (observation) => telemetry.captureToolFailure(observation),
 		onPosthogFlush: (flush) => posthogFlushes.push(flush()),
 	});
 	t.after(() => client.close());
@@ -3060,60 +3163,143 @@ void test("captures typed MCP adapter conversion failures once without private v
 		name: "open_lix",
 		arguments: { lix_ref: LIX_ID },
 	});
-	await Promise.all(posthogFlushes.splice(0));
 	const context = (opened.structuredContent as { context: string }).context;
-	const privateValue = "private SQL literal and row payload";
-	service.execute = async () => {
-		throw markMcpLocalAdapterFailure(
-			createLixError("upstream_error", privateValue),
-			"sdk_result_encoding",
-		);
+	const privateValue = "private SQL result and row payload";
+	const privateCause = "private OAuth bearer credential";
+	service.execute = async (_contextToken, request) => {
+		if (request.sql.includes("lix_row_ref_parts")) {
+			// The actual Node SDK rejects this impossible parameter with a genuine
+			// JavaScript Error stack. Its generic message does not disclose either
+			// private value.
+			await sdkLix.execute(request.sql, [
+				Symbol(privateCause) as unknown as SqlParam,
+			]);
+		} else {
+			// The second case reaches the actual native SQL engine and returns its
+			// validated Rust source origin inside an outer transport-style error.
+			try {
+				await sdkLix.execute(request.sql);
+			} catch (cause) {
+				const code =
+					cause &&
+					typeof cause === "object" &&
+					"code" in cause &&
+					typeof cause.code === "string"
+						? cause.code
+						: "upstream_error";
+				throw createLixError(code, "Wrapped native query failure", { cause });
+			}
+		}
+		throw new Error("Expected the native SDK query to fail.");
 	};
-	const before = received.length;
-	const failed = await client.callTool({
+	const invalidParameter = await client.callTool({
 		name: "query_sql",
-		arguments: { context, sql: "SELECT 1" },
+		arguments: {
+			context,
+			sql: `SELECT lix_row_ref_parts('${privateValue}')`,
+		},
 	});
-	assert.equal(failed.isError, true);
+	assert.equal(invalidParameter.isError, true);
+	const missingTable = "mcp_review_missing_table";
+	const nativeFailure = await client.callTool({
+		name: "query_sql",
+		arguments: { context, sql: `SELECT * FROM ${missingTable}` },
+	});
+	assert.equal(nativeFailure.isError, true);
+	await telemetry.flush();
 	await Promise.all(posthogFlushes.splice(0));
-	const exceptions = received
-		.slice(before)
-		.filter((event) => event.event === "$exception");
-	assert.equal(
-		exceptions.length,
-		1,
-		JSON.stringify({ events: received.slice(before), call: calls.at(-1) }),
+	await drainPosthogMcp();
+	const exceptions = received.filter((event) => event.event === "$exception");
+	assert.equal(exceptions.length, 2, JSON.stringify(received));
+	const failedCalls = calls.filter(
+		(call) => call.toolName === "query_sql" && call.outcome === "error",
 	);
-	const [exception] = exceptions;
-	assert.ok(exception);
-	assert.equal(exception.distinctId, "verified-user-123");
-	assert.equal(exception.properties.operation, "mcp.tool");
-	assert.equal(exception.properties.service_name, "lixray-mcp");
-	assert.equal(exception.properties.http_method, "POST");
-	assert.equal(exception.properties.http_route, "/mcp");
-	assert.equal(exception.properties.request_id, "same-http-id");
-	assert.equal(exception.properties.tool_name, "query_sql");
-	assert.equal(exception.properties.failure_stage, "sdk_result_encoding");
-	assert.equal(exception.properties.error_code, "upstream_error");
-	assert.equal(exception.properties.server_release, "release-2026.10.01");
-	assert.equal(exception.properties.error_correlation, "active_trace");
-	assert.match(String(exception.properties.error_id), /^[0-9a-f-]{36}$/);
-	assert.equal(exception.uuid, exception.properties.error_id);
-	const call = calls.at(-1)!;
-	assert.equal(exception.properties.$otel_trace_id, call.traceId);
-	assert.equal(exception.properties.$otel_span_id, call.spanId);
-	const exceptionList = exception.properties.$exception_list as Array<{
+	assert.equal(failedCalls.length, 2);
+	const jsCall = failedCalls.find(
+		(call) => call.errorCode === "LIX_INVALID_PARAM",
+	);
+	const rustCall = failedCalls.find(
+		(call) => call.errorCode === "LIX_TABLE_NOT_FOUND",
+	);
+	assert.ok(jsCall);
+	assert.ok(rustCall);
+	const exceptionForCall = (call: McpToolCallObservation) => {
+		const event = exceptions.find(
+			(candidate) => candidate.properties?.$otel_span_id === call.spanId,
+		);
+		assert.ok(event, `missing exception for span ${call.spanId}`);
+		return event;
+	};
+	const jsException = exceptionForCall(jsCall);
+	assert.equal(jsException.distinctId, "verified-user-123");
+	assert.equal(jsException.properties?.error_code, "LIX_INVALID_PARAM");
+	assert.equal(jsException.properties?.$otel_trace_id, jsCall.traceId);
+	assert.equal(jsException.properties?.$otel_span_id, jsCall.spanId);
+	assert.equal(jsCall.exceptionOwner, "mcp");
+	assert.equal(jsCall.resultEncodingType, undefined);
+	assert.ok(jsCall.exceptionStacktrace);
+	assert.ok(
+		jsCall.exceptionStacktrace.frames.some((frame) =>
+			frame.filename.endsWith("web-app/src/mcp/server.test.ts"),
+		),
+		JSON.stringify(jsCall.exceptionStacktrace),
+	);
+	const jsExceptionList = jsException.properties.$exception_list as Array<{
+		type?: unknown;
+		value?: unknown;
+		stacktrace?: {
+			frames?: Array<{ filename?: unknown; lineno?: unknown; colno?: unknown }>;
+		};
+	}>;
+	assert.ok(Array.isArray(jsExceptionList));
+	assert.equal(jsExceptionList.length, 1);
+	assert.equal(jsExceptionList[0]?.type, "LIX_INVALID_PARAM");
+	assert.equal(
+		jsExceptionList[0]?.value,
+		"MCP query_sql failed (LIX_INVALID_PARAM)",
+	);
+	assert.deepEqual(jsExceptionList[0]?.stacktrace, jsCall.exceptionStacktrace);
+
+	const rustException = exceptionForCall(rustCall);
+	assert.equal(rustException.distinctId, "verified-user-123");
+	assert.equal(rustException.properties?.error_code, "LIX_TABLE_NOT_FOUND");
+	assert.equal(rustException.properties?.$otel_trace_id, rustCall.traceId);
+	assert.equal(rustException.properties?.$otel_span_id, rustCall.spanId);
+	assert.equal(rustCall.exceptionOwner, "mcp");
+	assert.ok(rustCall.exceptionStacktrace);
+	assert.ok(rustCall.exceptionRustOrigin);
+	assert.equal(rustCall.exceptionRustOriginCauseIndex, 0);
+	assert.equal(rustCall.exceptionRustOrigin.kind, "source_location");
+	assert.equal(typeof rustCall.exceptionRustOrigin.file, "string");
+	assert.ok(rustCall.exceptionRustOrigin.file.endsWith(".rs"));
+	assert.ok(rustCall.exceptionRustOrigin.line > 0);
+	assert.deepEqual(
+		rustException.properties?.rust_origin,
+		rustCall.exceptionRustOrigin,
+	);
+	assert.equal(rustException.properties?.rust_origin_cause_index, 0);
+	assert.equal(
+		rustException.properties?.rust_stacktrace_status,
+		"not_captured",
+	);
+	const rustExceptionList = rustException.properties?.$exception_list as Array<{
 		type?: unknown;
 		value?: unknown;
 	}>;
-	assert.ok(Array.isArray(exceptionList));
-	assert.equal(exceptionList.length, 1);
-	assert.equal(exceptionList[0]?.type, "McpAdapterError");
-	assert.equal(exceptionList[0]?.value, "MCP adapter failure");
-	const eventText = JSON.stringify(exception);
+	assert.equal(rustExceptionList[0]?.type, "LIX_TABLE_NOT_FOUND");
+	assert.equal(
+		rustExceptionList[0]?.value,
+		"MCP query_sql failed (LIX_TABLE_NOT_FOUND)",
+	);
+	const eventText = JSON.stringify(exceptions);
 	assert.equal(eventText.includes(privateValue), false);
-	assert.equal(eventText.includes("SELECT 1"), false);
-	assert.equal(eventText.includes("client-private"), false);
+	assert.equal(eventText.includes(privateCause), false);
+	assert.equal(
+		eventText.includes(`SELECT lix_row_ref_parts('${privateValue}')`),
+		false,
+	);
+	assert.equal(eventText.includes(missingTable), false);
+	assert.equal(eventText.includes(context), false);
 });
 
 void test("concurrent tools sharing an HTTP request ID keep distinct native identities", async (t) => {

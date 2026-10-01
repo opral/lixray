@@ -82,6 +82,7 @@ import {
 	useRepositoryTree,
 	useWorkingFileChanges,
 	type RepositoryControlPlaneData,
+	type RepositoryHistorySource,
 	type WorkingFileChangeKind,
 } from "./lix-data";
 import {
@@ -92,6 +93,7 @@ import {
 
 type DirectoryViewProps = {
 	readonly lix: Lix;
+	readonly historySource?: RepositoryHistorySource | null;
 	/** The open diff session; its files get change indicators in the listing. */
 	readonly diffSession?: AtelierDiffSession | null;
 	/** Opens a changed file through the diff session (review-aware). */
@@ -177,6 +179,7 @@ const EMPTY_CHANGED_FILE_KINDS: ReadonlyMap<string, WorkingFileChangeKind> =
 
 export function DirectoryView({
 	lix,
+	historySource = null,
 	diffSession = null,
 	onOpenDiffFile,
 	dirPath,
@@ -210,7 +213,11 @@ export function DirectoryView({
 	const detailsEnabled = useAfterInitialIdle(
 		isActive && isHome && tree !== null,
 	);
-	const controlPlaneData = useRepositoryControlPlaneData(lix, detailsEnabled);
+	const controlPlaneData = useRepositoryControlPlaneData(
+		lix,
+		historySource,
+		detailsEnabled,
+	);
 	// Time travel: a historical session renders the listing as of its target
 	// commit. The working review keeps the live listing — its whole point is
 	// the latest state against its actual working baseline.

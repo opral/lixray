@@ -312,8 +312,7 @@ void test("server parser failures project only the allowlisted cause and receipt
 	assert.deepEqual(properties.$exception_list, [
 		{
 			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
-			value:
-				"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID",
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
@@ -389,7 +388,7 @@ void test("JSON receipt parser positions and missing fields stay bounded in Post
 	assert.deepEqual(properties.$exception_list, [
 		{
 			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
-			value: "LIX_PARTIAL_REPLICA_STATE_INVALID: receipt_json_data at $",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID",
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
@@ -399,7 +398,7 @@ void test("JSON receipt parser positions and missing fields stay bounded in Post
 	);
 });
 
-void test("standard OTel exceptions preserve the cause without inventing a stack trace", async () => {
+void test("standard OTel exceptions do not invent a stack trace when none was recorded", async () => {
 	const body = encode([
 		{
 			...span("lix.protocol.request"),
@@ -435,6 +434,273 @@ void test("standard OTel exceptions preserve the cause without inventing a stack
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
+});
+
+void test("OTel exceptions preserve safe application frames and a bounded cause chain", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			attributes: [
+				...span("lix.repository.open").attributes,
+				{ key: "rust_origin.kind", value: { stringValue: "source_location" } },
+				{
+					key: "code.filepath",
+					value: { stringValue: "packages/lix/src/storage.rs" },
+				},
+				{ key: "code.lineno", value: { intValue: 77 } },
+				{ key: "code.column", value: { intValue: 9 } },
+				{
+					key: "rust_stacktrace_status",
+					value: { stringValue: "not_captured" },
+				},
+			],
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "StorageError" } },
+						{
+							key: "exception.message",
+							value: {
+								stringValue:
+									"Storage failed: SELECT private FROM notes\n    at fakeFromMessage (/assets/injected.js:999:1)",
+							},
+						},
+						{
+							key: "exception.stacktrace",
+							value: {
+								stringValue:
+									"StorageError: Storage failed: SELECT private FROM notes\n    at fakeFromMessage (/assets/injected.js:999:1)\n    at openRepository (https://lixray.com/assets/repository-A1.js?token=private:21:9)\n    at vendor (https://cdn.example/vendor.js:1:2)",
+							},
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "NetworkError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: {
+								stringValue: 'Response body: {"secret":"private document"}',
+							},
+						},
+						{
+							key: "exception.cause.0.stacktrace",
+							value: {
+								stringValue:
+									"NetworkError: private\n    at downloadSnapshot (https://lixray.com/assets/snapshot-B2.js:8:3)",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const exceptions = captured!.batch[0]!.properties.$exception_list as Array<{
+		type: string;
+		value: string;
+		stacktrace?: { type: string; frames: Array<Record<string, unknown>> };
+	}>;
+	assert.equal(exceptions.length, 2);
+	assert.equal(exceptions[0]!.value, "Storage failed: [SQL statement omitted]");
+	assert.deepEqual(exceptions[0]!.stacktrace, {
+		type: "raw",
+		frames: [
+			{
+				platform: "web:javascript",
+				filename: "/assets/repository-A1.js",
+				function: "openRepository",
+				lineno: 21,
+				colno: 9,
+				in_app: true,
+			},
+		],
+	});
+	assert.equal(exceptions[1]!.type, "NetworkError");
+	assert.equal(exceptions[1]!.value, "[response body omitted]");
+	assert.equal(
+		exceptions[1]!.stacktrace?.frames[0]?.filename,
+		"/assets/snapshot-B2.js",
+	);
+	assert.deepEqual(captured!.batch[0]!.properties.rust_origin, {
+		kind: "source_location",
+		file: "packages/lix/src/storage.rs",
+		line: 77,
+		column: 9,
+	});
+	assert.equal(
+		captured!.batch[0]!.properties.rust_stacktrace_status,
+		"not_captured",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(captured!.batch[0]!.properties),
+		/private query|private FROM notes|token=private|cdn\\.example|private document|Response body:|injected\\.js|999:1/,
+	);
+});
+
+void test("native LixError messages project only a validated code and safe frames", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.query"),
+			attributes: [
+				...span("lix.engine.query").attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_SQL_QUERY_FAILED" },
+				},
+			],
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "LixError" } },
+						{
+							key: "exception.message",
+							value: {
+								stringValue:
+									"DataFusion failed for /home/private/repository; SELECT secret FROM private_table",
+							},
+						},
+						{
+							key: "exception.stacktrace",
+							value: {
+								stringValue:
+									"LixError: private query\n    at executeQuery (https://lixray.com/assets/query-A1.js:23:17)",
+							},
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "StorageError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: {
+								stringValue: "Could not open /private/customer/repository",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = captured!.batch[0]!.properties;
+	const exceptions = properties.$exception_list as Array<{
+		type: string;
+		value: string;
+		stacktrace?: { frames: Array<Record<string, unknown>> };
+	}>;
+	assert.equal(exceptions[0]!.value, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[0]!.type, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[1]!.value, "Caused by StorageError");
+	assert.equal(
+		exceptions[0]!.stacktrace?.frames[0]?.filename,
+		"/assets/query-A1.js",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private_table|secret FROM|private\/repository|customer\/repository|DataFusion failed/,
+	);
+});
+
+void test("OTel projection preserves Rust origin from a bounded native cause", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "Error" } },
+						{
+							key: "exception.message",
+							value: { stringValue: "repository operation failed" },
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "LixError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: { stringValue: "LIX_SQL_QUERY_FAILED" },
+						},
+						{
+							key: "exception.rust_origin.kind",
+							value: { stringValue: "source_location" },
+						},
+						{
+							key: "exception.rust_origin.file",
+							value: { stringValue: "packages/lix/src/storage.rs" },
+						},
+						{
+							key: "exception.rust_origin.line",
+							value: { intValue: 77 },
+						},
+						{
+							key: "exception.rust_origin.column",
+							value: { intValue: 9 },
+						},
+						{
+							key: "exception.rust_origin.cause_index",
+							value: { intValue: 0 },
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = captured!.batch[0]!.properties;
+	assert.deepEqual(properties.rust_origin, {
+		kind: "source_location",
+		file: "packages/lix/src/storage.rs",
+		line: 77,
+		column: 9,
+	});
+	assert.equal(properties.rust_origin_cause_index, 0);
+	assert.equal(properties.rust_stacktrace_status, undefined);
 });
 
 void test("authenticated browser exception identity overrides untrusted span identity while server identity is preserved", async () => {
@@ -1162,7 +1428,7 @@ void test("read fulfillment validation details reach PostHog without request con
 	assert.equal(properties.nativeReadRecipeMask, 129);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_READ_FULFILLMENT_INVALID: selected_change_payload_recipe_mismatch",
+		"LIX_READ_FULFILLMENT_INVALID",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /private/);
 });
@@ -1412,7 +1678,7 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.failurePath, "$.descriptor.selectedBranch.createdAt");
 	assert.equal(
 		(props.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_branch_incarnation_mismatch at $.descriptor.selectedBranch.createdAt",
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
 	);
 	assert.equal(props.retryable, false);
 	assert.equal(props.admissionRetryExhausted, true);
@@ -1473,7 +1739,7 @@ void test("owner point-read budget errors project only their bounded reason and 
 	assert.equal(properties.budget, 65_536);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_INTERNAL_ERROR: exact_owner_point_read_budget_exhausted",
+		"LIX_INTERNAL_ERROR",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /secret bytes/);
 

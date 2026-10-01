@@ -34,6 +34,11 @@ export const wireValue = z.union(
 	],
 );
 export type WireValue = z.infer<typeof wireValue>;
+export type WireValueType = keyof typeof schemas;
+
+export function isWireValueType(value: unknown): value is WireValueType {
+	return typeof value === "string" && Object.hasOwn(schemas, value);
+}
 
 export function unreachableValue(value: never): never {
 	throw new Error(`Unsupported SDK value type: ${String(value)}`);

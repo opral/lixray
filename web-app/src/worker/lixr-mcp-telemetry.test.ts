@@ -342,16 +342,56 @@ void test("local MCP failures capture one sanitized exception with actor and sta
 		traceId: "01".repeat(16),
 		spanId: "02".repeat(8),
 		lixId: LIX_ID,
+		exceptionStacktrace: {
+			type: "raw" as const,
+			frames: [
+				{
+					filename: "web-app/src/mcp/runtime-client.ts",
+					lineno: 123,
+					colno: 9,
+				},
+			],
+		},
+		exceptionRustOrigin: {
+			kind: "source_location" as const,
+			file: "packages/lix/src/engine.rs",
+			line: 123,
+			column: 9,
+		},
+		exceptionRustOriginCauseIndex: 0,
+		exceptionRustStacktraceStatus: "not_captured" as const,
 		rawStatements: [{ sql: "SELECT private", params: ["secret"] }],
 	};
 	session.captureToolFailure(failure);
 	session.captureToolFailure(failure);
 	session.captureToolFailure({ ...failure, spanId: "03".repeat(8) });
+	session.captureToolFailure({
+		...failure,
+		spanId: "04".repeat(8),
+		exceptionRustOriginCauseIndex: 4,
+	});
+	session.captureToolFailure({
+		...failure,
+		spanId: "05".repeat(8),
+		exceptionRustOriginCauseIndex: 3,
+	});
 	session.captureToolFailure({ ...failure, exceptionOwner: "protocol" });
 	await session.flush();
-	assert.equal(captured.length, 3);
+	assert.equal(captured.length, 5);
 	assert.equal(captured[0]!.uuid, captured[1]!.uuid);
 	assert.notEqual(captured[0]!.uuid, captured[2]!.uuid);
+	const firstException = captured[0]!.properties?.$exception_list as Array<{
+		stacktrace?: { frames?: Array<Record<string, unknown>> };
+	}>;
+	assert.deepEqual(firstException[0]?.stacktrace, failure.exceptionStacktrace);
+	assert.deepEqual(
+		captured[0]!.properties?.rust_origin,
+		failure.exceptionRustOrigin,
+	);
+	assert.equal(captured[0]!.properties?.rust_origin_cause_index, 0);
+	assert.equal(captured[0]!.properties?.rust_stacktrace_status, "not_captured");
+	assert.equal(captured[3]!.properties?.rust_origin_cause_index, undefined);
+	assert.equal(captured[4]!.properties?.rust_origin_cause_index, 3);
 	for (const event of captured) {
 		assert.equal(event.event, "$exception");
 		assert.equal(event.distinctId, "canonical-account");

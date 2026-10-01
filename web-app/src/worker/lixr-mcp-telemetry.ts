@@ -154,7 +154,15 @@ export function createLixrMcpTelemetrySession(
 				/^(?:LIX_[A-Z0-9_]{1,100}|[a-z_]{1,100})$/.test(observation.errorCode)
 					? observation.errorCode
 					: "mcp_tool_failed";
-			// Never capture thrown messages/stacks: engine errors can contain SQL or values.
+			const rustOriginCauseIndex = observation.exceptionRustOriginCauseIndex;
+			const safeRustOriginCauseIndex =
+				typeof rustOriginCauseIndex === "number" &&
+				Number.isSafeInteger(rustOriginCauseIndex) &&
+				rustOriginCauseIndex >= 0 &&
+				rustOriginCauseIndex <= 3
+					? rustOriginCauseIndex
+					: undefined;
+			// Never capture thrown messages or raw stacks: engine errors can contain SQL or values.
 			const digest = createHash("sha256")
 				.update(`mcp-error:${traceId}:${spanId}`)
 				.digest();
@@ -173,6 +181,9 @@ export function createLixrMcpTelemetrySession(
 							value: observation.resultEncodingType
 								? `MCP ${toolName} result encoding failed (${observation.resultEncodingType})`
 								: `MCP ${toolName} failed (${code})`,
+							...(observation.exceptionStacktrace
+								? { stacktrace: observation.exceptionStacktrace }
+								: {}),
 							mechanism: { type: "generic", handled: true },
 						},
 					],
@@ -180,6 +191,18 @@ export function createLixrMcpTelemetrySession(
 					$exception_source: "mcp",
 					$process_person_profile: false,
 					$geoip_disable: true,
+					...(observation.exceptionRustOrigin
+						? { rust_origin: observation.exceptionRustOrigin }
+						: {}),
+					...(safeRustOriginCauseIndex !== undefined
+						? { rust_origin_cause_index: safeRustOriginCauseIndex }
+						: {}),
+					...(observation.exceptionRustStacktraceStatus
+						? {
+								rust_stacktrace_status:
+									observation.exceptionRustStacktraceStatus,
+							}
+						: {}),
 					$otel_trace_id: traceId,
 					$otel_span_id: spanId,
 					$ai_trace_id: traceId,

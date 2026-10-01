@@ -80,15 +80,20 @@ void test("scrubs personal API tokens from telemetry strings", () => {
 	const event = scrubPostHogEvent({
 		uuid: "api_token_event",
 		event: "$exception",
-		properties: { note: `Credential ${token}`, header: `Bearer ${token}` },
+		properties: {
+			note: `Credential ${token}`,
+			header: `Bearer ${token}`,
+			diagnostic: "api_key=private-value",
+		},
 	});
 	assert.deepEqual(event?.properties, {
 		note: "Credential [redacted_token]",
 		header: "Bearer [redacted]",
+		diagnostic: "api_key=[redacted]",
 	});
 });
 
-void test("preserves sanitized PostHog exception messages", () => {
+void test("redacts native PostHog messages while preserving sanitized frames", () => {
 	const event = scrubPostHogEvent({
 		uuid: "event_exception",
 		event: "$exception",
@@ -107,6 +112,11 @@ void test("preserves sanitized PostHog exception messages", () => {
 							{
 								filename:
 									"https://assets.example/app.js?token=private#repository-content",
+								function: "openRepository",
+								lineno: 23,
+								colno: 11,
+								in_app: true,
+								chunk_id: "11111111-1111-4111-8111-111111111111",
 							},
 						],
 					},
@@ -119,19 +129,85 @@ void test("preserves sanitized PostHog exception messages", () => {
 		$exception_list: [
 			{
 				type: "LixError",
-				value: "The lix is recovering at [redacted_path] and Bearer [redacted]",
+				value: "LixError",
 				mechanism: { handled: true },
 				stacktrace: {
 					frames: [
 						{
 							filename: "[redacted_path]",
 						},
-						{ filename: "https://assets.example/app.js" },
+						{
+							filename: "https://assets.example/app.js",
+							function: "openRepository",
+							lineno: 23,
+							colno: 11,
+							in_app: true,
+							chunk_id: "11111111-1111-4111-8111-111111111111",
+						},
 					],
 				},
 			},
 		],
 	});
+});
+
+void test("native PostHog exceptions keep a safe code and frames but omit messages", () => {
+	const event = scrubPostHogEvent({
+		uuid: "event_native_exception",
+		event: "$exception",
+		properties: {
+			lix_error_code: "LIX_SQL_QUERY_FAILED",
+			lix_error_hint: "SELECT private contents FROM repository_files",
+			$exception_list: [
+				{
+					type: "LixError",
+					value:
+						"Planning failed at /home/private/worktree; SELECT secret FROM private_table",
+					mechanism: { handled: true },
+					stacktrace: {
+						frames: [
+							{
+								filename: "https://lixray.com/assets/query-A1.js?token=secret",
+								function: "runQuery",
+								lineno: 23,
+								colno: 17,
+								in_app: true,
+								chunk_id: "11111111-1111-4111-8111-111111111111",
+							},
+						],
+					},
+				},
+				{
+					type: "StorageError",
+					value: "Unable to open /private/customer/repository",
+					mechanism: { handled: true },
+				},
+			],
+		},
+	});
+	const properties = event?.properties as Record<string, unknown>;
+	const exceptions = properties.$exception_list as Array<{
+		type: string;
+		value: string;
+		stacktrace?: { frames: Array<Record<string, unknown>> };
+	}>;
+	assert.equal(properties.lix_error_code, "LIX_SQL_QUERY_FAILED");
+	assert.equal(properties.lix_error_hint, undefined);
+	assert.equal(exceptions[0]!.type, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[0]!.value, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[1]!.value, "Caused by StorageError");
+	assert.deepEqual(exceptions[0]!.stacktrace?.frames[0], {
+		filename: "https://lixray.com/assets/query-A1.js",
+		function: "runQuery",
+		lineno: 23,
+		colno: 17,
+		in_app: true,
+		chunk_id: "11111111-1111-4111-8111-111111111111",
+	});
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private_table|secret FROM|private\/worktree|customer\/repository|private contents/,
+	);
 });
 
 void test("classifies opaque cross-origin exceptions without dropping them", () => {
@@ -224,10 +300,7 @@ void test("scrubs SQL and response bodies from bounded exception diagnostics", (
 	const frames = (
 		exception.stacktrace as { frames: Array<Record<string, unknown>> }
 	).frames;
-	assert.equal(
-		exception.value,
-		"Repository read failed: [SQL statement omitted]",
-	);
+	assert.equal(exception.value, "LIX_READ_FAILED");
 	assert.equal(properties.lix_error_code, "LIX_READ_FAILED");
 	assert.equal(properties.response_body, undefined);
 	assert.equal(properties["http.response.body"], undefined);

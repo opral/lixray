@@ -23,7 +23,6 @@ import {
 	type CommitSpan,
 	createLixError,
 	isLixError,
-	markMcpLocalAdapterFailure,
 	type LixError,
 	type LixRuntimeClient,
 	type LixSummary,
@@ -285,6 +284,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				} catch (caught) {
 					const error = asLixError(caught);
 					throw createLixError(error.code ?? "upstream_error", error.message, {
+						cause: caught,
 						details: {
 							...(error.details && typeof error.details === "object"
 								? error.details
@@ -740,7 +740,6 @@ function encodeLixValue(
 							valueType: "blob",
 						},
 					},
-
 				);
 			}
 			return { kind: "blob", base64: bytesToBase64(value) };
@@ -758,7 +757,6 @@ function encodeLixValue(
 				valueType: type,
 			},
 		},
-
 	);
 }
 

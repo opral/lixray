@@ -9,6 +9,8 @@ import {
 	exceptionTraceability,
 	preparePostHogEvent,
 } from "../../src/lib/exception-traceability.ts";
+import { applicationExceptionFrames } from "../../src/lib/exception-stack-trace.ts";
+import { lixErrorTelemetryProperties } from "../../src/lib/telemetry.ts";
 import { downloadRepositorySnapshot } from "../../src/lib/repository-snapshot-telemetry";
 import { downloadRepositoryRemoteSnapshot } from "../../src/lib/repository-lix-session";
 import { tracer } from "../../src/telemetry.ts";
@@ -38,7 +40,16 @@ declare global {
 		snapshotPreparedExceptions: PreparedException[];
 		snapshotExpectedTraces: Record<string, TraceContext>;
 		runExceptionTraceability: () => Promise<void>;
-		triggerPostHogWireExceptions: () => void;
+		triggerPostHogWireExceptions: () => Promise<void>;
+		snapshotActualWasmSql?: {
+			code?: unknown;
+			rustOrigin?: unknown;
+			frameCandidates: Array<{
+				filename: string;
+				lineno: number;
+				colno: number;
+			}>;
+		};
 		snapshotPostHogCaptureExceptionCalls: number;
 		snapshotPostHogBeforeSendCalls: number;
 		snapshotPostHogBeforeSendEvents: string[];
@@ -125,7 +136,71 @@ window.snapshotExceptions = [];
 window.snapshotPreparedExceptions = [];
 window.snapshotExpectedTraces = {};
 
-window.triggerPostHogWireExceptions = () => {
+window.triggerPostHogWireExceptions = async () => {
+	const nativeError = Object.assign(
+		new Error(
+			"DataFusion failed for /home/private/worktree; SELECT secret FROM private_table",
+		),
+		{
+			name: "LixError",
+			code: "LIX_SQL_QUERY_FAILED",
+			hint: "SELECT private contents FROM repository_files",
+			rustOrigin: {
+				kind: "source_location",
+				file: "packages/lix/src/query.rs",
+				line: 217,
+				column: 5,
+			},
+			rustStacktraceStatus: "not_captured",
+		},
+	);
+	posthog.captureException(
+		nativeError,
+		exceptionTraceability({
+			...lixErrorTelemetryProperties(nativeError),
+			operation: "snapshot.fixture.synthetic_native",
+		}),
+	);
+	const { openLix } = await import("@lix-js/sdk");
+	const lix = await openLix();
+	try {
+		let captured = false;
+		try {
+			await lix.execute("SELECT * FROM telemetry_missing_table");
+		} catch (error) {
+			captured = true;
+			const properties = lixErrorTelemetryProperties(error);
+			const errorFields =
+				error && typeof error === "object"
+					? (error as { name?: unknown; message?: unknown; stack?: unknown })
+					: {};
+			const frames = applicationExceptionFrames(
+				errorFields.stack,
+				errorFields.name,
+				errorFields.message,
+			);
+			window.snapshotActualWasmSql = {
+				code: properties.lix_error_code,
+				rustOrigin: properties.rust_origin,
+				frameCandidates: frames.map(({ filename, lineno, colno }) => ({
+					filename,
+					lineno,
+					colno,
+				})),
+			};
+			posthog.captureException(
+				error,
+				exceptionTraceability({
+					...properties,
+					operation: "snapshot.fixture.actual_wasm_sql",
+				}),
+			);
+		}
+		if (!captured)
+			throw new Error("The missing-table SQL query unexpectedly succeeded");
+	} finally {
+		await lix.close();
+	}
 	setTimeout(() => {
 		const error = new Error("Controlled snapshot fixture uncaught failure");
 		error.name = "SnapshotFixtureUncaughtError";

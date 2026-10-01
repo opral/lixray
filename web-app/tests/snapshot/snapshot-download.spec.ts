@@ -434,7 +434,7 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	await page.evaluate(() =>
 		(
 			window as Window & {
-				triggerPostHogWireExceptions: () => void;
+				triggerPostHogWireExceptions: () => Promise<void>;
 			}
 		).triggerPostHogWireExceptions(),
 	);
@@ -443,7 +443,7 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 			() =>
 				posthogWireEvents.filter(({ event }) => event === "$exception").length,
 		)
-		.toBeGreaterThanOrEqual(3);
+		.toBeGreaterThanOrEqual(5);
 	expect(posthogCaptureRequests.length).toBeGreaterThan(0);
 	expect(posthogCaptureRequests.every(({ status }) => status === 200)).toBe(
 		true,
@@ -494,7 +494,7 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	expect(
 		wireExceptions,
 		JSON.stringify({ posthogStatus, posthogTraffic, wireExceptionSummary }),
-	).toHaveLength(3);
+	).toHaveLength(5);
 	const handledWireException = wireExceptions.find(
 		(event) =>
 			event.properties?.operation === "repository_remote_snapshot_download",
@@ -531,6 +531,119 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 	expect(handledWireProperties.$otel_span_id).toBe(
 		failedProperties.$otel_span_id,
 	);
+	const handledWireFrames = (
+		handledWireError?.stacktrace as
+			| { frames?: Array<{ filename?: unknown; lineno?: unknown }> }
+			| undefined
+	)?.frames;
+	expect(handledWireFrames?.length).toBeGreaterThan(0);
+	expect(
+		handledWireFrames?.some(
+			(frame) =>
+				typeof frame.filename === "string" &&
+				frame.filename.includes("snapshot-fixture.tsx") &&
+				typeof frame.lineno === "number" &&
+				frame.lineno > 0,
+		),
+	).toBe(true);
+
+	const nativeWireException = wireExceptions.find(
+		(event) =>
+			event.properties?.operation === "snapshot.fixture.synthetic_native",
+	);
+	expect(nativeWireException).toBeDefined();
+	const nativeWireError = firstException(nativeWireException!);
+	expect(nativeWireError?.value).toBe("LIX_SQL_QUERY_FAILED");
+	const nativeWireFrames = (
+		nativeWireError?.stacktrace as
+			| { frames?: Array<{ filename?: unknown; lineno?: unknown }> }
+			| undefined
+	)?.frames;
+	expect(nativeWireFrames?.length).toBeGreaterThan(0);
+	expect(
+		nativeWireFrames?.some(
+			(frame) =>
+				typeof frame.filename === "string" &&
+				frame.filename.includes("snapshot-fixture"),
+		),
+	).toBe(true);
+	expect(nativeWireException?.properties?.rust_origin).toEqual({
+		kind: "source_location",
+		file: "packages/lix/src/query.rs",
+		line: 217,
+		column: 5,
+	});
+	expect(nativeWireException?.properties?.rust_stacktrace_status).toBe(
+		"not_captured",
+	);
+
+	const actualWasmWireException = wireExceptions.find(
+		(event) =>
+			event.properties?.operation === "snapshot.fixture.actual_wasm_sql",
+	);
+	expect(actualWasmWireException).toBeDefined();
+	const actualWasmWireError = firstException(actualWasmWireException!);
+	expect(actualWasmWireError?.type).toBe("LIX_TABLE_NOT_FOUND");
+	expect(actualWasmWireError?.value).toBe("LIX_TABLE_NOT_FOUND");
+	expect(actualWasmWireException?.properties?.lix_error_code).toBe(
+		"LIX_TABLE_NOT_FOUND",
+	);
+	const actualRustOrigin = actualWasmWireException?.properties?.rust_origin as
+		| {
+				kind?: unknown;
+				file?: unknown;
+				line?: unknown;
+				column?: unknown;
+		  }
+		| undefined;
+	expect(actualRustOrigin?.kind).toBe("source_location");
+	expect(actualRustOrigin?.file).toMatch(
+		/^packages\/[A-Za-z0-9_-]{1,80}\/(?:[A-Za-z0-9_.-]+\/)*[A-Za-z0-9_.-]+\.rs$/,
+	);
+	expect(actualRustOrigin?.line).toEqual(expect.any(Number));
+	expect(actualRustOrigin?.line).toBeGreaterThan(0);
+	if (actualRustOrigin?.column !== undefined)
+		expect(actualRustOrigin.column).toEqual(expect.any(Number));
+	expect(actualWasmWireException?.properties?.rust_stacktrace_status).toBe(
+		"not_captured",
+	);
+	const actualWasmFrames = (
+		actualWasmWireError?.stacktrace as
+			| {
+					frames?: Array<{
+						filename?: unknown;
+						lineno?: unknown;
+						colno?: unknown;
+					}>;
+			  }
+			| undefined
+	)?.frames;
+	const availableAppFrames = await page.evaluate(
+		() =>
+			(
+				window as Window & {
+					snapshotActualWasmSql?: {
+						frameCandidates: Array<{
+							filename: string;
+							lineno: number;
+							colno: number;
+						}>;
+					};
+				}
+			).snapshotActualWasmSql?.frameCandidates ?? [],
+	);
+	for (const expectedFrame of availableAppFrames) {
+		expect(
+			actualWasmFrames?.some(
+				(frame) =>
+					typeof frame.filename === "string" &&
+					(frame.filename === expectedFrame.filename ||
+						frame.filename.endsWith(expectedFrame.filename)) &&
+					frame.lineno === expectedFrame.lineno &&
+					frame.colno === expectedFrame.colno,
+			),
+		).toBe(true);
+	}
 
 	const uncaughtWireException = wireExceptions.find(
 		(event) => firstException(event)?.type === "SnapshotFixtureUncaughtError",

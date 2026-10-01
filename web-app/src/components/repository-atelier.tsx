@@ -1597,6 +1597,7 @@ export function RepositoryAtelier({
 								? stableSettingsApiRef.current
 								: null,
 							repositoryVisibility,
+							publicPath ? null : getDebugRemoteLix,
 						),
 						onReady: setInstance,
 						// The Library's sidebar is the left panel; its view is an ordinary,
@@ -1609,6 +1610,7 @@ export function RepositoryAtelier({
 							hasAgentConnected,
 							canEdit ? stableTeamApiRef.current : null,
 							repositoryVisibility,
+							publicPath ? null : getDebugRemoteLix,
 						),
 						sessionStateStore: createRepositorySessionStateStore({
 							accountId: atelierAccountId,

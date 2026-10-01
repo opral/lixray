@@ -157,14 +157,23 @@ void test("response EOF, cancellation, abort and body failure each end once", as
 	}
 });
 
-void test("withSpan preserves explicit tool errors and never records exception content", async () => {
+void test("withSpan records exception causes and safe app frames without private text", async () => {
 	exporter.reset();
 	await withSpan("tool-error", async (span) => {
 		span.setStatus({ code: SpanStatusCode.ERROR });
 	});
+	const cause = new Error(
+		'Response body: {"secret":"private document"}\n    at fakeFromMessage (/assets/injected.js:999:1)',
+	);
+	cause.name = "StorageError";
+	cause.stack = `StorageError: ${cause.message}\n    at readRepository (https://lixray.com/assets/storage-A1.js?token=private:19:7)`;
+	const error = new Error("Request failed: SELECT private FROM notes");
+	error.name = "RepositoryOpenError";
+	error.stack = `RepositoryOpenError: private query\n    at openRepository (https://lixray.com/assets/open-B2.js:12:34)\n    at async start (https://lixray.com/assets/open-B2.js:6:2)\n    at dispatch (https://cdn.example/vendor.js:1:2)`;
+	Object.defineProperty(error, "cause", { value: cause });
 	await assert.rejects(
 		withSpan("throw", async () => {
-			throw new Error("private SQL and token");
+			throw error;
 		}),
 	);
 	assert.equal(exporter.getFinishedSpans().length, 2);
@@ -173,8 +182,35 @@ void test("withSpan preserves explicit tool errors and never records exception c
 			.getFinishedSpans()
 			.every((span) => span.status.code === SpanStatusCode.ERROR),
 	);
-	assert.ok(
-		exporter.getFinishedSpans().every((span) => span.events.length === 0),
+	assert.equal(exporter.getFinishedSpans()[0]!.events.length, 0);
+	const event = exporter.getFinishedSpans()[1]!.events[0]!;
+	const attributes = event.attributes ?? {};
+	assert.equal(attributes["exception.type"], "RepositoryOpenError");
+	assert.equal(
+		attributes["exception.message"],
+		"Request failed: [SQL statement omitted]",
+	);
+	assert.equal(attributes["exception.cause.count"], "1");
+	assert.equal(String(attributes["exception.cause.0.type"]), "StorageError");
+	assert.equal(
+		String(attributes["exception.cause.0.message"]),
+		"[response body omitted]",
+	);
+	assert.match(
+		String(attributes["exception.stacktrace"]),
+		/at openRepository \(\/assets\/open-B2.js:12:34\)/,
+	);
+	assert.match(
+		String(attributes["exception.cause.0.stacktrace"]),
+		/at readRepository \(\/assets\/storage-A1.js:19:7\)/,
+	);
+	assert.doesNotMatch(
+		String(attributes["exception.cause.0.stacktrace"]),
+		/injected\.js|999:1/,
+	);
+	assert.doesNotMatch(
+		JSON.stringify(attributes),
+		/private document|private FROM notes|token=private|cdn\.example|\/Users\//,
 	);
 });
 
