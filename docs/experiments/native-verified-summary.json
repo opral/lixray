@@ -1,0 +1,249 @@
+{
+  "input": ".architecture/profile-native.json",
+  "cases": 24,
+  "failures": 0,
+  "samplesPerWorkload": 6,
+  "bootstrapByteRange": [2598, 2619],
+  "rows": [
+    {
+      "unrelatedFiles": 0,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 989.4000005722046,
+        "min": 984.0999994277954,
+        "max": 1131.7000007629395
+      },
+      "scopeMs": {
+        "median": 231.4500002861023,
+        "min": 228.29999923706055,
+        "max": 236.20000076293945
+      },
+      "readyMs": {
+        "median": 1221.7000002861023,
+        "min": 1212.5,
+        "max": 1363.6000003814697
+      },
+      "navigationToReadyMs": {
+        "median": 1236.5319304999935,
+        "min": 1225.2401660000032,
+        "max": 1375.1995739999984
+      },
+      "bootstrapBytes": {
+        "median": 2607,
+        "min": 2598,
+        "max": 2619
+      },
+      "scopeBytes": {
+        "median": 17743,
+        "min": 17736,
+        "max": 17761
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 16.59999990463257,
+        "min": 13,
+        "max": 77.30000019073486
+      },
+      "hotReadMs": {
+        "median": 3.8000001907348633,
+        "min": 3.1000003814697266,
+        "max": 5.600000381469727
+      },
+      "offlineReopenMs": {
+        "median": 490.25,
+        "min": 478.29999923706055,
+        "max": 492.5
+      },
+      "convergenceMs": {
+        "median": 555.75862399998,
+        "min": 550.4327540000086,
+        "max": 562.9125020000001
+      }
+    },
+    {
+      "unrelatedFiles": 500,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 996.6999998092651,
+        "min": 974.1999998092651,
+        "max": 1009.2000007629395
+      },
+      "scopeMs": {
+        "median": 242.54999923706055,
+        "min": 239.19999980926514,
+        "max": 248.39999961853027
+      },
+      "readyMs": {
+        "median": 1240.9999995231628,
+        "min": 1217.0999994277954,
+        "max": 1252.8999996185303
+      },
+      "navigationToReadyMs": {
+        "median": 1253.764887499994,
+        "min": 1237.0234929999997,
+        "max": 1274.9061389999988
+      },
+      "bootstrapBytes": {
+        "median": 2611.5,
+        "min": 2603,
+        "max": 2619
+      },
+      "scopeBytes": {
+        "median": 99304,
+        "min": 73707,
+        "max": 105919
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 18.549999713897705,
+        "min": 17.100000381469727,
+        "max": 90.69999980926514
+      },
+      "hotReadMs": {
+        "median": 3.6999998092651367,
+        "min": 3.09999942779541,
+        "max": 6.300000190734863
+      },
+      "offlineReopenMs": {
+        "median": 500.65000009536743,
+        "min": 487.29999923706055,
+        "max": 515.6000003814697
+      },
+      "convergenceMs": {
+        "median": 555.8852989999941,
+        "min": 552.1131860000023,
+        "max": 558.8577119999991
+      }
+    },
+    {
+      "unrelatedFiles": 5000,
+      "unrelatedHistory": 0,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 1002,
+        "min": 995.4000005722046,
+        "max": 2070.800000190735
+      },
+      "scopeMs": {
+        "median": 250.65000009536743,
+        "min": 247.19999980926514,
+        "max": 254.80000019073486
+      },
+      "readyMs": {
+        "median": 1252.1499996185303,
+        "min": 1246,
+        "max": 2321.5
+      },
+      "navigationToReadyMs": {
+        "median": 1274.6775479999997,
+        "min": 1267.8933700000052,
+        "max": 2337.181574999995
+      },
+      "bootstrapBytes": {
+        "median": 2608,
+        "min": 2603,
+        "max": 2617
+      },
+      "scopeBytes": {
+        "median": 140522.5,
+        "min": 128894,
+        "max": 168027
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 21.15000009536743,
+        "min": 18.100000381469727,
+        "max": 83.89999961853027
+      },
+      "hotReadMs": {
+        "median": 3.8000001907348633,
+        "min": 3.1000003814697266,
+        "max": 15.09999942779541
+      },
+      "offlineReopenMs": {
+        "median": 502.1000003814697,
+        "min": 498.80000019073486,
+        "max": 511.19999980926514
+      },
+      "convergenceMs": {
+        "median": 555.2228584999975,
+        "min": 550.6523589999997,
+        "max": 557.2772819999955
+      }
+    },
+    {
+      "unrelatedFiles": 0,
+      "unrelatedHistory": 500,
+      "samples": 6,
+      "bootstrapMs": {
+        "median": 1003.8000001907349,
+        "min": 987.3000001907349,
+        "max": 2230.300000190735
+      },
+      "scopeMs": {
+        "median": 235.85000038146973,
+        "min": 229.9000005722046,
+        "max": 238
+      },
+      "readyMs": {
+        "median": 1239.2000002861023,
+        "min": 1224.5,
+        "max": 2463.800000190735
+      },
+      "navigationToReadyMs": {
+        "median": 1259.8984614999972,
+        "min": 1239.8441309999907,
+        "max": 2482.027850000013
+      },
+      "bootstrapBytes": {
+        "median": 2613,
+        "min": 2601,
+        "max": 2616
+      },
+      "scopeBytes": {
+        "median": 22479.5,
+        "min": 22461,
+        "max": 23809
+      },
+      "bootstrapResponses": {
+        "median": 3,
+        "min": 3,
+        "max": 3
+      },
+      "offlineEditMs": {
+        "median": 17.15000009536743,
+        "min": 13.59999942779541,
+        "max": 85.79999923706055
+      },
+      "hotReadMs": {
+        "median": 3.8000001907348633,
+        "min": 3,
+        "max": 7.699999809265137
+      },
+      "offlineReopenMs": {
+        "median": 494.94999980926514,
+        "min": 486,
+        "max": 502
+      },
+      "convergenceMs": {
+        "median": 555.1612999999961,
+        "min": 546.4023410000082,
+        "max": 556.1531880000039
+      }
+    }
+  ]
+}

@@ -540,3 +540,255 @@ void test("repository retry starts a new file-open root before SDK work", () => 
 		["lixray.file.open", "lixray.file.open"],
 	);
 });
+
+void test("WASM asset failure spans contain code-gated phase, cache status and HTTP status", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private compile error"), {
+				code: "LIX_WASM_ASSET_UNAVAILABLE",
+				details: {
+					phase: "wasm_compile",
+					cacheStatus: "corrupt",
+					httpStatus: 503,
+					url: "https://private.example/asset.wasm?token=secret",
+					body: "private response",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["error.type"], "LIX_WASM_ASSET_UNAVAILABLE");
+	assert.equal(finished.attributes["lix.wasm_asset.phase"], "wasm_compile");
+	assert.equal(finished.attributes["lix.wasm_asset.cache_status"], "corrupt");
+	assert.equal(finished.attributes["http.response.status_code"], 503);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});
+
+void test("failed opening spans preserve structured causes without recording error content", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private content"), {
+				code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+				details: {
+					sourceCode: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+					migrationPhase: "partial_receipt",
+					failureReason: "v2_branch_incarnation_mismatch",
+					failurePath: "$.descriptor.globalBranch.createdAt",
+					receiptVersion: 2,
+					expectedReceiptVersion: 3,
+					retryable: false,
+					admissionRetryExhausted: true,
+					recoveryDeadlineExceeded: true,
+					responseBody: "secret",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["error.type"],
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
+	);
+	assert.equal(
+		finished.attributes["lix.error.source_code"],
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
+	);
+	assert.equal(finished.attributes["lix.migration.phase"], "partial_receipt");
+	assert.equal(
+		finished.attributes["lix.migration.failure_reason"],
+		"v2_branch_incarnation_mismatch",
+	);
+	assert.equal(
+		finished.attributes["lix.migration.failure_path"],
+		"$.descriptor.globalBranch.createdAt",
+	);
+	assert.equal(finished.attributes["lix.receipt.version"], 2);
+	assert.equal(finished.attributes["lix.receipt.expected_version"], 3);
+	assert.equal(finished.attributes["lix.error.retryable"], false);
+	assert.equal(finished.attributes["lix.recovery.retry_exhausted"], true);
+	assert.equal(finished.attributes["lix.recovery.deadline_exceeded"], true);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});
+
+void test("receipt JSON spans preserve only bounded parser coordinates", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private parser output"), {
+				code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+				details: {
+					migrationPhase: "partial_receipt",
+					receiptVersion: 2,
+					expectedReceiptVersion: 3,
+					failureReason: "v2_receipt_json_data",
+					failurePath: "$",
+					jsonLine: 12,
+					jsonColumn: 5,
+					missingField: "activeAccountId",
+					parserMessage: "contains private bytes",
+					responseBody: "secret",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["lix.migration.phase"], "partial_receipt");
+	assert.equal(
+		finished.attributes["lix.migration.failure_reason"],
+		"v2_receipt_json_data",
+	);
+	assert.equal(finished.attributes["lix.migration.failure_path"], "$");
+	assert.equal(finished.attributes["lix.migration.json_line"], 12);
+	assert.equal(finished.attributes["lix.migration.json_column"], 5);
+	assert.equal(
+		finished.attributes["lix.migration.missing_field"],
+		"activeAccountId",
+	);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});
+
+void test("payload failures spans preserve only bounded reason, status, and UUID", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private payload"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					payloadFailureReason: "selected_change_payload_unavailable",
+					payloadPhysicalStatus: "missing_snapshot",
+					changeId: "11111111-1111-4111-8111-111111111111",
+					payload: "private bytes",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["lix.payload.failure_reason"],
+		"selected_change_payload_unavailable",
+	);
+	assert.equal(
+		finished.attributes["lix.payload.physical_status"],
+		"missing_snapshot",
+	);
+	assert.equal(
+		finished.attributes["lix.payload.change_id"],
+		"11111111-1111-4111-8111-111111111111",
+	);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|bytes/);
+});
+
+void test("catalog scan failures spans preserve only the fixed boundary markers", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private catalog detail"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					payloadPhase: "pre_request_catalog",
+					payloadOperation: "registered_schema_identity_scan",
+					private: "private schema bytes",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["lix.payload.phase"], "pre_request_catalog");
+	assert.equal(
+		finished.attributes["lix.payload.operation"],
+		"registered_schema_identity_scan",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(finished.attributes),
+		/private|schema bytes/,
+	);
+});
+
+void test("read fulfillment rejection spans expose only the fixed validation reason", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private recipe payload"), {
+				code: "LIX_READ_FULFILLMENT_INVALID",
+				details: {
+					payloadPhase: "read_fulfillment_validation",
+					payloadFailureReason: "selected_change_payload_recipe_mismatch",
+					payloadSchemaKind: "file_descriptor",
+					payloadRecipeMask: 129,
+					payloadRecipeCount: 2,
+					payloadRequiredInputCount: 17,
+					request: "private scan recipe",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["lix.payload.phase"],
+		"read_fulfillment_validation",
+	);
+	assert.equal(
+		finished.attributes["lix.payload.failure_reason"],
+		"selected_change_payload_recipe_mismatch",
+	);
+	assert.equal(
+		finished.attributes["lix.payload.schema_kind"],
+		"file_descriptor",
+	);
+	assert.equal(finished.attributes["lix.payload.recipe_mask"], 129);
+	assert.equal(finished.attributes["lix.payload.recipe_count"], 2);
+	assert.equal(finished.attributes["lix.payload.required_input_count"], 17);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
+});
+
+void test("native read recipe spans expose only a validated count and mask", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private read recipe"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					readFulfillment: {
+						interests: [
+							{ kind: "scan", schema_key: "private_schema" },
+							{ kind: "filesystem_paths", branch_ids: ["private_branch"] },
+						],
+					},
+					nativeReadRecipeCount: 2,
+					nativeReadRecipeMask: 18,
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(finished.attributes["lix.read.recipe_count"], 2);
+	assert.equal(finished.attributes["lix.read.recipe_mask"], 18);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private/);
+});
+
+void test("owner point-read budget failure spans preserve only bounded counts", async () => {
+	exporter.reset();
+	await assert.rejects(
+		withSpan("repository.open", async () => {
+			throw Object.assign(new Error("private payload"), {
+				code: "LIX_INTERNAL_ERROR",
+				details: {
+					payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+					attempted: 65_537,
+					budget: 65_536,
+					privateValue: "secret",
+				},
+			});
+		}),
+	);
+	const finished = exporter.getFinishedSpans()[0]!;
+	assert.equal(
+		finished.attributes["lix.payload.failure_reason"],
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(finished.attributes["lix.payload.attempted"], 65_537);
+	assert.equal(finished.attributes["lix.payload.budget"], 65_536);
+	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
+});

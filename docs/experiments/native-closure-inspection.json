@@ -1,0 +1,228 @@
+{
+  "generatedAt": "2026-10-01",
+  "inspection": {
+    "purpose": "Inspect the native read-fulfillment closure for one exact selected-file open and distinguish repository bootstrap from active-file preparation.",
+    "fixture": {
+      "kind": "synthetic",
+      "selectedFileBytes": 1024,
+      "selectedFileCount": 1,
+      "unrelatedFiles": [0, 5000],
+      "unrelatedHistory": 0,
+      "identifiers": "redacted"
+    },
+    "privacy": "No repository, branch, file, commit, digest, row-key, payload, or content value is retained. Inputs are summarized by address category and byte/count aggregates."
+  },
+  "measurementContext": {
+    "authority": "Disposable loopback authority was already running and had just been populated by fixture seeding.",
+    "browser": "Each invocation launched a fresh Chromium process and context.",
+    "networkDelayMs": 0,
+    "scopeTiming": "The UI's scope timer includes selected-branch check/switch, selected-file read, and prepareOfflineEditing. Bootstrap timing covers openLix, including browser WASM initialization.",
+    "concurrency": "The zero-file and 5000-file one-shot probes ran concurrently. Their timings are diagnostic observations only, not paired or headline latency evidence.",
+    "offlineBehavior": "This closure probe measures the online opening requests. Offline hot read/edit/reopen and eventual publication are exercised separately by profile-native.mjs."
+  },
+  "bootstrapContract": {
+    "scope": "Repository admission and bounded descriptor only; active-file materialization is measured separately.",
+    "observed": [
+      {
+        "unrelatedFiles": 0,
+        "durationMs": 815.9,
+        "attempts": 4,
+        "completedResponses": 3,
+        "responseBytes": 2615
+      },
+      {
+        "unrelatedFiles": 5000,
+        "durationMs": 2868.5,
+        "attempts": 4,
+        "completedResponses": 3,
+        "responseBytes": 2603
+      }
+    ],
+    "interpretation": "Both fixtures used four bootstrap attempts and three completed responses totaling about 2.6 KiB. The 12-byte measured difference is descriptor/data variation, not repository-size scaling. This is empirical boundedness evidence, not a proof of identical latency or a bound on later scoped preparation."
+  },
+  "activeFilePreparation": {
+    "requestScope": [
+      {
+        "kind": "file_content",
+        "requestedFileCount": 1
+      },
+      {
+        "kind": "filesystem_paths",
+        "scope": "file_ids",
+        "requestedFileCount": 1
+      }
+    ],
+    "observations": [
+      {
+        "unrelatedFiles": 0,
+        "bootstrapDurationMs": 815.9,
+        "scopeDurationMs": 155.6,
+        "scopeResponseBytes": 17751,
+        "scopeRequests": 1,
+        "readFulfillment": {
+          "request": {
+            "interests": ["file_content(fileIdCount=1)", "filesystem_paths(FileIds count=1)"],
+            "requiredCount": 1,
+            "requiredKinds": { "metadata": 1 },
+            "continuationPresent": false
+          },
+          "inputCount": 26,
+          "inputCategories": {
+            "blob_chunk": 1,
+            "blob_manifest": 1,
+            "change_record": 2,
+            "metadata/change_locator": 2,
+            "metadata/commit_graph_record": 4,
+            "metadata/commit_state_header": 4,
+            "object/commit_delta_part": 2,
+            "object/mutation_catalog": 4,
+            "object/mutation_directory_node": 3,
+            "object/tracked_state_tree_chunk": 3
+          },
+          "categoryPayloads": {
+            "blob_chunk": { "decodedPayloadBytes": 1024, "maxInputBytes": 1024 },
+            "blob_manifest": { "decodedPayloadBytes": 201, "maxInputBytes": 201 },
+            "change_record": { "decodedPayloadBytes": 357, "maxInputBytes": 208 },
+            "metadata/change_locator": { "decodedPayloadBytes": 8, "maxInputBytes": 5 },
+            "metadata/commit_graph_record": { "decodedPayloadBytes": 560, "maxInputBytes": 152 },
+            "metadata/commit_state_header": { "decodedPayloadBytes": 1742, "maxInputBytes": 478 },
+            "object/commit_delta_part": { "decodedPayloadBytes": 567, "maxInputBytes": 313 },
+            "object/mutation_catalog": { "decodedPayloadBytes": 685, "maxInputBytes": 312 },
+            "object/mutation_directory_node": { "decodedPayloadBytes": 1460, "maxInputBytes": 551 },
+            "object/tracked_state_tree_chunk": { "decodedPayloadBytes": 2033, "maxInputBytes": 830 }
+          },
+          "decodedPayloadBytes": 8637,
+          "maxInputBytes": 1024,
+          "treeChunkInputBytes": 2033,
+          "serverIo": {
+            "storageCalls": 383,
+            "storageBytes": 70655,
+            "payloadBytes": 8637
+          }
+        }
+      },
+      {
+        "unrelatedFiles": 5000,
+        "bootstrapDurationMs": 2868.5,
+        "scopeDurationMs": 172.4,
+        "scopeResponseBytes": 134463,
+        "scopeRequests": 1,
+        "readFulfillment": {
+          "request": {
+            "interests": ["file_content(fileIdCount=1)", "filesystem_paths(FileIds count=1)"],
+            "requiredCount": 1,
+            "requiredKinds": { "metadata": 1 },
+            "continuationPresent": false
+          },
+          "inputCount": 59,
+          "inputCategories": {
+            "blob_chunk": 1,
+            "blob_manifest": 1,
+            "change_record": 2,
+            "metadata/change_locator": 2,
+            "metadata/commit_graph_record": 6,
+            "metadata/commit_state_header": 5,
+            "object/commit_delta_part": 2,
+            "object/mutation_catalog": 5,
+            "object/mutation_directory_node": 4,
+            "object/tracked_state_tree_chunk": 31
+          },
+          "categoryPayloads": {
+            "blob_chunk": { "decodedPayloadBytes": 1024, "maxInputBytes": 1024 },
+            "blob_manifest": { "decodedPayloadBytes": 201, "maxInputBytes": 201 },
+            "change_record": { "decodedPayloadBytes": 357, "maxInputBytes": 208 },
+            "metadata/change_locator": { "decodedPayloadBytes": 8, "maxInputBytes": 5 },
+            "metadata/commit_graph_record": { "decodedPayloadBytes": 736, "maxInputBytes": 136 },
+            "metadata/commit_state_header": { "decodedPayloadBytes": 2095, "maxInputBytes": 478 },
+            "object/commit_delta_part": { "decodedPayloadBytes": 567, "maxInputBytes": 313 },
+            "object/mutation_catalog": { "decodedPayloadBytes": 838, "maxInputBytes": 312 },
+            "object/mutation_directory_node": { "decodedPayloadBytes": 1875, "maxInputBytes": 551 },
+            "object/tracked_state_tree_chunk": {
+              "decodedPayloadBytes": 83382,
+              "maxInputBytes": 10055
+            }
+          },
+          "decodedPayloadBytes": 91083,
+          "maxInputBytes": 10055,
+          "treeChunkInputBytes": 83382,
+          "serverIo": {
+            "storageCalls": 450,
+            "storageBytes": 323136,
+            "payloadBytes": 91083
+          }
+        }
+      }
+    ],
+    "interpretation": "The exact-file interests remain file-scoped, but their native immutable read closure grows with the tracked-state tree. The 5000-file case transfers 31 tree chunks (83382 payload bytes), not 5000 file descriptors. Therefore active-file preparation is indexed and remote-size-sensitive; it is not constant-byte preparation."
+  },
+  "treeAndMutationClosure": {
+    "configuredChunkLimitBytes": 16384,
+    "explicitMaximumChildrenPerInternalNode": null,
+    "fanoutContract": "No standalone maximum child count was found. Encoded node size is configured to 16 KiB, which indirectly limits ordinary fanout according to child-summary/key sizes. A single oversized entry may exceed the target, so this setting is not a format-level absolute byte guarantee.",
+    "pointReadAndMutationPreparation": "Exact row-key access follows its point path. For existing-key replacement, prepare_existing_key_mutation_inputs visits tree levels and reads the predecessor, affected node, and unchanged successor frontier (up to three nodes per level per selected key); absent keys prepare only their point path. This is the immutable dependency closure required to make the corresponding local mutation, not a generated mutation or an inventory of all same-schema rows.",
+    "pathIndexPreparation": "FileIds reads selected file descriptors and exact ancestor-directory closure. All-files and directories-only scopes are the scan branches.",
+    "limits": {
+      "readFulfillmentPayloadBytes": 268435456,
+      "readFulfillmentRecords": 16384,
+      "readFulfillmentCalls": 65536,
+      "offlineWriteFrontierRecords": 256
+    },
+    "interpretation": "The API has finite hard failure budgets and exact input scoping, but these limits do not prove a repository-size-independent byte bound for an exact active-file operation. The tree closure can add O(tree height) chunks as remote row count grows."
+  },
+  "sourceReferences": [
+    {
+      "file": "vendor/lix/packages/lix/src/handle.rs",
+      "lines": "1722-1747",
+      "claim": "prepare_offline_editing is an explicit bounded branch-frontier preparation API; query-specific file/plugin inputs remain demand-driven."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/sync/partial_write_frontier.rs",
+      "lines": "18-20, 36-78, 111-151",
+      "claim": "Selected/global branch jump-spine frontier has a 256-record preparation budget and does not enumerate ordinary ancestry or repository inventory."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/tracked_state/tree.rs",
+      "lines": "90-97, 529-584",
+      "claim": "The configured tree chunk limit is 16 KiB; existing-key mutation preparation follows the exact replacement frontier and reads at most three cursor nodes at each visited level per key."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/sync/read_interest_prepare.rs",
+      "lines": "424-435",
+      "claim": "Foreground row reads prepare native edit inputs for exact returned identities before rows become visible."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/hot_state/context.rs",
+      "lines": "1545-1576",
+      "claim": "Preparation resolves the selected rows' change records and calls exact current-row mutation-input preparation for their tracked-state keys."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/tracked_state/row_pk_index.rs",
+      "lines": "449-470, 498-524",
+      "claim": "Selected returned row keys prepare row-PK and snapshot primary mutation paths; the path preparation reads no repository-wide mutation inventory."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/filesystem/path_index.rs",
+      "lines": "1437-1507",
+      "claim": "FileIds scopes selected file owners and then loads their ancestor directory closure; All and DirectoriesOnly use scans."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/sync/read_fulfillment.rs",
+      "lines": "18-28, 1219-1233",
+      "claim": "Native fulfillment has explicit byte, record, and read-call budgets and rejects responses that exceed configured limits."
+    },
+    {
+      "file": "vendor/lix/packages/lix/src/sync/partial_worker_sql_tests.rs",
+      "lines": "363-563, 567-738",
+      "claim": "Native tests exercise offline local writes after preparation and an exact file update after close/reopen."
+    }
+  ],
+  "reproduction": {
+    "script": "web-app/experiments/inspect-native-closure.mjs",
+    "commands": [
+      "cd web-app",
+      "node experiments/inspect-native-closure.mjs",
+      "PROTOTYPE_UNRELATED_FILES=5000 node experiments/inspect-native-closure.mjs"
+    ],
+    "requirements": "Disposable loopback authority on port 18309 and prototype preview on port 8830, built with the vendored SDK. The script seeds one synthetic repository, opens the selected 1 KiB file, aggregates the fulfillment response in memory, then discards payloads and transient IDs."
+  }
+}

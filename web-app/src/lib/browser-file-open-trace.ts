@@ -1,3 +1,4 @@
+import { repositoryOpenTrace } from "./repository-open-performance.ts";
 import {
 	context,
 	trace,
@@ -54,6 +55,7 @@ export function createBrowserFileOpenTraceController(
 		}
 		scope.span.end();
 		completedFileId = outcome === "loaded" ? scope.fileId : undefined;
+		if (outcome === "loaded") repositoryOpenTrace.usable(repositoryId);
 	};
 
 	const start = (
@@ -73,11 +75,14 @@ export function createBrowserFileOpenTraceController(
 					"lix.file.id": fileId,
 				},
 			},
-			ROOT_CONTEXT,
+			repositoryOpenTrace.parentContext() ?? ROOT_CONTEXT,
 		);
 		const scope: FileOpenScope = {
 			span,
-			context: trace.setSpan(ROOT_CONTEXT, span),
+			context: trace.setSpan(
+				repositoryOpenTrace.parentContext() ?? ROOT_CONTEXT,
+				span,
+			),
 			owner,
 			fileId,
 			filePath,
@@ -119,7 +124,7 @@ export function createBrowserFileOpenTraceController(
 				scope.filePath = filePath;
 			const result = scope
 				? context.with(scope.context, operation)
-				: operation();
+				: repositoryOpenTrace.run(operation);
 			if (
 				scope &&
 				trackInitialReads &&
@@ -286,7 +291,9 @@ export function createBrowserFileOpenTraceController(
 			completedFileId = undefined;
 		},
 		run<T>(operation: () => T): T {
-			return active ? context.with(active.context, operation) : operation();
+			return active
+				? context.with(active.context, operation)
+				: repositoryOpenTrace.run(operation);
 		},
 		/** Scoped handle for one document's loaders and React effects. */
 		scopeLix(filePath: string, fileId: string | undefined, lix: Lix): Lix {

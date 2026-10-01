@@ -1,0 +1,23 @@
+{
+  "scenario": "native local commit while publication is held",
+  "productionScope": true,
+  "results": [
+    {
+      "unrelatedFiles": 0,
+      "blockedPushes": 1,
+      "durableEditMs": 63.18777299999988,
+      "localReadPassedBeforeAck": true,
+      "authorityUnchangedBeforeRelease": true,
+      "convergedAfterRelease": true
+    },
+    {
+      "unrelatedFiles": 5000,
+      "blockedPushes": 1,
+      "durableEditMs": 69.61400299999968,
+      "localReadPassedBeforeAck": true,
+      "authorityUnchangedBeforeRelease": true,
+      "convergedAfterRelease": true
+    }
+  ],
+  "failures": 0
+}

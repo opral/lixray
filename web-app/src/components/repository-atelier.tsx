@@ -1,3 +1,4 @@
+import { repositoryOpenTrace } from "~/lib/repository-open-performance";
 import { reportRepositoryOpenFailure } from "~/lib/repository-open-telemetry";
 import { createRepositoryRouteLifecycle } from "~/lib/repository-route-lifecycle";
 import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
@@ -90,6 +91,7 @@ import {
 	createBrowserFileOpenTraceController,
 	type BrowserFileOpenTraceController,
 } from "~/lib/browser-file-open-trace";
+import { withNativeFileWorkingScope } from "~/lib/native-file-working-scope";
 import {
 	openRepositoryLixSession,
 	openRepositoryRemoteLix,
@@ -104,6 +106,8 @@ import {
 } from "~/lib/repository-open-error";
 import { RepositoryOpenFailure } from "./repository-open-failure";
 import { ReplicaRecovery } from "./replica-recovery";
+import { DeviceReplicaRecovery } from "./device-replica-recovery";
+import { DeviceStorageProtection } from "./device-storage-protection";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
@@ -1268,7 +1272,7 @@ export function RepositoryAtelier({
 			typeof createRepositoryDebugRemote
 		> | null = null;
 		const openController = new AbortController();
-		resetRepositoryOpenPerformance();
+		resetRepositoryOpenPerformance(repositoryId);
 		setShellProps(null);
 		setInstance(null);
 		setBranchSession(null);
@@ -1279,6 +1283,7 @@ export function RepositoryAtelier({
 		routeSyncedRef.current = false;
 
 		if (!atelierAccountId) {
+			repositoryOpenTrace.finish("failed");
 			setError("Unable to identify the current Atelier account.");
 			return;
 		}
@@ -1288,7 +1293,9 @@ export function RepositoryAtelier({
 				? parseEntityUrlSplat(routeChildRef.current.splat)?.id
 				: undefined;
 		if (openingFileId) fileOpenTrace.ensureRepositoryAttempt(openingFileId);
-		void fileOpenTrace.run(() =>
+		const runOpening = <T,>(operation: () => T): T =>
+			repositoryOpenTrace.run(() => fileOpenTrace.run(operation));
+		void runOpening(() =>
 			openRepositoryLixSession({
 				namespace,
 				repositorySlug: repositorySlug,
@@ -1311,7 +1318,10 @@ export function RepositoryAtelier({
 					}
 					activeLix = session;
 					setMigration(null);
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.sessionReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.sessionReady,
+						repositoryId,
+					);
 					activeLixRef.current = session;
 					if (import.meta.env.DEV) {
 						// Dev-only escape hatch: lets the console (and agents driving
@@ -1512,8 +1522,15 @@ export function RepositoryAtelier({
 						// Scope its shared Lix handle once so every initial SQL read joins
 						// the active file-open trace, regardless of which view starts it.
 						lix: fileOpenTrace.scopeRepositoryLix(session.lix),
-						scopeDocumentLix: (path, fileId, lix) =>
-							fileOpenTrace.scopeLix(path, fileId, lix),
+						scopeDocumentLix: (path, fileId, lix) => {
+							const scopedLix = fileOpenTrace.scopeLix(path, fileId, lix);
+							// Native writes are enabled only after the selected file and
+							// active branch frontier are locally prepared. Path-scoped
+							// public views use the remote read-only session above.
+							return isReadOnly
+								? scopedLix
+								: withNativeFileWorkingScope(scopedLix, { fileId });
+						},
 						onError: (error) =>
 							captureExceptionTelemetry(error, {
 								operation: "atelier_view_render",
@@ -1587,7 +1604,10 @@ export function RepositoryAtelier({
 						}),
 						onEvent: (event) => eventHandlerRef.current(event),
 					};
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.atelierReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.atelierReady,
+						repositoryId,
+					);
 					setShellProps(atelierProps);
 					const actualBranchId = session.activeBranchSnapshot();
 					if (
@@ -1603,6 +1623,7 @@ export function RepositoryAtelier({
 				})
 				.catch((caught: unknown) => {
 					if (!disposed) {
+						repositoryOpenTrace.finish("failed");
 						const failedFileId =
 							routeChildRef.current.kind === "file"
 								? parseEntityUrlSplat(routeChildRef.current.splat)?.id
@@ -1768,7 +1789,7 @@ export function RepositoryAtelier({
 	);
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
+			className="fixed inset-0 flex h-full w-full flex-col overflow-hidden bg-bg"
 			aria-busy={!shellProps && !error}
 		>
 			{shellProps ? (
@@ -1787,17 +1808,22 @@ export function RepositoryAtelier({
 										<RepositoryFileOpenTraceContext.Provider
 											value={fileOpenTrace}
 										>
-											<Atelier
-												{...shellProps}
-												topBarProps={REPOSITORY_TOP_BAR_PROPS}
-												slots={{
-													navbarBrand,
-													navbarEnd: headerActions,
-												}}
-											/>
+											<div className="min-h-0 flex-1">
+												<Atelier
+													{...shellProps}
+													topBarProps={REPOSITORY_TOP_BAR_PROPS}
+													slots={{
+														navbarBrand,
+														navbarEnd: headerActions,
+													}}
+												/>
+											</div>
 											<Outlet />
 											{shellProps.lix ? (
 												<ReplicaRecovery lix={shellProps.lix} />
+											) : null}
+											{shellProps.lix && canEdit && !publicPath ? (
+												<DeviceStorageProtection lix={shellProps.lix} />
 											) : null}
 										</RepositoryFileOpenTraceContext.Provider>
 									</RepositoryAtelierContext.Provider>
@@ -1827,6 +1853,13 @@ export function RepositoryAtelier({
 						setStorageBusy(false);
 						setOpenAttempt((attempt) => attempt + 1);
 					}}
+				/>
+			) : null}
+			{canEdit && !publicPath && atelierAccountId ? (
+				<DeviceReplicaRecovery
+					repositoryId={repositoryId}
+					authIdentity={atelierAccountId}
+					openingFailed={error !== null}
 				/>
 			) : null}
 		</div>

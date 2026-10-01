@@ -1,3 +1,4 @@
+import { createRepositorySpanExporter } from "./lib/repository-span-exporter.ts";
 import { context, propagation, type Context } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { ZoneContextManager } from "@opentelemetry/context-zone";
@@ -42,19 +43,23 @@ export function installBrowserTelemetry(): void {
 	if (providerInstalled || isDemoModeEnabled || typeof window === "undefined")
 		return;
 	providerInstalled = true;
-	const exporter = new OTLPTraceExporter({
-		url: new URL(OTLP_PATH, window.location.origin).toString(),
-		headers: async (): Promise<Record<string, string>> => {
-			const token = await accessTokenProvider();
-			const repositoryId = repositoryIdProvider();
-			if (!token || !repositoryId) return {};
-			return {
-				Authorization: `Bearer ${token}`,
-				"x-lixray-repository-id": repositoryId,
-			};
-		},
-		timeoutMillis: 4_000,
-	});
+	const exporter = createRepositorySpanExporter(
+		(repositoryId) =>
+			new OTLPTraceExporter({
+				url: new URL(OTLP_PATH, window.location.origin).toString(),
+				headers: async (): Promise<Record<string, string>> => {
+					const token = await accessTokenProvider();
+
+					if (!repositoryId) return {};
+					return {
+						...(token ? { Authorization: `Bearer ${token}` } : {}),
+						"x-lixray-repository-id": repositoryId,
+					};
+				},
+				timeoutMillis: 4_000,
+			}),
+		() => repositoryIdProvider(),
+	);
 	const provider = new WebTracerProvider({
 		resource: resourceFromAttributes({
 			"service.name": "lixray-web",
@@ -125,21 +130,18 @@ export function createLixTelemetryOptions(
 					Promise.resolve().then(getAccessToken),
 					controller.signal,
 				);
-				if (!token)
-					throw new Error(
-						"No repository token is available for Lix OTLP export",
-					);
 				const requestBody = new ArrayBuffer(body.byteLength);
 				new Uint8Array(requestBody).set(body);
+				const headers = new Headers({
+					"x-lixray-repository-id": repositoryId,
+					"content-type": "application/x-protobuf",
+				});
+				if (token) headers.set("Authorization", `Bearer ${token}`);
 				const response = await fetch(
 					new URL(OTLP_PATH, window.location.origin),
 					{
 						method: "POST",
-						headers: {
-							Authorization: `Bearer ${token}`,
-							"x-lixray-repository-id": repositoryId,
-							"content-type": "application/x-protobuf",
-						},
+						headers,
 						body: requestBody,
 						signal: controller.signal,
 					},
@@ -244,6 +246,11 @@ export function stampLixResource(
 		const decoded = traceRequestType.decode(request) as {
 			resourceSpans?: Array<{
 				resource?: { attributes?: Array<{ key: string; value?: unknown }> };
+				scopeSpans?: Array<{
+					spans?: Array<{
+						attributes?: Array<{ key: string; value?: unknown }>;
+					}>;
+				}>;
 			}>;
 		};
 		for (const resourceSpan of decoded.resourceSpans ?? []) {
@@ -252,6 +259,16 @@ export function stampLixResource(
 			setStringAttribute(attributes, "service.name", "lixray-web");
 			setStringAttribute(attributes, "service.version", SERVICE_VERSION);
 			setStringAttribute(attributes, "lix.id", repositoryId);
+			// Native SDK spans carry the database's embedded ID. Published routes
+			// may use a different public ID, which is the identity authorized by
+			// the gateway header and used by Lixray's route-level instrumentation.
+			// This telemetry callback is bound to one open repository session, so
+			// bind its spans to that same authorized route scope before export.
+			for (const scope of resourceSpan.scopeSpans ?? []) {
+				for (const span of scope.spans ?? []) {
+					setStringAttribute((span.attributes ??= []), "lix.id", repositoryId);
+				}
+			}
 		}
 		return traceRequestType.encode(decoded).finish();
 	} catch {
@@ -279,7 +296,11 @@ function setStringAttribute(
 	key: string,
 	value: string,
 ): void {
-	const existing = attributes.find((attribute) => attribute.key === key);
-	if (existing) existing.value = { stringValue: value };
-	else attributes.push({ key, value: { stringValue: value } });
+	let found = false;
+	for (const attribute of attributes) {
+		if (attribute.key !== key) continue;
+		attribute.value = { stringValue: value };
+		found = true;
+	}
+	if (!found) attributes.push({ key, value: { stringValue: value } });
 }

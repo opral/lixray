@@ -1,5 +1,8 @@
 import { sanitizeRepositoryErrorFrames } from "../lib/repository-error-stack.ts";
-import { repositoryOpenDiagnostics } from "../lib/repository-open-telemetry.ts";
+import {
+	repositoryOpenDiagnostics,
+	repositoryOpenFailureMessage,
+} from "../lib/repository-open-telemetry.ts";
 import {
 	isProductionTelemetryEnvironment,
 	resolvePosthogProjectToken,
@@ -73,7 +76,10 @@ export async function captureRepositoryOpenReport(
 									report.fields.lix_error_code ??
 									report.fields.error_kind ??
 									"RepositoryOpenError",
-								value: "Repository opening failed",
+								value: repositoryOpenFailureMessage(
+									{ details: report.fields },
+									"Repository opening failed",
+								),
 								mechanism: { handled: true, type: "generic" },
 								...(report.frames.length
 									? { stacktrace: { type: "raw", frames: report.frames } }

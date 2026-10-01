@@ -53,6 +53,273 @@ void test("server delivers exceptions independently of browser PostHog", async (
 	assert.equal(properties.delivery, "first_party");
 });
 
+void test("first-party worker projection retains code-gated WASM asset diagnostics", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_WASM_ASSET_UNAVAILABLE",
+			wasmAssetPhase: "wasm_compile",
+			wasmAssetCacheStatus: "corrupt",
+			httpStatus: 503,
+			url: "https://private.example/asset.wasm?token=secret",
+			body: "private response",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.lix_error_code, "LIX_WASM_ASSET_UNAVAILABLE");
+	assert.equal(properties.wasmAssetPhase, "wasm_compile");
+	assert.equal(properties.wasmAssetCacheStatus, "corrupt");
+	assert.equal(properties.httpStatus, 503);
+	assert.doesNotMatch(JSON.stringify(payload), /private|secret/);
+});
+
+void test("first-party exception values show bounded migration cause and path", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			failureReason: "v2_receipt_shape_invalid",
+			failurePath: "$.descriptor.descriptorVersion",
+			message: "private payload",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		failureReason: string;
+		failurePath: string;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(properties.failureReason, "v2_receipt_shape_invalid");
+	assert.equal(properties.failurePath, "$.descriptor.descriptorVersion");
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private payload/);
+});
+
+void test("first-party exception values show bounded selected-payload diagnosis", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadFailureReason: "selected_change_payload_unavailable",
+			payloadPhysicalStatus: "missing_snapshot",
+			changeId: id,
+			payload: "private bytes",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		payloadFailureReason: string;
+		payloadPhysicalStatus: string;
+		changeId: string;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(
+		properties.payloadFailureReason,
+		"selected_change_payload_unavailable",
+	);
+	assert.equal(properties.payloadPhysicalStatus, "missing_snapshot");
+	assert.equal(properties.changeId, id);
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: selected_change_payload_unavailable",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private bytes/);
+});
+
+void test("first-party exception values preserve bounded owner point-read counts", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadFailureReason: "exact_owner_point_read_budget_exhausted",
+			attempted: 65_537,
+			budget: 65_536,
+			privateValue: "secret",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as {
+		payloadFailureReason: string;
+		attempted: number;
+		budget: number;
+		$exception_list: Array<{ value: string }>;
+	};
+	assert.equal(
+		properties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(properties.attempted, 65_537);
+	assert.equal(properties.budget, 65_536);
+	assert.equal(
+		properties.$exception_list[0]!.value,
+		"Repository opening failed: exact_owner_point_read_budget_exhausted",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /secret/);
+});
+
+void test("first-party exception values preserve fixed pre-request catalog operation", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_INTERNAL_ERROR",
+			payloadPhase: "pre_request_catalog",
+			payloadOperation: "registered_schema_snapshot_load",
+			privateValue: "secret schema bytes",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.payloadPhase, "pre_request_catalog");
+	assert.equal(properties.payloadOperation, "registered_schema_snapshot_load");
+	assert.doesNotMatch(JSON.stringify(payload), /secret|schema bytes/);
+});
+
+void test("first-party exceptions preserve the fixed read fulfillment validation cause", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
+			payloadPhase: "read_fulfillment_validation",
+			payloadFailureReason: "selected_change_payload_recipe_mismatch",
+			payloadSchemaKind: "file_descriptor",
+			payloadRecipeMask: 129,
+			payloadRecipeCount: 2,
+			payloadRequiredInputCount: 17,
+			nativeReadRecipeCount: 2,
+			nativeReadRecipeMask: 129,
+			request: "private recipe data",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
+	assert.equal(
+		properties.payloadFailureReason,
+		"selected_change_payload_recipe_mismatch",
+	);
+	assert.equal(properties.payloadSchemaKind, "file_descriptor");
+	assert.equal(properties.payloadRecipeMask, 129);
+	assert.equal(properties.payloadRecipeCount, 2);
+	assert.equal(properties.payloadRequiredInputCount, 17);
+	assert.equal(properties.nativeReadRecipeCount, 2);
+	assert.equal(properties.nativeReadRecipeMask, 129);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"Repository opening failed: selected_change_payload_recipe_mismatch",
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private/);
+});
+
+void test("client installation failures reach PostHog after a successful authority response", async () => {
+	const reason = "selected_change_payload_identity_or_lifetime_mismatch";
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {
+			lix_error_code: "LIX_READ_FULFILLMENT_INVALID",
+			payloadPhase: "read_fulfillment_install",
+			payloadFailureReason: reason,
+			request: "private recipe bytes",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.payloadPhase, "read_fulfillment_install");
+	assert.equal(properties.payloadFailureReason, reason);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		`Repository opening failed: ${reason}`,
+	);
+	assert.doesNotMatch(JSON.stringify(payload), /private recipe/);
+});
+
 void test("diagnostics route authenticates, bounds input and checks repository access", async () => {
 	const { handleRequest } = await import("./handler.ts");
 	const request = (body: unknown) =>

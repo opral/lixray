@@ -2,12 +2,154 @@ import { repositoryErrorFrames } from "./repository-error-stack.ts";
 export const REPOSITORY_OPEN_DIAGNOSTICS_PATH =
 	"/api/repository-open-diagnostics";
 const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
+const MIGRATION_FAILURE_REASONS = [
+	"pending_conversion_journal",
+	"receipt_json_syntax",
+	"receipt_json_data",
+	"receipt_json_eof",
+	"receipt_json_other",
+	"unsupported_receipt_version",
+	"descriptor_version_invalid",
+	"branch_control_missing",
+	"branch_incarnation_mismatch",
+	"baseline_lease_invalid",
+	"receipt_validation_failed",
+	"v2_receipt_shape_invalid",
+	"v2_descriptor_version_invalid",
+	"v2_branch_control_missing",
+	"v2_branch_incarnation_mismatch",
+	"v2_receipt_json_syntax",
+	"v2_receipt_json_data",
+	"v2_receipt_json_eof",
+	"v2_receipt_json_other",
+] as const;
+const MIGRATION_FAILURE_PATHS = [
+	"$",
+	"$.descriptor.descriptorVersion",
+	"$.descriptor.selectedBranch",
+	"$.descriptor.globalBranch",
+	"$.descriptor.selectedBranch.createdAt",
+	"$.descriptor.globalBranch.createdAt",
+	"$.baselineLease",
+] as const;
+const MIGRATION_PHASES = [
+	"partial_receipt",
+	"candidate_format_migration",
+] as const;
+const PAYLOAD_FAILURE_REASONS = [
+	"selected_change_payload_unavailable",
+	"exact_owner_point_read_budget_exhausted",
+	"selected_change_payload_recipe_mismatch",
+	"selected_change_payload_identity_or_lifetime_mismatch",
+	"selected_change_payload_locator_missing",
+	"selected_change_payload_source_mismatch",
+	"selected_change_payload_outside_descriptor_scope",
+	"read_fulfillment_resident_input_conflict",
+	"read_fulfillment_validation_failed",
+	"read_fulfillment_install_failed",
+] as const;
+const PAYLOAD_PHASES = [
+	"pre_request_catalog",
+	"read_fulfillment_validation",
+	"read_fulfillment_install",
+] as const;
+const PAYLOAD_OPERATIONS = [
+	"registered_schema_identity_scan",
+	"registered_schema_snapshot_load",
+] as const;
+const PAYLOAD_SCHEMA_KINDS = [
+	"file_descriptor",
+	"directory_descriptor",
+	"binary_blob_ref",
+	"plugin_registry",
+	"account",
+	"schema",
+	"key_value",
+	"other",
+] as const;
+const READ_FULFILLMENT_ERROR_CODE = "LIX_READ_FULFILLMENT_INVALID";
+const NATIVE_READ_RECIPE_MASKS = {
+	exact: 1,
+	scan: 2,
+	file_content: 4,
+	filesystem_metadata: 8,
+	filesystem_paths: 16,
+	collection_generation: 32,
+	packed_identity_membership: 64,
+	diff: 128,
+} as const;
+const WASM_ASSET_ERROR_CODE = "LIX_WASM_ASSET_UNAVAILABLE";
+const WASM_ASSET_PHASES = ["wasm_fetch", "wasm_compile"] as const;
+const WASM_ASSET_CACHE_STATUSES = [
+	"hit",
+	"miss",
+	"corrupt",
+	"unavailable",
+] as const;
+const EXACT_OWNER_POINT_READ_BUDGET = 65_536;
+const MIGRATION_MISSING_FIELDS = [
+	"version",
+	"archivedBranchIds",
+	"remoteId",
+	"activeAccountId",
+	"epochId",
+	"descriptor",
+	"baselineLease",
+	"selectedServingGeneration",
+	"globalServingGeneration",
+	"descriptorVersion",
+	"lixId",
+	"defaultBranchId",
+	"cursor",
+	"selectedBranch",
+	"globalBranch",
+	"branchId",
+	"createdAt",
+	"updatedAt",
+	"refChangeId",
+	"head",
+	"checkpoint",
+	"commitId",
+	"scopedRangeRootId",
+	"scopedRangeRootDigest",
+	"rowPkIndexRootId",
+	"leaseId",
+	"accountId",
+	"roots",
+	"expiresAtMs",
+	"authorId",
+] as const;
+
+function isKnownMigrationMissingField(
+	fields: Record<string, unknown>,
+): boolean {
+	const field = fields.missingField;
+	if (
+		typeof field !== "string" ||
+		!MIGRATION_MISSING_FIELDS.includes(
+			field as (typeof MIGRATION_MISSING_FIELDS)[number],
+		)
+	)
+		return false;
+	const version =
+		typeof fields.receiptVersion === "number"
+			? fields.receiptVersion
+			: typeof fields.receiptVersion === "string" &&
+				  /^\d{1,3}$/.test(fields.receiptVersion)
+				? Number(fields.receiptVersion)
+				: undefined;
+	if (field === "version") return true;
+	if (version === 1)
+		return field !== "archivedBranchIds" && field !== "authorId";
+	if (version === 2) return field !== "authorId";
+	return version === 3;
+}
 
 /** Only structural coordinates: never messages, URLs, credentials or document data. */
 export function repositoryOpenDiagnostics(
 	error: unknown,
-): Record<string, string | number | null> {
-	const result: Record<string, string | number | null> = {};
+): Record<string, string | number | boolean | null> {
+	const result: Record<string, string | number | boolean | null> = {};
 	if (!error || typeof error !== "object") return result;
 	const candidate = error as Record<string, unknown>;
 	if (
@@ -37,6 +179,40 @@ export function repositoryOpenDiagnostics(
 	const details = candidate.details;
 	if (!details || typeof details !== "object") return result;
 	const fields = details as Record<string, unknown>;
+	if (candidate.code === WASM_ASSET_ERROR_CODE) {
+		// Accept both SDK error details and the already-normalized first-party
+		// diagnostic payload. Re-normalizing at the worker boundary must not
+		// discard these code-gated enums.
+		const phase = fields.phase ?? fields.wasmAssetPhase;
+		if (
+			typeof phase === "string" &&
+			WASM_ASSET_PHASES.includes(phase as (typeof WASM_ASSET_PHASES)[number])
+		)
+			result.wasmAssetPhase = phase;
+		const cacheStatus = fields.cacheStatus ?? fields.wasmAssetCacheStatus;
+		if (
+			typeof cacheStatus === "string" &&
+			WASM_ASSET_CACHE_STATUSES.includes(
+				cacheStatus as (typeof WASM_ASSET_CACHE_STATUSES)[number],
+			)
+		)
+			result.wasmAssetCacheStatus = cacheStatus;
+	}
+	for (const key of [
+		"retryable",
+		"admissionRetryExhausted",
+		"recoveryDeadlineExceeded",
+		"sourcePreserved",
+		"payloadSourceDeferred",
+		"payloadPhysicalConflict",
+	]) {
+		if (typeof fields[key] === "boolean") result[key] = fields[key];
+	}
+	if (
+		typeof fields.sourceCode === "string" &&
+		/^LIX_[A-Z0-9_]{1,100}$/.test(fields.sourceCode)
+	)
+		result.sourceCode = fields.sourceCode;
 	for (const key of [
 		"branchId",
 		"headCommitId",
@@ -44,11 +220,170 @@ export function repositoryOpenDiagnostics(
 		"expectedRootCommitId",
 		"servingGeneration",
 		"expectedServingGeneration",
+		"changeId",
+		"sourceCommitId",
 	]) {
 		const value = fields[key];
 		if (value === null || (typeof value === "string" && UUID.test(value)))
 			result[key] = value;
 	}
+	for (const key of ["payloadStandaloneStatus", "payloadPhysicalStatus"]) {
+		const value = fields[key];
+		if (
+			typeof value === "string" &&
+			[
+				"absent",
+				"matched",
+				"identity_mismatch",
+				"missing_snapshot",
+				"lifetime_mismatch",
+			].includes(value)
+		)
+			result[key] = value;
+	}
+	if (
+		typeof fields.payloadFailureReason === "string" &&
+		PAYLOAD_FAILURE_REASONS.includes(
+			fields.payloadFailureReason as (typeof PAYLOAD_FAILURE_REASONS)[number],
+		)
+	)
+		result.payloadFailureReason = fields.payloadFailureReason;
+	if (
+		typeof fields.payloadPhase === "string" &&
+		PAYLOAD_PHASES.includes(
+			fields.payloadPhase as (typeof PAYLOAD_PHASES)[number],
+		)
+	)
+		result.payloadPhase = fields.payloadPhase;
+	if (
+		typeof fields.payloadOperation === "string" &&
+		PAYLOAD_OPERATIONS.includes(
+			fields.payloadOperation as (typeof PAYLOAD_OPERATIONS)[number],
+		)
+	)
+		result.payloadOperation = fields.payloadOperation;
+	if (candidate.code === READ_FULFILLMENT_ERROR_CODE) {
+		if (
+			typeof fields.payloadSchemaKind === "string" &&
+			PAYLOAD_SCHEMA_KINDS.includes(
+				fields.payloadSchemaKind as (typeof PAYLOAD_SCHEMA_KINDS)[number],
+			)
+		)
+			result.payloadSchemaKind = fields.payloadSchemaKind;
+		const recipeMask = parseBoundedPayloadCount(fields.payloadRecipeMask, 255);
+		if (recipeMask !== undefined) result.payloadRecipeMask = recipeMask;
+		const recipeCount = parseBoundedPayloadCount(
+			fields.payloadRecipeCount,
+			4096,
+		);
+		if (recipeCount !== undefined) result.payloadRecipeCount = recipeCount;
+		const requiredInputCount = parseBoundedPayloadCount(
+			fields.payloadRequiredInputCount,
+			16_384,
+		);
+		if (requiredInputCount !== undefined)
+			result.payloadRequiredInputCount = requiredInputCount;
+	}
+	if (
+		fields.payloadFailureReason === "exact_owner_point_read_budget_exhausted" &&
+		parseBoundedPayloadCount(
+			fields.attempted,
+			EXACT_OWNER_POINT_READ_BUDGET + 1,
+		) ===
+			EXACT_OWNER_POINT_READ_BUDGET + 1 &&
+		parseBoundedPayloadCount(fields.budget, EXACT_OWNER_POINT_READ_BUDGET) ===
+			EXACT_OWNER_POINT_READ_BUDGET
+	) {
+		result.attempted = EXACT_OWNER_POINT_READ_BUDGET + 1;
+		result.budget = EXACT_OWNER_POINT_READ_BUDGET;
+	}
+	if (
+		typeof candidate.code === "string" &&
+		/^LIX_[A-Z0-9_]{1,100}$/.test(candidate.code)
+	) {
+		const nativeMarker = fields.readFulfillment;
+		const interests =
+			nativeMarker && typeof nativeMarker === "object"
+				? (nativeMarker as Record<string, unknown>).interests
+				: undefined;
+		if (Array.isArray(interests)) {
+			const count = parseBoundedPayloadCount(
+				fields.nativeReadRecipeCount,
+				4096,
+			);
+			const mask = parseBoundedPayloadCount(fields.nativeReadRecipeMask, 255);
+			const derivedMask = interests.reduce<number | undefined>(
+				(current, interest) => {
+					if (
+						current === undefined ||
+						!interest ||
+						typeof interest !== "object"
+					)
+						return undefined;
+					const kind = (interest as Record<string, unknown>).kind;
+					if (
+						typeof kind !== "string" ||
+						!Object.hasOwn(NATIVE_READ_RECIPE_MASKS, kind)
+					)
+						return undefined;
+					return (
+						current |
+						NATIVE_READ_RECIPE_MASKS[
+							kind as keyof typeof NATIVE_READ_RECIPE_MASKS
+						]
+					);
+				},
+				0,
+			);
+			if (
+				count !== undefined &&
+				count >= 1 &&
+				count === interests.length &&
+				mask !== undefined &&
+				derivedMask !== undefined &&
+				mask === derivedMask
+			) {
+				result.nativeReadRecipeCount = count;
+				result.nativeReadRecipeMask = mask;
+			}
+		} else if (nativeMarker === undefined) {
+			// First-party reports carry already-normalized fields after the private
+			// marker has been dropped at the browser boundary. This fallback only
+			// admits bounded numbers and a validated LIX code.
+			const count = parseBoundedPayloadCount(
+				fields.nativeReadRecipeCount,
+				4096,
+			);
+			const mask = parseBoundedPayloadCount(fields.nativeReadRecipeMask, 255);
+			if (count !== undefined && count >= 1 && mask !== undefined) {
+				result.nativeReadRecipeCount = count;
+				result.nativeReadRecipeMask = mask;
+			}
+		}
+	}
+	if (
+		typeof fields.failureReason === "string" &&
+		MIGRATION_FAILURE_REASONS.includes(
+			fields.failureReason as (typeof MIGRATION_FAILURE_REASONS)[number],
+		)
+	)
+		result.failureReason = fields.failureReason;
+	if (
+		typeof fields.failurePath === "string" &&
+		MIGRATION_FAILURE_PATHS.includes(
+			fields.failurePath as (typeof MIGRATION_FAILURE_PATHS)[number],
+		)
+	)
+		result.failurePath = fields.failurePath;
+	if (
+		typeof fields.migrationPhase === "string" &&
+		MIGRATION_PHASES.includes(
+			fields.migrationPhase as (typeof MIGRATION_PHASES)[number],
+		)
+	)
+		result.migrationPhase = fields.migrationPhase;
+	if (isKnownMigrationMissingField(fields))
+		result.missingField = fields.missingField as string;
 	for (const key of [
 		"servingGeneration",
 		"expectedServingGeneration",
@@ -58,14 +393,75 @@ export function repositoryOpenDiagnostics(
 		"expectedStorageEpoch",
 		"protocolEpoch",
 		"expectedProtocolEpoch",
+		"fromVersion",
+		"toVersion",
+		"receiptVersion",
+		"expectedReceiptVersion",
+		"recoveryAttempts",
 	]) {
 		const value = fields[key];
 		if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0)
 			result[key] = value;
 		else if (typeof value === "string" && /^\d{1,20}$/.test(value))
-			result[key] = value;
+			result[key] = Number.isSafeInteger(Number(value)) ? Number(value) : value;
+	}
+	for (const key of ["jsonLine", "jsonColumn"] as const) {
+		const value = fields[key];
+		const number =
+			typeof value === "number"
+				? value
+				: typeof value === "string" && /^\d{1,5}$/.test(value)
+					? Number(value)
+					: undefined;
+		if (Number.isSafeInteger(number) && number! > 0 && number! <= 16_384)
+			result[key] = number!;
+	}
+	if (
+		fields.recoveryStage === "admission" ||
+		fields.recoveryStage === "replacement"
+	)
+		result.recoveryStage = fields.recoveryStage;
+	for (const [key, field, length] of [
+		["telemetryTraceId", "$otel_trace_id", 32],
+		["telemetrySpanId", "$otel_span_id", 16],
+	] as const) {
+		const value = fields[key] ?? fields[field];
+		if (
+			typeof value === "string" &&
+			new RegExp(`^[a-f0-9]{${length}}$`).test(value) &&
+			/[1-9a-f]/.test(value)
+		)
+			result[field] = value;
 	}
 	return result;
+}
+
+function parseBoundedPayloadCount(
+	value: unknown,
+	max: number,
+): number | undefined {
+	const parsed =
+		typeof value === "number"
+			? value
+			: typeof value === "string" && /^\d{1,6}$/.test(value)
+				? Number(value)
+				: undefined;
+	return Number.isSafeInteger(parsed) && parsed! >= 0 && parsed! <= max
+		? parsed
+		: undefined;
+}
+
+/** Build a PostHog-safe exception value from an allowlisted migration cause. */
+export function repositoryOpenFailureMessage(
+	value: unknown,
+	fallback: string,
+): string {
+	const fields = repositoryOpenDiagnostics(value);
+	const reason = fields.failureReason ?? fields.payloadFailureReason;
+	if (typeof reason !== "string") return fallback;
+	const path =
+		typeof fields.failurePath === "string" ? ` at ${fields.failurePath}` : "";
+	return `${fallback}: ${reason}${path}`;
 }
 
 export async function reportRepositoryOpenFailure(

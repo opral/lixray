@@ -7,6 +7,8 @@ const compatibility = getCompatibility();
 const repositoryId = "11111111-1111-4111-8111-111111111111";
 const lixUrl = `https://lixray.example/lix/${repositoryId}`;
 const principalId = "00000000-0000-7000-8000-000000000002";
+const defaultBranchId = "00000000-0000-7000-8000-000000000003";
+const globalBranchId = "ffffffff-ffff-7fff-bfff-ffffffffffff";
 const identity = {
 	repositoryId,
 	principalId,
@@ -18,15 +20,32 @@ const handshake = {
 	protocolVersion: compatibility.serverProtocolVersion,
 	syncProtocolVersion: compatibility.syncProtocolVersion,
 	activeAccountId: principalId,
+	activeBranchId: defaultBranchId,
 	sessionId: "session-1",
 };
 function success(url, init = {}) {
 	const path = new URL(url).pathname;
 	if (path.endsWith("/admission")) return Response.json(identity);
+	if (
+		path.endsWith("/execute") &&
+		JSON.parse(init.body).sql.includes("lix_key_value")
+	)
+		return Response.json({
+			columns: [{ name: "value", type: "jsonb" }],
+			rows: [[{ kind: "jsonb", value: defaultBranchId }]],
+		});
 	if (path.endsWith("/execute"))
 		return Response.json({ rows: [[{ kind: "int", value: 1 }]] });
 	if (init.method === "DELETE") return new Response(null, { status: 204 });
-	return Response.json(handshake);
+	return Response.json(
+		new URL(url).searchParams.get("activeBranchId") === globalBranchId
+			? {
+					...handshake,
+					activeBranchId: globalBranchId,
+					sessionId: "global-session",
+				}
+			: handshake,
+	);
 }
 
 void test("checks browser admission before SQL using canonical SDK compatibility", async () => {
@@ -67,8 +86,37 @@ void test("checks browser admission before SQL using canonical SDK compatibility
 		["GET", `/lix/v1/${repositoryId}/admission`, null],
 		["GET", `/lix/v1/${repositoryId}/`, null],
 		["POST", `/lix/v1/${repositoryId}/execute`, "session-1"],
+		["GET", `/lix/v1/${repositoryId}/`, null],
+		["POST", `/lix/v1/${repositoryId}/execute`, "global-session"],
+		["DELETE", `/lix/v1/${repositoryId}/session`, "global-session"],
 		["DELETE", `/lix/v1/${repositoryId}/session`, "session-1"],
 	]);
+});
+
+void test("rejects missing or mismatched canonical default settings and closes both sessions", async () => {
+	for (const rows of [[], [[{ kind: "jsonb", value: principalId }]]]) {
+		const closed = [];
+		await assert.rejects(
+			checkProductionLix({
+				lixUrl,
+				fetchImpl: async (url, init) => {
+					if (init.method === "DELETE")
+						closed.push(new Headers(init.headers).get("Lix-Session-Id"));
+					if (
+						new URL(url).pathname.endsWith("/execute") &&
+						JSON.parse(init.body).sql.includes("lix_key_value")
+					)
+						return Response.json({
+							columns: [{ name: "value", type: "jsonb" }],
+							rows,
+						});
+					return success(url, init);
+				},
+			}),
+			/canonical default branch is missing or disagrees/,
+		);
+		assert.deepEqual(closed, ["global-session", "session-1"]);
+	}
 });
 
 void test("awaits only typed migration progress before opening a SQL session", async () => {
@@ -207,6 +255,39 @@ void test("fails when the canary session cannot close", async () => {
 	);
 });
 
+void test("closes sessions allocated in unsuccessful handshake responses", async () => {
+	for (const globalFailure of [false, true]) {
+		const closed = [];
+		await assert.rejects(
+			checkProductionLix({
+				lixUrl,
+				fetchImpl: async (url, init) => {
+					const parsed = new URL(url);
+					const isHandshake = parsed.pathname.endsWith(`/${repositoryId}/`);
+					const isGlobal =
+						parsed.searchParams.get("activeBranchId") === globalBranchId;
+					if (init.method === "DELETE")
+						closed.push(new Headers(init.headers).get("Lix-Session-Id"));
+					if (isHandshake && isGlobal === globalFailure)
+						return Response.json(
+							{
+								sessionId: isGlobal ? "global-session" : "session-1",
+								error: { code: "HANDSHAKE_FAILED" },
+							},
+							{ status: 500 },
+						);
+					return success(url, init);
+				},
+			}),
+			/handshake failed with HTTP 500 HANDSHAKE_FAILED/,
+		);
+		assert.deepEqual(
+			closed,
+			globalFailure ? ["global-session", "session-1"] : ["session-1"],
+		);
+	}
+});
+
 void test("preserves the read failure if session cleanup fails too", async () => {
 	await assert.rejects(
 		checkProductionLix({
@@ -258,13 +339,16 @@ void test("awaits typed handshake migration after catalog admission without repl
 				);
 			if (path.endsWith("/execute")) {
 				executes += 1;
-				assert.equal(handshakes, 3);
+				assert.equal(
+					handshakes,
+					JSON.parse(init.body).sql.includes("lix_key_value") ? 4 : 3,
+				);
 			}
 			return success(url, init);
 		},
 	});
 	assert.deepEqual(delays, [1000, 1000]);
-	assert.equal(executes, 1);
+	assert.equal(executes, 2);
 });
 
 void test("handshake migration is bounded and other failures are terminal", async () => {
@@ -295,8 +379,12 @@ void test("hosted admission can route to a different embedded repository identit
 		lixUrl,
 		fetchImpl: async (url, init) => {
 			if (new URL(url).pathname.endsWith(`/${repositoryId}/`)) {
+				const isGlobal =
+					new URL(url).searchParams.get("activeBranchId") === globalBranchId;
 				return Response.json({
 					...handshake,
+					activeBranchId: isGlobal ? globalBranchId : defaultBranchId,
+					sessionId: isGlobal ? "global-session" : "session-1",
 					lixId: "22222222-2222-4222-8222-222222222222",
 				});
 			}
@@ -304,7 +392,7 @@ void test("hosted admission can route to a different embedded repository identit
 			return success(url, init);
 		},
 	});
-	assert.equal(reads, 1);
+	assert.equal(reads, 2);
 });
 
 void test("invalid embedded identity closes the allocated session before SQL", async () => {

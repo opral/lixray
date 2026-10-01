@@ -272,6 +272,14 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		// Match the startup budget used by the other repository-opening tests.
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${source}`,
+		);
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		expect(admissionRequests).toBe(2);
 		// First use may hydrate native inputs. Read the actual file and open
 		// working review online before asserting those workflows work offline.
@@ -312,6 +320,14 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await showLibraryFiles(page);
 		await expect(row(source)).toBeVisible({ timeout: 30_000 });
 		await expect(row(target)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${source}`,
+		);
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		context.on("request", captureCheckpoint);
 		// Keep navigation/assets reachable so reload tests the persisted replica,
 		// while every protocol operation from browser workers is unavailable.
@@ -320,6 +336,10 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await expect(row(source)).toHaveCount(0, { timeout: 5_000 });
 		await row(target).click();
 		await expect(row(source)).toBeVisible();
+		await expect(libraryRow(page, source)).toHaveAttribute(
+			"data-path",
+			`/${target}/${source}`,
+		);
 		await row(source).hover();
 		await libraryRow(page, source).getByRole("checkbox").click();
 		await row(source).focus();
@@ -328,10 +348,18 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		await renameInput.fill(renamedSource);
 		await renameInput.press("Enter");
 		await expect(row(renamedSource)).toBeVisible();
+		await expect(libraryRow(page, renamedSource)).toHaveAttribute(
+			"data-path",
+			`/${target}/${renamedSource}`,
+		);
 		// Readable links retain the old path after a move, but resolve by ID and
 		// rewrite to the current path. Stored links remain unchanged.
 		await page.goto(displayDirectoryUrl);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await expect(page).toHaveURL(
 			new RegExp(
 				`/folder/${compactId(directoryId)}/${target}/${renamedSource}(?:\\?.*)?$`,
@@ -385,14 +413,30 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 			page.getByRole("heading", { name: renamedSource, exact: true }),
 		).toBeVisible();
 		await expect(row("note.txt")).toBeVisible();
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await folderPath
 			.getByRole("button", { name: "Files", exact: true })
 			.click();
 		await expect(row(target)).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, target)).toHaveAttribute(
+			"data-path",
+			`/${target}`,
+		);
 		await row(target).click();
 		await expect(row(renamedSource)).toBeVisible();
+		await expect(libraryRow(page, renamedSource)).toHaveAttribute(
+			"data-path",
+			`/${target}/${renamedSource}`,
+		);
 		await row(renamedSource).click();
 		await expect(row("note.txt")).toBeVisible();
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await expect(
 			page.getByRole("button", {
 				name: /[1-9]\d* files? changed since checkpoint\. Review working changes/,
@@ -445,6 +489,10 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		);
 		await page.goto(renamedLinks.entities[0]!.url);
 		await expect(row("note.txt")).toBeVisible({ timeout: 30_000 });
+		await expect(libraryRow(page, "note.txt")).toHaveAttribute(
+			"data-path",
+			finalPath,
+		);
 		await page.goto(renamedLinks.entities[1]!.url);
 		await expect(
 			page.locator('[data-view-key="atelier_text"][data-active="true"]'),

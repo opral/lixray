@@ -404,6 +404,24 @@ export async function handleRequest(
 				status: 400,
 			});
 		}
+		if (!request.headers.has("authorization")) {
+			const resolution = await (
+				options.resolvePublicLix ?? resolvePublicLixWithSupabase
+			)(repositoryId, env);
+			if (!resolution.ok) return resolution.response;
+			if (
+				resolution.lixId.toLowerCase() !== repositoryId ||
+				resolution.scope === "path"
+			)
+				return new Response("Not found\n", { status: 404 });
+			return handleOtlpTelemetry(request, env, {
+				fetch: options.fetch ?? fetch,
+				authenticatedBrowser: true,
+				publicBrowser: true,
+				browserRepositoryId: repositoryId,
+				browserUserId: LIX_ANONYMOUS_ACCOUNT_ID,
+			});
+		}
 		const auth = await (options.authenticate ?? authenticateRepositoryClient)(
 			request,
 			env,
@@ -418,6 +436,8 @@ export async function handleRequest(
 		return handleOtlpTelemetry(request, env, {
 			fetch: options.fetch ?? fetch,
 			authenticatedBrowser: true,
+			browserRepositoryId: repositoryId,
+			browserUserId: auth.auth.userId,
 		});
 	}
 

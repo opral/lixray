@@ -136,7 +136,10 @@ export async function openRepositoryLixSession(
 				const replicaId = options.publicPath
 					? "remote-public-path"
 					: await repositoryBrowserReplicaId(options);
-				markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.replicaIdentified);
+				markRepositoryOpenPerformance(
+					REPOSITORY_OPEN_MARKS.replicaIdentified,
+					options.repositoryId,
+				);
 				try {
 					return await openRepositoryLixSessionWithRetry({
 						...options,
@@ -151,6 +154,24 @@ export async function openRepositoryLixSession(
 			{ signal: options.signal },
 		);
 		return new RepositoryLixSessionLease(lease.resource, () => lease.release());
+	} catch (error) {
+		// Context may be lost after a rejected worker/Web Lock promise. Carry
+		// the initiating trace into the independent first-party failure report.
+		const parent = openingTelemetryParent?.traceparent.match(
+			/^00-([a-f0-9]{32})-([a-f0-9]{16})-[a-f0-9]{2}$/,
+		);
+		if (error instanceof Error && parent && Object.isExtensible(error)) {
+			const details =
+				"details" in error && isRecord(error.details) ? error.details : {};
+			Object.assign(error, {
+				details: {
+					...details,
+					telemetryTraceId: parent[1],
+					telemetrySpanId: parent[2],
+				},
+			});
+		}
+		throw error;
 	} finally {
 		unsubscribe?.();
 	}
@@ -227,7 +248,7 @@ async function openRepositoryLixSessionWithRetry(
 							repositoryId: options.repositoryId,
 							refreshAccessToken: options.refreshAccessToken,
 							signal: options.signal,
-							shouldCaptureRequestFailures: () => false,
+							shouldCaptureRequestFailures: () => true,
 							openingParent: () => options.openingTelemetryParent,
 						}),
 						signal: options.signal,
@@ -264,7 +285,10 @@ async function openRepositoryLixSessionOnce(
 		openingParent = undefined;
 		throw error;
 	});
-	markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.lixOpened);
+	markRepositoryOpenPerformance(
+		REPOSITORY_OPEN_MARKS.lixOpened,
+		options.repositoryId,
+	);
 
 	try {
 		const activeBranchId = await lix.activeBranchId();
@@ -309,7 +333,10 @@ async function openRepositoryLixSessionOnce(
 				// Offline or slow pending uploads must not hide the cached branch.
 				// An explicit later switch still reports its failure to the caller.
 				if (isErrorCode(error, "LIX_PARTIAL_BRANCH_SWITCH_PENDING")) {
-					markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
+					markRepositoryOpenPerformance(
+						REPOSITORY_OPEN_MARKS.branchReady,
+						options.repositoryId,
+					);
 					requestFailureReporting.enabled = true;
 					return session;
 				}
@@ -326,7 +353,10 @@ async function openRepositoryLixSessionOnce(
 				}
 			}
 		}
-		markRepositoryOpenPerformance(REPOSITORY_OPEN_MARKS.branchReady);
+		markRepositoryOpenPerformance(
+			REPOSITORY_OPEN_MARKS.branchReady,
+			options.repositoryId,
+		);
 		requestFailureReporting.enabled = true;
 		return session;
 	} catch (error) {

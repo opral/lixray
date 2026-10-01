@@ -1,0 +1,185 @@
+{
+  "productionScope": true,
+  "ciRunId": "36841323230",
+  "engineRevision": "787b30226c1c621b752334a1dbffe8993b752038",
+  "appRevision": "5844e3d413a9fb9dba65044858f7628cfd064c21",
+  "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+  "profileElapsedMs": 167139,
+  "sampleIntervalMs": 30000,
+  "host": {
+    "cpuCount": 32,
+    "availableParallelism": 32,
+    "activeCompilerProcessCountMax": 0,
+    "loadAverageRanges": [
+      {
+        "windowMinutes": 1,
+        "min": 0.01,
+        "max": 1.87
+      },
+      {
+        "windowMinutes": 5,
+        "min": 0.18,
+        "max": 0.7
+      },
+      {
+        "windowMinutes": 15,
+        "min": 1.79,
+        "max": 1.91
+      }
+    ],
+    "samples": [
+      {
+        "capturedAt": "2026-10-01T09:42:52.021Z",
+        "phase": "before",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          0.01,
+          0.18,
+          1.87
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 195407540224
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:43:22.062Z",
+        "phase": "during",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          0.28,
+          0.23,
+          1.83
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193542500352
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:43:52.065Z",
+        "phase": "during",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          1.87,
+          0.63,
+          1.91
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193309454336
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:44:22.096Z",
+        "phase": "during",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          1.56,
+          0.67,
+          1.88
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193257250816
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:44:52.118Z",
+        "phase": "during",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          1.15,
+          0.66,
+          1.83
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193453850624
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:45:22.148Z",
+        "phase": "during",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          1.17,
+          0.7,
+          1.81
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193410871296
+        },
+        "activeCompilerProcessCount": 0
+      },
+      {
+        "capturedAt": "2026-10-01T09:45:39.161Z",
+        "phase": "after",
+        "productionScope": true,
+        "ciRunId": "36841323230",
+        "engineHead": "787b30226c1c621b752334a1dbffe8993b752038",
+        "authorityBinarySha256": "569443a5d9bf0a01c530f5c67f7a90901d9addae43c5b22f11cdae331dc804ca",
+        "loadAverage": [
+          0.98,
+          0.69,
+          1.79
+        ],
+        "cpuCount": 32,
+        "availableParallelism": 32,
+        "memory": {
+          "totalBytes": 200066154496,
+          "freeBytes": 193573961728
+        },
+        "activeCompilerProcessCount": 0
+      }
+    ]
+  },
+  "endpoints": {
+    "previewOrigin": "http://127.0.0.1:8830",
+    "authorityOrigin": "http://127.0.0.1:18309",
+    "objectStoreEndpoint": "http://127.0.0.1:53623",
+    "bucket": "lix",
+    "prefix": "native-prototype-01-10"
+  },
+  "note": "All runtime endpoints were loopback-only and used disposable local fixture storage. No production endpoint or deployment was used.",
+  "qualificationScope": "prepared-document baseline only",
+  "productionScopeMeaning": "Harness mode flag; the measured runtime used loopback-only fixtures and does not establish full Library release qualification.",
+  "libraryReleaseQualification": "pending cold directory-registry fix and fresh profile with exact matching SDK/server artifacts",
+  "deployment": "none"
+}

@@ -1,0 +1,426 @@
+{
+  "generatedAt": "2026-09-30T21:06:01.471Z",
+  "wasmAssetIdentity": "ab301e544725ddc5d57d0bd9588ba5750a8cfdbc10b013e07af7612208d1e946",
+  "authorityBuild": "smoke-unpinned",
+  "samples": 1,
+  "results": [
+    {
+      "mode": "partial",
+      "sample": 0,
+      "bytes": 1024,
+      "unrelatedFiles": 0,
+      "delayMs": 0,
+      "navigationToUsableMs": 1579.223708,
+      "coldOpenToUsableMs": 1541.0999999046326,
+      "coldRequests": 4,
+      "coldResponseBytes": 20323,
+      "coldEvents": [
+        {
+          "name": "partial.read",
+          "durationMs": 332.1999999284744,
+          "outcome": "ok"
+        },
+        {
+          "name": "partial.open_to_usable",
+          "durationMs": 1541.0999999046326,
+          "outcome": "ok"
+        }
+      ],
+      "coldNetwork": [
+        {
+          "method": "GET",
+          "route": "admission",
+          "purpose": "operation",
+          "durationMs": 96.5,
+          "status": 200,
+          "responseBytes": 145
+        },
+        {
+          "method": "GET",
+          "route": "fc3f7508-9878-4a68-87cc-4892eddbbf23",
+          "purpose": "operation",
+          "durationMs": 116.10000002384186,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "GET",
+          "route": "descriptor",
+          "purpose": "operation",
+          "durationMs": 186.19999992847443,
+          "status": 200,
+          "responseBytes": 1970
+        },
+        {
+          "method": "POST",
+          "route": "read-fulfillment",
+          "purpose": "operation",
+          "durationMs": 186.29999995231628,
+          "status": 200,
+          "responseBytes": 17715
+        }
+      ],
+      "capabilityStatus": "failed",
+      "capabilityError": "Error: page.evaluate: Error: partial.durable_edit: LIX_IDENTITY_UNVERIFIED_OFFLINE: Repository identity cannot be verified while offline\n    at Q (http://127.0.0.1:8830/assets/architecture-DO7KyRdw.js:5:67817)\n    at async eval (eval at evaluate (:303:30), <anonymous>:17:5)\n    at async <anonymous>:329:30"
+    },
+    {
+      "mode": "working-set",
+      "sample": 0,
+      "bytes": 1024,
+      "unrelatedFiles": 0,
+      "delayMs": 0,
+      "navigationToUsableMs": 1174.9299580000002,
+      "coldOpenToUsableMs": 1144.2000000476837,
+      "coldRequests": 3,
+      "coldResponseBytes": 2124,
+      "coldEvents": [
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.open_to_usable",
+          "durationMs": 1144.2000000476837,
+          "outcome": "ok"
+        }
+      ],
+      "coldNetwork": [
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 171.80000007152557,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 568.6000000238419,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "POST",
+          "route": "execute",
+          "purpose": "operation",
+          "durationMs": 143.69999992847443,
+          "status": 200,
+          "responseBytes": 1138
+        }
+      ],
+      "prepareOfflineEditingMs": 0.33770800000002055,
+      "offlineReopenMs": 0.5,
+      "warmReadMs": [
+        0.10000002384185791,
+        0.5,
+        0.10000002384185791,
+        0,
+        0.20000004768371582,
+        0.09999990463256836,
+        0,
+        0.10000002384185791,
+        0.10000002384185791,
+        0.20000004768371582,
+        0,
+        0.09999990463256836,
+        0.10000002384185791,
+        0.10000002384185791,
+        0.10000002384185791,
+        0.10000002384185791,
+        0.09999990463256836,
+        0,
+        0.10000002384185791,
+        0
+      ],
+      "durableEditMs": 0.8999999761581421,
+      "offlineNetworkRequests": 0,
+      "offlineAttempts": [],
+      "nativeBackgroundPublicationAttempts": [],
+      "unexpectedRemoteSqlAttempts": [],
+      "reconnectToAuthorityMs": 619.2791669999997,
+      "events": [
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.open_to_usable",
+          "durationMs": 1144.2000000476837,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.prepare_offline_editing",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.19999992847442627,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.open_to_usable",
+          "durationMs": 0.5,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.5,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.20000004768371582,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.09999990463256836,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.20000004768371582,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.09999990463256836,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.09999990463256836,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.durable_edit",
+          "durationMs": 0.7999999523162842,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.open_to_usable",
+          "durationMs": 0.20000004768371582,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.read",
+          "durationMs": 0.10000002384185791,
+          "outcome": "ok"
+        },
+        {
+          "name": "working-set.sync",
+          "durationMs": 618.7000000476837,
+          "outcome": "ok"
+        }
+      ],
+      "engineSpans": [],
+      "requests": [
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 171.80000007152557,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 568.6000000238419,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "POST",
+          "route": "execute",
+          "purpose": "operation",
+          "durationMs": 143.69999992847443,
+          "status": 200,
+          "responseBytes": 1138
+        },
+        {
+          "method": "DELETE",
+          "route": "session",
+          "purpose": "operation",
+          "durationMs": 121.89999997615814,
+          "status": 204,
+          "responseBytes": 0
+        },
+        {
+          "method": "DELETE",
+          "route": "session",
+          "purpose": "operation",
+          "durationMs": 190.79999995231628,
+          "status": 204,
+          "responseBytes": 0
+        },
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 126.90000009536743,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "GET",
+          "route": "",
+          "purpose": "operation",
+          "durationMs": 142.10000002384186,
+          "status": 200,
+          "responseBytes": 493
+        },
+        {
+          "method": "POST",
+          "route": "execute",
+          "purpose": "operation",
+          "durationMs": 161.29999995231628,
+          "status": 200,
+          "responseBytes": 251
+        },
+        {
+          "method": "POST",
+          "route": "execute",
+          "purpose": "operation",
+          "durationMs": 181.79999995231628,
+          "status": 200,
+          "responseBytes": 1153
+        },
+        {
+          "method": "POST",
+          "route": "execute",
+          "purpose": "operation",
+          "durationMs": 141.10000002384186,
+          "status": 200,
+          "responseBytes": 1153
+        },
+        {
+          "method": "DELETE",
+          "route": "session",
+          "purpose": "operation",
+          "durationMs": 136.5,
+          "status": 204,
+          "responseBytes": 0
+        },
+        {
+          "method": "DELETE",
+          "route": "session",
+          "purpose": "operation",
+          "durationMs": 192.10000002384186,
+          "status": 204,
+          "responseBytes": 0
+        }
+      ],
+      "capabilityStatus": "passed"
+    }
+  ],
+  "failures": [
+    {
+      "mode": "partial",
+      "sample": 0,
+      "bytes": 1024,
+      "unrelatedFiles": 0,
+      "delayMs": 0,
+      "error": "Error: page.evaluate: Error: partial.durable_edit: LIX_IDENTITY_UNVERIFIED_OFFLINE: Repository identity cannot be verified while offline\n    at Q (http://127.0.0.1:8830/assets/architecture-DO7KyRdw.js:5:67817)\n    at async eval (eval at evaluate (:303:30), <anonymous>:17:5)\n    at async <anonymous>:329:30"
+    }
+  ],
+  "notes": [
+    "Same local protocol-25 authority for both arms; synthetic text fixtures. Browser WASM identified by SHA-256 above.",
+    "Request delay is injected before each protocol fetch, not a full network emulator.",
+    "Usable means text present in prototype textarea; production auth, tree, plugins excluded.",
+    "Offline uses Chromium network disconnect plus explicit transport rejection; no network succeeds. Native partial-replica POST /sync/push attempts are recorded separately; remote SQL execute attempts fail the capability check.",
+    "Both arms use actual browser durability (OPFS vs strict IndexedDB) and authoritative Lix SQL.",
+    "Warm reopened measurements use the already loaded document, not offline HTML navigation."
+  ]
+}

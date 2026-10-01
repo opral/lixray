@@ -167,6 +167,15 @@ as PostHog `$exception` events. Each exception includes `server_log_message`,
 `server_error_detail`, repository ID, migration versions when present, and
 `$otel_trace_id`/`$otel_span_id` for the native diagnostic trace. Projection
 uses stable event UUIDs so exporter retries do not create new occurrences.
+Partial-receipt parser and validation failures may include allowlisted
+`failureReason` and fixed-schema `failurePath` fields. JSON parser failures may
+also include the bounded parser category and positive `jsonLine` / `jsonColumn`
+positions (each capped at 16 KiB). A recognized missing frozen DTO field may be
+named through the explicit `missingField` enum. Status-only exception values
+include these bounded diagnostics. Arbitrary parser messages and JSON paths are
+not projected.
+They also carry the allowlisted `migrationPhase=partial_receipt` marker; receipt
+versions remain distinct from physical storage-format migration versions.
 An ERROR span status alone is not captured: retryable migration 503s are not
 terminal server errors. Only diagnostic fields are projected, with bounded
 messages and credential redaction; request bodies and arbitrary log fields

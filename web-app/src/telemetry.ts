@@ -10,6 +10,8 @@ import {
 	type Span,
 } from "@opentelemetry/api";
 
+import { repositoryOpenDiagnostics } from "./lib/repository-open-telemetry.ts";
+
 export const tracer = trace.getTracer("lixray");
 
 /** Only bounded, application-owned error categories belong in traces. */
@@ -27,7 +29,55 @@ export function withSpan<T>(
 		try {
 			return await operation(span);
 		} catch (error) {
-			failSpan(span);
+			const diagnostic = repositoryOpenDiagnostics(error);
+			failSpan(
+				span,
+				typeof diagnostic.lix_error_code === "string"
+					? diagnostic.lix_error_code
+					: "operation_failed",
+			);
+			for (const [key, field] of [
+				["sourceCode", "lix.error.source_code"],
+				["migrationPhase", "lix.migration.phase"],
+				["fromVersion", "lix.migration.from_version"],
+				["toVersion", "lix.migration.to_version"],
+				["failureReason", "lix.migration.failure_reason"],
+				["failurePath", "lix.migration.failure_path"],
+				["jsonLine", "lix.migration.json_line"],
+				["jsonColumn", "lix.migration.json_column"],
+				["missingField", "lix.migration.missing_field"],
+				["receiptVersion", "lix.receipt.version"],
+				["expectedReceiptVersion", "lix.receipt.expected_version"],
+				["httpStatus", "http.response.status_code"],
+				["recoveryStage", "lix.recovery.stage"],
+				["recoveryAttempts", "lix.recovery.attempts"],
+				["retryable", "lix.error.retryable"],
+				["admissionRetryExhausted", "lix.recovery.retry_exhausted"],
+				["recoveryDeadlineExceeded", "lix.recovery.deadline_exceeded"],
+				["payloadFailureReason", "lix.payload.failure_reason"],
+				["payloadPhase", "lix.payload.phase"],
+				["payloadOperation", "lix.payload.operation"],
+				["payloadSchemaKind", "lix.payload.schema_kind"],
+				["payloadRecipeCount", "lix.payload.recipe_count"],
+				["payloadRecipeMask", "lix.payload.recipe_mask"],
+				["payloadRequiredInputCount", "lix.payload.required_input_count"],
+				["nativeReadRecipeCount", "lix.read.recipe_count"],
+				["nativeReadRecipeMask", "lix.read.recipe_mask"],
+				["wasmAssetPhase", "lix.wasm_asset.phase"],
+				["wasmAssetCacheStatus", "lix.wasm_asset.cache_status"],
+				["attempted", "lix.payload.attempted"],
+				["budget", "lix.payload.budget"],
+				["payloadPhysicalStatus", "lix.payload.physical_status"],
+				["changeId", "lix.payload.change_id"],
+			]) {
+				const value = diagnostic[key!];
+				if (
+					typeof value === "string" ||
+					typeof value === "number" ||
+					typeof value === "boolean"
+				)
+					span.setAttribute(field!, value);
+			}
 			throw error;
 		} finally {
 			span.end();

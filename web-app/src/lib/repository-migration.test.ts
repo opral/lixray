@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { currentReplicaStorage } from "./repository-migration.ts";
+import {
+	currentReplicaStorage,
+	retainedReplicaStorageNames,
+} from "./repository-migration.ts";
 
 const sourceName = "repository:old/name";
 const key = `lixray:replica-route:81:${encodeURIComponent(sourceName)}`;
@@ -29,6 +32,10 @@ void test("keeps a previously published destination and retained sources unchang
 		currentReplicaStorage(sourceName, storage(records)),
 		route.activeName,
 	);
+	assert.deepEqual(
+		retainedReplicaStorageNames(sourceName, storage(records)),
+		route.retainedSources,
+	);
 	assert.deepEqual([...records], before);
 });
 
@@ -47,7 +54,12 @@ void test("invalid published routes fail without falling back to stale source da
 		{},
 		{ ...route, sourceName: "other" },
 		{ ...route, activeName: "other" },
+		{ ...route, activeName: `${sourceName}:format81:` },
 		{ ...route, sourceDigest: "invalid" },
+		{ ...route, retainedSources: ["other:format81:retained"] },
+		{ ...route, retainedSources: [`${sourceName}:replacement:retained`] },
+		{ ...route, retainedSources: [sourceName, sourceName] },
+		{ ...route, retainedSources: [route.activeName] },
 	]) {
 		assert.throws(
 			() =>
@@ -58,6 +70,18 @@ void test("invalid published routes fail without falling back to stale source da
 			/routing metadata is invalid/,
 		);
 	}
+	assert.throws(
+		() =>
+			retainedReplicaStorageNames(
+				sourceName,
+				storage(
+					new Map([
+						[key, JSON.stringify({ ...route, retainedSources: ["elsewhere"] })],
+					]),
+				),
+			),
+		/routing metadata is invalid/,
+	);
 	assert.throws(
 		() => currentReplicaStorage(sourceName, storage(new Map([[key, "{"]]))),
 		SyntaxError,

@@ -88,6 +88,71 @@ void test("browser uploader stamps host resource identity and merges OTLP reques
 	);
 });
 
+void test("Lix SDK span identity follows a public route alias", () => {
+	const request = requestType
+		.encode({
+			resourceSpans: [
+				{
+					scopeSpans: [
+						{
+							spans: [
+								{
+									traceId: new Uint8Array(16).fill(1),
+									spanId: new Uint8Array(8).fill(2),
+									name: "lix.engine.open",
+									attributes: [
+										{
+											key: "lix.id",
+											value: { stringValue: "embedded-id" },
+										},
+										{
+											key: "lix.id",
+											value: { stringValue: "embedded-id-alias" },
+										},
+										{
+											key: "lix.branch_id",
+											value: { stringValue: "branch-id" },
+										},
+									],
+								},
+							],
+						},
+					],
+				},
+			],
+		})
+		.finish();
+	const decoded = requestType.decode(
+		stampLixResource(request, "public-route-id"),
+	);
+	const output = requestType.toObject(decoded, {
+		bytes: Uint8Array,
+		defaults: false,
+	}) as {
+		resourceSpans: Array<{
+			scopeSpans: Array<{
+				spans: Array<{
+					attributes: Array<{ key: string; value: { stringValue: string } }>;
+				}>;
+			}>;
+		}>;
+	};
+	const attributes = Object.fromEntries(
+		output.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.attributes.map(
+			(attribute) => [attribute.key, attribute.value.stringValue],
+		),
+	);
+	assert.equal(attributes["lix.id"], "public-route-id");
+	assert.equal(attributes["lix.branch_id"], "branch-id");
+	assert.deepEqual(
+		output.resourceSpans[0]!.scopeSpans[0]!.spans[0]!.attributes.filter(
+			(attribute) => attribute.key === "lix.id",
+		).map((attribute) => attribute.value.stringValue),
+		["public-route-id", "public-route-id"],
+	);
+	assert.doesNotMatch(JSON.stringify(output), /embedded-id/);
+});
+
 void test("Lix parent context follows the active browser W3C trace context", () => {
 	propagation.setGlobalPropagator(new W3CTraceContextPropagator());
 	const activeSpan = trace.wrapSpanContext({
@@ -134,6 +199,39 @@ void test("Lix uploader retains a failed batch and clears it only after delivery
 		assert.equal(attempts, 2);
 	} finally {
 		console.warn = originalWarn;
+		globalThis.fetch = originalFetch;
+		if (originalWindow) {
+			Object.defineProperty(globalThis, "window", originalWindow);
+		} else {
+			Reflect.deleteProperty(globalThis, "window");
+		}
+	}
+});
+
+void test("public repository Lix uploader sends its repository scope without a user token", async () => {
+	const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+	const originalFetch = globalThis.fetch;
+	let requestHeaders: Headers | undefined;
+	Object.defineProperty(globalThis, "window", {
+		configurable: true,
+		value: { location: { origin: "https://lixray.com" } },
+	});
+	globalThis.fetch = async (_input, init) => {
+		requestHeaders = new Headers(init?.headers);
+		return new Response(null, { status: 200 });
+	};
+	try {
+		const telemetry = createLixTelemetryOptions(
+			"repo-public",
+			async () => null,
+		);
+		await Promise.resolve(
+			telemetry.onExport(encodeRequest("lixray.repository.open")),
+		);
+		await telemetry.flush?.();
+		assert.equal(requestHeaders?.get("x-lixray-repository-id"), "repo-public");
+		assert.equal(requestHeaders?.get("authorization"), null);
+	} finally {
 		globalThis.fetch = originalFetch;
 		if (originalWindow) {
 			Object.defineProperty(globalThis, "window", originalWindow);

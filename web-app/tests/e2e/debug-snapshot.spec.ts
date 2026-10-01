@@ -1,4 +1,8 @@
-import { showLibraryFiles, libraryOpenButton } from "./library-fixture";
+import {
+	showLibraryFiles,
+	libraryRow,
+	libraryOpenButton,
+} from "./library-fixture";
 import { expect, test } from "@playwright/test";
 
 test("snapshot inspection is temporary and does not write browser storage", async ({
@@ -61,6 +65,10 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 		page.getByText("In memory · discarded on close or refresh"),
 	).toBeVisible();
 	await showLibraryFiles(page);
+	await expect(libraryRow(page, "snapshot-proof.txt")).toHaveAttribute(
+		"data-path",
+		"/snapshot-proof.txt",
+	);
 	await expect(libraryOpenButton(page, "snapshot-proof.txt")).toBeVisible({
 		timeout: 30_000,
 	});
@@ -88,6 +96,10 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 		buffer: Buffer.from(bytes),
 	});
 	await showLibraryFiles(page);
+	await expect(libraryRow(page, "snapshot-proof.txt")).toHaveAttribute(
+		"data-path",
+		"/snapshot-proof.txt",
+	);
 	await expect(libraryOpenButton(page, "snapshot-proof.txt")).toBeVisible();
 	await page.reload();
 	await expect(
@@ -186,6 +198,10 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 		buffer: Buffer.from(bytes),
 	});
 	await showLibraryFiles(page);
+	await expect(libraryRow(page, "leads.csv")).toHaveAttribute(
+		"data-path",
+		"/leads.csv",
+	);
 	await expect(libraryOpenButton(page, "leads.csv")).toBeVisible();
 	await page
 		.getByRole("button", {

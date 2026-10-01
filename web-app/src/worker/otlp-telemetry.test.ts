@@ -18,7 +18,7 @@ interface CaptureBatch {
 		distinct_id: string;
 		timestamp: string;
 		uuid: string;
-		properties: Record<string, string>;
+		properties: Record<string, unknown>;
 	}>;
 }
 const codec = protobuf.Root.fromJSON(schema).lookupType(
@@ -231,12 +231,168 @@ void test("server error logs become exceptions with diagnostics, correlation and
 	);
 	assert.equal(captured.properties.$otel_trace_id, "01".repeat(16));
 	assert.equal(captured.properties.$otel_span_id, "02".repeat(8));
-	assert.equal(captured.properties.migration_from_version, "78");
-	assert.equal(captured.properties.migration_to_version, "79");
+	assert.equal(captured.properties.fromVersion, 78);
+	assert.equal(captured.properties.toVersion, 79);
 	assert.equal(captured.properties.repository_id, "lix-123");
 	assert.doesNotMatch(
 		JSON.stringify(captured),
 		/secret-value|private SQL|must-not-project/,
+	);
+});
+
+void test("server parser failures project only the allowlisted cause and receipt path", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID" },
+				},
+				{
+					key: "lix.migration.phase",
+					value: { stringValue: "partial_receipt" },
+				},
+				{
+					key: "lix.migration.failure_reason",
+					value: { stringValue: "v2_receipt_shape_invalid" },
+				},
+				{
+					key: "lix.migration.failure_path",
+					value: { stringValue: "$.descriptor.descriptorVersion" },
+				},
+				{
+					key: "lix.receipt.version",
+					value: { intValue: 2 },
+				},
+				{
+					key: "lix.receipt.expected_version",
+					value: { intValue: 3 },
+				},
+			],
+			events: [
+				{
+					name: "partial receipt decode failed",
+					attributes: [
+						{ key: "level", value: { stringValue: "ERROR" } },
+						{
+							key: "error",
+							value: {
+								stringValue: "serde detail includes private receipt data",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(properties.migrationPhase, "partial_receipt");
+	assert.equal(properties.failureReason, "v2_receipt_shape_invalid");
+	assert.equal(properties.failurePath, "$.descriptor.descriptorVersion");
+	assert.equal(properties.receiptVersion, 2);
+	assert.equal(properties.expectedReceiptVersion, 3);
+	assert.deepEqual(properties.$exception_list, [
+		{
+			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			value:
+				"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.doesNotMatch(JSON.stringify(properties), /private receipt data/);
+});
+
+void test("JSON receipt parser positions and missing fields stay bounded in PostHog", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID" },
+				},
+				{
+					key: "lix.migration.phase",
+					value: { stringValue: "partial_receipt" },
+				},
+				{
+					key: "lix.migration.failure_reason",
+					value: { stringValue: "receipt_json_data" },
+				},
+				{
+					key: "lix.migration.failure_path",
+					value: { stringValue: "$" },
+				},
+				{ key: "lix.migration.json_line", value: { intValue: 12 } },
+				{ key: "lix.migration.json_column", value: { intValue: 5 } },
+				{ key: "lix.receipt.version", value: { intValue: 3 } },
+				{ key: "lix.receipt.expected_version", value: { intValue: 3 } },
+				{
+					key: "lix.migration.missing_field",
+					value: { stringValue: "authorId" },
+				},
+			],
+			events: [
+				{
+					name: "partial receipt decode failed",
+					attributes: [
+						{ key: "level", value: { stringValue: "ERROR" } },
+						{
+							key: "error",
+							value: { stringValue: "private receipt parser output" },
+						},
+					],
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.migrationPhase, "partial_receipt");
+	assert.equal(properties.failureReason, "receipt_json_data");
+	assert.equal(properties.failurePath, "$");
+	assert.equal(properties.jsonLine, 12);
+	assert.equal(properties.jsonColumn, 5);
+	assert.equal(properties.receiptVersion, 3);
+	assert.equal(properties.expectedReceiptVersion, 3);
+	assert.equal(properties.missingField, "authorId");
+	assert.deepEqual(properties.$exception_list, [
+		{
+			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID: receipt_json_data at $",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private receipt parser output/,
 	);
 });
 
@@ -357,4 +513,582 @@ void test("stalled downstream delivery is aborted within the receiver deadline",
 	assert.equal(result.status, 503);
 	assert.equal(aborted, true);
 	assert.ok(Date.now() - started < 5_000);
+});
+
+void test("status-only admission failures reach PostHog with code, versions, HTTP status and correlation", async () => {
+	const body = encode([
+		{
+			...span("lix.protocol.request"),
+			status: { code: 2 },
+			attributes: [
+				{ key: "lix.request.phase", value: { stringValue: "admission" } },
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_ERROR_RECOVERING" },
+				},
+				{ key: "http.response.status_code", value: { intValue: 503 } },
+				{ key: "lix.receipt.version", value: { intValue: 2 } },
+				{ key: "lix.receipt.expected_version", value: { intValue: 3 } },
+				{ key: "lix.request.id", value: { stringValue: "request-123" } },
+			],
+		},
+	]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	for (let i = 0; i < 2; i++)
+		assert.equal(
+			(await handleOtlpTelemetry(request(body), env, { fetch: fetcher }))
+				.status,
+			200,
+		);
+	assert.deepEqual(batches[0], batches[1]);
+	const props = batches[0]!.batch[0]!.properties;
+	assert.equal(props.lix_error_code, "LIX_ERROR_RECOVERING");
+	assert.equal(props.operation, "lix.protocol.request");
+	assert.equal(props.httpStatus, 503);
+	assert.equal(props.request_phase, "admission");
+	assert.equal(props.receiptVersion, 2);
+	assert.equal(props.expectedReceiptVersion, 3);
+	assert.equal(props.request_id, "request-123");
+	assert.equal(props.$otel_trace_id, "01".repeat(16));
+	assert.doesNotMatch(JSON.stringify(props), /must-not-project/);
+});
+
+void test("read fulfillment validation details reach PostHog without request content", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_READ_FULFILLMENT_INVALID" },
+				},
+				{
+					key: "lix.payload.phase",
+					value: { stringValue: "read_fulfillment_validation" },
+				},
+				{
+					key: "lix.payload.failure_reason",
+					value: {
+						stringValue: "selected_change_payload_recipe_mismatch",
+					},
+				},
+				{
+					key: "lix.payload.schema_kind",
+					value: { stringValue: "file_descriptor" },
+				},
+				{
+					key: "lix.payload.recipe_mask",
+					value: { intValue: 129 },
+				},
+				{
+					key: "lix.payload.recipe_count",
+					value: { doubleValue: 2 },
+				},
+				{
+					key: "lix.payload.required_input_count",
+					value: { intValue: 17 },
+				},
+				{
+					key: "lix.read.recipe_count",
+					value: { doubleValue: 2 },
+				},
+				{
+					key: "lix.read.recipe_mask",
+					value: { intValue: 129 },
+				},
+				{
+					key: "private.request",
+					value: { stringValue: "private scan recipe" },
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_READ_FULFILLMENT_INVALID");
+	assert.equal(properties.payloadPhase, "read_fulfillment_validation");
+	assert.equal(
+		properties.payloadFailureReason,
+		"selected_change_payload_recipe_mismatch",
+	);
+	assert.equal(properties.payloadSchemaKind, "file_descriptor");
+	assert.equal(properties.payloadRecipeMask, 129);
+	assert.equal(properties.payloadRecipeCount, 2);
+	assert.equal(properties.payloadRequiredInputCount, 17);
+	assert.equal(properties.nativeReadRecipeCount, 2);
+	assert.equal(properties.nativeReadRecipeMask, 129);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_READ_FULFILLMENT_INVALID: selected_change_payload_recipe_mismatch",
+	);
+	assert.doesNotMatch(JSON.stringify(properties), /private/);
+});
+
+void test("WASM asset span attributes project only for the known SDK error code", async () => {
+	const body = encode([
+		{
+			...span("repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_WASM_ASSET_UNAVAILABLE" },
+				},
+				{
+					key: "lix.wasm_asset.phase",
+					value: { stringValue: "wasm_fetch" },
+				},
+				{
+					key: "lix.wasm_asset.cache_status",
+					value: { stringValue: "miss" },
+				},
+				{
+					key: "http.response.status_code",
+					value: { intValue: 404 },
+				},
+				{
+					key: "private.asset_url",
+					value: {
+						stringValue: "https://private.example/asset.wasm?token=secret",
+					},
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.lix_error_code, "LIX_WASM_ASSET_UNAVAILABLE");
+	assert.equal(properties.wasmAssetPhase, "wasm_fetch");
+	assert.equal(properties.wasmAssetCacheStatus, "miss");
+	assert.equal(properties.httpStatus, 404);
+	assert.doesNotMatch(JSON.stringify(properties), /private|secret/);
+
+	const untrusted = encode([
+		{
+			...span("repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "error.type",
+					value: { stringValue: "LIX_INTERNAL_ERROR" },
+				},
+				{
+					key: "lix.wasm_asset.phase",
+					value: { stringValue: "wasm_fetch" },
+				},
+				{
+					key: "lix.wasm_asset.cache_status",
+					value: { stringValue: "hit" },
+				},
+			],
+		},
+	]);
+	let untrustedBatch: CaptureBatch | undefined;
+	const untrustedFetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			untrustedBatch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(untrusted), env, {
+				fetch: untrustedFetcher,
+			})
+		).status,
+		200,
+	);
+	assert.equal(untrustedBatch!.batch[0]!.properties.wasmAssetPhase, undefined);
+	assert.equal(
+		untrustedBatch!.batch[0]!.properties.wasmAssetCacheStatus,
+		undefined,
+	);
+});
+
+void test("browser status-only engine failures use browser source and preserve resource revision", async () => {
+	const bytes = codec
+		.encode(
+			codec.fromObject({
+				resourceSpans: [
+					{
+						resource: {
+							attributes: [
+								{
+									key: "vcs.ref.head.revision",
+									value: { stringValue: "a".repeat(40) },
+								},
+								{ key: "private-resource", value: { stringValue: "secret" } },
+							],
+						},
+						scopeSpans: [
+							{
+								spans: [
+									{
+										...span("lix.engine.open"),
+										status: { code: 2 },
+										attributes: [
+											...span().attributes,
+											{
+												key: "error.type",
+												value: {
+													stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+												},
+											},
+											{
+												key: "lix.error.source_code",
+												value: {
+													stringValue: "LIX_PARTIAL_REPLICA_STATE_INVALID",
+												},
+											},
+											{
+												key: "lix.migration.phase",
+												value: { stringValue: "partial_receipt" },
+											},
+											{
+												key: "lix.receipt.version",
+												value: { intValue: 2 },
+											},
+											{
+												key: "lix.receipt.expected_version",
+												value: { intValue: 3 },
+											},
+											{
+												key: "lix.migration.failure_reason",
+												value: {
+													stringValue: "v2_branch_incarnation_mismatch",
+												},
+											},
+											{
+												key: "lix.migration.failure_path",
+												value: {
+													stringValue: "$.descriptor.selectedBranch.createdAt",
+												},
+											},
+											{
+												key: "lix.error.retryable",
+												value: { boolValue: false },
+											},
+											{
+												key: "lix.recovery.retry_exhausted",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.recovery.deadline_exceeded",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.payload.standalone_status",
+												value: { stringValue: "matched" },
+											},
+											{
+												key: "lix.payload.physical_status",
+												value: { stringValue: "missing_snapshot" },
+											},
+											{
+												key: "lix.payload.failure_reason",
+												value: {
+													stringValue: "selected_change_payload_unavailable",
+												},
+											},
+											{
+												key: "lix.payload.phase",
+												value: { stringValue: "pre_request_catalog" },
+											},
+											{
+												key: "lix.payload.operation",
+												value: {
+													stringValue: "registered_schema_identity_scan",
+												},
+											},
+											{
+												key: "lix.payload.change_id",
+												value: {
+													stringValue: "11111111-1111-4111-8111-111111111111",
+												},
+											},
+											{
+												key: "lix.payload.source_deferred",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.payload.physical_conflict",
+												value: { boolValue: true },
+											},
+											{
+												key: "lix.payload.source_commit_id",
+												value: { stringValue: "private-secret" },
+											},
+										],
+									},
+								],
+							},
+						],
+					},
+				],
+			}),
+		)
+		.finish();
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(bytes), env, {
+				fetch: fetcher,
+				authenticatedBrowser: true,
+			})
+		).status,
+		200,
+	);
+	const props = batch!.batch[0]!.properties;
+	assert.equal(props.source, "browser");
+	assert.equal(props.$exception_source, "browser");
+	assert.equal(props.client_release, "a".repeat(40));
+	assert.equal(props.lix_error_code, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(props.sourceCode, "LIX_PARTIAL_REPLICA_STATE_INVALID");
+	assert.equal(props.migrationPhase, "partial_receipt");
+	assert.equal(props.receiptVersion, 2);
+	assert.equal(props.expectedReceiptVersion, 3);
+	assert.equal(props.failureReason, "v2_branch_incarnation_mismatch");
+	assert.equal(props.failurePath, "$.descriptor.selectedBranch.createdAt");
+	assert.equal(
+		(props.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_branch_incarnation_mismatch at $.descriptor.selectedBranch.createdAt",
+	);
+	assert.equal(props.retryable, false);
+	assert.equal(props.admissionRetryExhausted, true);
+	assert.equal(props.recoveryDeadlineExceeded, true);
+	assert.equal(props.payloadStandaloneStatus, "matched");
+	assert.equal(props.payloadPhysicalStatus, "missing_snapshot");
+	assert.equal(
+		props.payloadFailureReason,
+		"selected_change_payload_unavailable",
+	);
+	assert.equal(props.payloadPhase, "pre_request_catalog");
+	assert.equal(props.payloadOperation, "registered_schema_identity_scan");
+	assert.equal(props.changeId, "11111111-1111-4111-8111-111111111111");
+	assert.equal(props.payloadSourceDeferred, true);
+	assert.equal(props.payloadPhysicalConflict, true);
+	assert.equal(props.sourceCommitId, undefined);
+	assert.doesNotMatch(JSON.stringify(props), /secret|must-not-project/);
+});
+
+void test("owner point-read budget errors project only their bounded reason and counts", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_INTERNAL_ERROR" },
+				},
+				{
+					key: "lix.payload.failure_reason",
+					value: { stringValue: "exact_owner_point_read_budget_exhausted" },
+				},
+				{ key: "lix.payload.attempted", value: { intValue: 65_537 } },
+				{ key: "lix.payload.budget", value: { intValue: 65_536 } },
+				{ key: "private.payload", value: { stringValue: "secret bytes" } },
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(
+		properties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(properties.attempted, 65_537);
+	assert.equal(properties.budget, 65_536);
+	assert.equal(
+		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
+		"LIX_INTERNAL_ERROR: exact_owner_point_read_budget_exhausted",
+	);
+	assert.doesNotMatch(JSON.stringify(properties), /secret bytes/);
+
+	const invalid = encode([
+		{
+			...span("lix.repository.open"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{
+					key: "lix.payload.failure_reason",
+					value: { stringValue: "exact_owner_point_read_budget_exhausted" },
+				},
+				{ key: "lix.payload.attempted", value: { intValue: 999_999 } },
+				{ key: "lix.payload.budget", value: { intValue: 65_536 } },
+			],
+		},
+	]);
+	let invalidBatch: CaptureBatch | undefined;
+	const invalidFetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			invalidBatch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(invalid), env, {
+				fetch: invalidFetcher,
+			})
+		).status,
+		200,
+	);
+	const invalidProperties = invalidBatch!.batch[0]!.properties;
+	assert.equal(
+		invalidProperties.payloadFailureReason,
+		"exact_owner_point_read_budget_exhausted",
+	);
+	assert.equal(invalidProperties.attempted, undefined);
+	assert.equal(invalidProperties.budget, undefined);
+});
+
+void test("delivery failures identify the failed destination without exporting private transport errors", async () => {
+	const failures: object[] = [];
+	const response = await handleOtlpTelemetry(request(encode([span()])), env, {
+		reportDeliveryFailure: (failure) => failures.push(failure),
+		fetch: (async (url) => {
+			const destination =
+				url instanceof Request ? url.url : url instanceof URL ? url.href : url;
+			if (destination.endsWith("/i/v1/traces"))
+				return new Response("private upstream body", { status: 429 });
+			throw new Error("private transport error with secret-token");
+		}) as typeof fetch,
+	});
+	assert.equal(response.status, 503);
+	assert.deepEqual(failures, [
+		{
+			code: "LIX_TELEMETRY_UPSTREAM_REJECTED",
+			destination: "traces",
+			httpStatus: 429,
+			source: "server",
+		},
+		{
+			code: "LIX_TELEMETRY_UPSTREAM_UNAVAILABLE",
+			destination: "events",
+			source: "server",
+		},
+	]);
+	assert.equal(JSON.stringify(failures).includes("private"), false);
+	assert.equal(JSON.stringify(failures).includes("secret-token"), false);
+});
+
+void test("browser route attempts become replay-stable performance samples with bounded phase timings", async () => {
+	const root = {
+		...span("lixray.repository.open"),
+		attributes: [
+			{ key: "lix.id", value: { stringValue: "repo-id" } },
+			{
+				key: "lixray.repository.open.outcome",
+				value: { stringValue: "usable" },
+			},
+			{
+				key: "lixray.repository.open.entry",
+				value: { stringValue: "navigation" },
+			},
+			{
+				key: "lixray.repository.open.visibility",
+				value: { stringValue: "foreground" },
+			},
+			{
+				key: "lixray.repository.open.duration_ms",
+				value: { doubleValue: 123.5 },
+			},
+			{ key: "lixray.repository.open.engine_ms", value: { doubleValue: 80.5 } },
+			{ key: "lixray.repository.open.paint_ms", value: { intValue: 32 } },
+			{ key: "private-url", value: { stringValue: "https://private/?secret" } },
+		],
+	};
+	const bytes = encode([
+		root,
+		{
+			...root,
+			attributes: [
+				...root.attributes,
+				{ key: "lix.id", value: { stringValue: "unrelated-id" } },
+			],
+		},
+	]);
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const req = new Request(input, init);
+		if (req.url.endsWith("/batch/"))
+			batches.push((await req.json()) as CaptureBatch);
+		return new Response(null, { status: 200 });
+	};
+	for (let replay = 0; replay < 2; replay++)
+		assert.equal(
+			(
+				await handleOtlpTelemetry(request(bytes), env, {
+					fetch: fetcher,
+					authenticatedBrowser: true,
+					browserRepositoryId: "repo-id",
+					browserUserId: "trusted-account",
+				})
+			).status,
+			200,
+		);
+	assert.equal(batches.length, 2);
+	assert.deepEqual(batches[0]!.batch, batches[1]!.batch);
+	assert.equal(batches[0]!.batch.length, 1);
+	const event = batches[0]!.batch[0]!;
+	assert.equal(event.event, "repository_open_performance");
+	assert.equal(event.distinct_id, "trusted-account");
+	assert.equal(event.properties.duration_ms, 123.5);
+	assert.equal(event.properties.engine_ms, 80.5);
+	assert.equal(event.properties.paint_ms, 32);
+	assert.equal(event.properties.outcome, "usable");
+	assert.equal(event.properties.entry, "navigation");
+	assert.equal(event.properties.visibility, "foreground");
+	assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+	assert.doesNotMatch(JSON.stringify(event), /private|secret|unrelated/);
 });

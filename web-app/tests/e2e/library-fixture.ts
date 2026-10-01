@@ -15,6 +15,14 @@ export async function showLibraryFiles(page: Page) {
 			timeout: 120_000,
 		},
 	);
+	const view = page.locator('[data-testid="library-view"]:visible');
+	await expect(view).toHaveAttribute("data-library-kind", "files");
+	await expect(view).toHaveAttribute("data-library-mode", "folders");
+	await expect(view.locator('[role="status"][aria-busy="true"]')).toHaveCount(
+		0,
+		{ timeout: 120_000 },
+	);
+	await expect(view.getByRole("alert")).toHaveCount(0);
 }
 
 export const libraryRow = (page: Page, name: string) =>
