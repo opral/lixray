@@ -66,6 +66,10 @@ function posthogSourceMapPlugins(command: string) {
 }
 
 export default defineConfig(({ command }) => ({
+	build: {
+		// Preserve Atelier's inherited light-dark() design tokens.
+		cssTarget: ["chrome123", "firefox120", "safari17.5"],
+	},
 	define: {
 		"import.meta.env.VITE_LIXRAY_RELEASE_ID": JSON.stringify(
 			process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "development",
@@ -80,10 +84,10 @@ export default defineConfig(({ command }) => ({
 				? [
 						// Vite serves Atelier source in development, so each editor's
 						// JavaScript import brings in its own CSS. The production build
-						// instead links the package's complete, built stylesheet.
+						// instead imports the package's complete component stylesheet.
 						{
-							find: /^@opral\/atelier\/style\.css(?:\?url)?$/,
-							replacement: `${path.resolve(atelierSourceDir, "index.css")}?url`,
+							find: "@opral/atelier/style.css",
+							replacement: path.resolve(atelierSourceDir, "index.css"),
 						},
 						// The token sheet, the Tailwind adapter and the document sheet
 						// are package exports; in serve mode the bare alias below would

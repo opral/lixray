@@ -1,4 +1,4 @@
-@layer theme, base, components, utilities;
+@layer theme, base, components, atelier, utilities;
 
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -8,9 +8,8 @@
  * utilities (bg-panel, text-fg-muted, border-border-subtle). Nothing here
  * declares a colour; `pnpm tokens:check` keeps it that way.
  */
-@import "@opral/atelier/theme.css";
+@import "@opral/atelier/style.css";
 @import "@opral/atelier/tailwind.css";
-@import "@opral/atelier/document.css";
 
 @custom-variant dark (&:is(.dark *));
 .dark {

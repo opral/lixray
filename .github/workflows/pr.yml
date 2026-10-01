@@ -323,6 +323,8 @@ jobs:
           path: vendor/lix/packages
       - run: pnpm --dir web-app ci:prepare:web
       - run: pnpm --dir web-app exec playwright install --with-deps chromium
+      - name: Test CSS ownership and packed Atelier styles
+        run: pnpm --filter @opral/atelier test:styles && pnpm --dir web-app test:styles
       - name: Test MCP Apps write preview
         run: pnpm --dir web-app test:mcp-ui
       - name: Test published file rendering

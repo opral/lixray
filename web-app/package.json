@@ -8,7 +8,7 @@
 		"check": "pnpm typecheck && pnpm test:analytics && pnpm test:auth && pnpm test:docs && pnpm test:profile && pnpm test:repository && pnpm test:railway-config && pnpm test:worker",
 		"lix:build": "node ../scripts/prepare-vendored-lix-sdk.mjs",
 		"lix:build:native": "node ../scripts/prepare-vendored-lix-sdk.mjs --native",
-		"atelier:build": "pnpm --filter @opral/atelier exec vite build && pnpm --filter @opral/atelier exec tsc -p tsconfig.build.json --noCheck && pnpm --filter @opral/atelier exec node scripts/prune-types.mjs",
+		"atelier:build": "pnpm --filter @opral/atelier exec vite build && pnpm --filter @opral/atelier exec node scripts/build-styles.mjs && pnpm --filter @opral/atelier exec tsc -p tsconfig.build.json --noCheck && pnpm --filter @opral/atelier exec node scripts/prune-types.mjs",
 		"ci:prepare": "LIXRAY_SKIP_VENDORED_LIX_WASM=1 pnpm lix:build && pnpm ci:prepare:web",
 		"ci:prepare:web": "pnpm atelier:build && pnpm routes:generate && pnpm mcp:tools:generate",
 		"ci:lint": "eslint . --max-warnings=0",
@@ -43,7 +43,8 @@
 		"ci:fast": "pnpm format:check && pnpm test:auth && pnpm test:profile && pnpm test:docs",
 		"test:partial-replica": "node --test --experimental-strip-types --experimental-test-module-mocks src/lib/repository-lix-session-open.test.ts",
 		"test:mcp-ui": "node --test --experimental-strip-types tests/mcp-ui/*.test.mjs",
-		"test:published": "playwright test --config playwright.published.config.ts"
+		"test:published": "playwright test --config playwright.published.config.ts",
+		"test:styles": "node --test tests/styles.test.mjs"
 	},
 	"dependencies": {
 		"@lix-js/sdk": "workspace:*",
