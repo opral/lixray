@@ -53,7 +53,12 @@ function RepositorySqlRoute() {
 				}
 			}, 800);
 			atelier.views
-				.open(SQL_EXPLORER_EXTENSION_ID, { signal: controller.signal })
+				// Activated if open; otherwise beside the tab in front, never in
+				// its place (a reload or Back to /sql must not close a tab).
+				.open(SQL_EXPLORER_EXTENSION_ID, {
+					newTab: true,
+					signal: controller.signal,
+				})
 				.then(() => {
 					settled = true;
 					clearTimeout(timer);

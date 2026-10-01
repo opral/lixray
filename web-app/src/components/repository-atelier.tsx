@@ -8,6 +8,7 @@ import {
 } from "~/lib/shell-navigation-queue";
 import {
 	canonicalConversationSplat,
+	canonicalEntitySplat,
 	conversationRoutePath,
 	conversationUrlSplat,
 	entityUrlSplat,
@@ -19,6 +20,7 @@ import {
 import {
 	Atelier,
 	AtelierSkeleton,
+	ATELIER_BUILTIN_EXTENSION_IDS,
 	ATELIER_CONVERSATION_VIEW_ID,
 	selectConversationSummary,
 	type AtelierEvent,
@@ -111,8 +113,10 @@ import {
 	LIXRAY_HOME_EXTENSION_ID,
 	LIXRAY_PEOPLE_EXTENSION_ID,
 	LIXRAY_SETTINGS_EXTENSION_ID,
+	LIBRARY_HOME_INSTANCE,
+	createLixrayLibraryOptions,
 	createLixrayRepositoryExtensions,
-	lixrayHomeDirState,
+	libraryFolderState,
 } from "~/components/repository-home/host-extensions";
 import type {
 	TeamMember,
@@ -924,6 +928,31 @@ export function RepositoryAtelier({
 				setReviewFocusActive(event.active && event.changedFileCount > 0);
 				return;
 			}
+			if (event.type === "main_area_emptied") {
+				// Nothing in front: the URL leaves the view that closed for the
+				// repository root, without reopening anything there. A navigation
+				// still resolving for the closed view is superseded.
+				navigationRevision += 1;
+				if (!routeSyncedRef.current) return;
+				const targetPath = `/@${namespace}/${repositorySlug}`;
+				void navigationQueue
+					.settle(() => pathnameRef.current)
+					.then((startingPath) => {
+						if (startingPath === null || pathnameRef.current === targetPath)
+							return;
+						shellNavigationRef.current = "view:home";
+						return navigationQueue.navigate(targetPath, () =>
+							navigate({
+								to: "/@{$namespace}/$repository",
+								params: { namespace, repository: repositorySlug },
+							}),
+						);
+					})
+					.catch((error: unknown) =>
+						console.error("Unable to navigate shell", error),
+					);
+				return;
+			}
 			if (event.type === "main_view_navigation_requested") {
 				routeLifecycle.current.cancel();
 				routeSyncedRef.current = true;
@@ -945,7 +974,11 @@ export function RepositoryAtelier({
 				activeBranchId && defaultBranchId
 					? atelierBranchSearch(activeBranchId, defaultBranchId)
 					: {};
-			const navigateEntity = async (kind: EntityKind, path: string) => {
+			const navigateEntity = async (
+				kind: EntityKind,
+				path: string,
+				options: { readonly removed?: boolean } = {},
+			) => {
 				const session = activeLixRef.current;
 				if (!session) return;
 				try {
@@ -965,20 +998,39 @@ export function RepositoryAtelier({
 						{ path },
 					);
 					if (
-						!entity ||
 						revision !== navigationRevision ||
 						session !== activeLixRef.current ||
 						startingPath !== pathnameRef.current ||
 						activeBranchId !== session.activeBranchSnapshot()
 					)
 						return;
-					const current = routeChildRef.current;
-					if (
-						current.kind === (kind === "file" ? "file" : "folder") &&
-						parseEntityUrlSplat(current.splat)?.id === entity.id
-					)
+					if (!entity) {
+						if (!options.removed) return;
+						// Nothing at that path any more (a review's removed file): the
+						// URL falls back to the repository root rather than keep naming
+						// the tab that was in front before.
+						const rootPath = `/@${namespace}/${repositorySlug}`;
+						if (startingPath === rootPath) return;
+						shellNavigationRef.current = "view:home";
+						await navigationQueue.navigate(rootPath, () =>
+							navigate({
+								to: "/@{$namespace}/$repository",
+								params: { namespace, repository: repositorySlug },
+								replace: true,
+							}),
+						);
 						return;
-					shellNavigationRef.current = `${kind}:${entity.id}`;
+					}
+					const current = routeChildRef.current;
+					const routed =
+						current.kind === (kind === "file" ? "file" : "folder") &&
+						parseEntityUrlSplat(current.splat)?.id === entity.id;
+					// The same item under a new name (a page titled from untitled.md, a
+					// rename): the URL's slug follows, replaced rather than pushed, and
+					// with no marker — the route does not re-run for it.
+					if (routed && canonicalEntitySplat(current.splat, entity) === null)
+						return;
+					if (!routed) shellNavigationRef.current = `${kind}:${entity.id}`;
 					await navigationQueue.navigate(
 						entityRoutePath(
 							namespace,
@@ -999,6 +1051,7 @@ export function RepositoryAtelier({
 									_splat: entityUrlSplat(entity.id, entity.path),
 								},
 								search,
+								replace: routed,
 							}),
 					);
 				} catch (error) {
@@ -1084,15 +1137,25 @@ export function RepositoryAtelier({
 					);
 				return;
 			}
-			if (event.viewKind === LIXRAY_HOME_EXTENSION_ID) {
-				// Home is the primary Files surface (flow A): drilled into a
-				// folder it claims the /folder URL, at the root it claims the
-				// repository root URL.
+			if (
+				event.viewKind === LIXRAY_HOME_EXTENSION_ID ||
+				event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library
+			) {
+				// The Library (and the Home it replaced) is the primary surface:
+				// in Files, inside a folder, it claims the /folder URL; anywhere
+				// else — a kind, the top of Files — the repository root URL.
 				const state = event.state;
-				const dirPath =
-					state &&
-					(state.kind === undefined || state.kind === EntryKind.Directory) &&
-					typeof state.path === "string"
+				const isLibrary =
+					event.viewKind === ATELIER_BUILTIN_EXTENSION_IDS.library;
+				const dirPath = isLibrary
+					? (state?.kind === "files" || state?.mode === "folders") &&
+						typeof state.dirPath === "string"
+						? state.dirPath
+						: "/"
+					: state &&
+						  (state.kind === undefined ||
+								state.kind === EntryKind.Directory) &&
+						  typeof state.path === "string"
 						? state.path
 						: "/";
 				const splat = dirPath.replace(/^\/+/, "");
@@ -1183,7 +1246,10 @@ export function RepositoryAtelier({
 				void navigateEntity("directory", dirPath);
 				return;
 			}
-			if (event.filePath) void navigateEntity("file", event.filePath);
+			if (event.filePath)
+				void navigateEntity("file", event.filePath, {
+					removed: event.state?.afterExists === false,
+				});
 		};
 		return () => {
 			navigationRevision++;
@@ -1433,6 +1499,24 @@ export function RepositoryAtelier({
 					);
 					const getDebugRemoteLix = () => debugRemoteSession!.selectedBranch();
 					const getDebugRemoteSnapshot = () => debugRemoteSession!.snapshot();
+					const repositoryConnection = {
+						lixId: repositoryId,
+						namespace,
+						lixSlug: repositorySlug,
+						lixName: repositoryName,
+					};
+					const hasAgentConnected = async () => {
+						if (!client || !canEdit || !atelierAccountId) return false;
+						if (!(await getAccessToken())) return false;
+						const { data, error } = await client
+							.from("mcp_lix_connections")
+							.select("last_seen_at")
+							.eq("lix_id", repositoryId)
+							.order("last_seen_at", { ascending: false })
+							.limit(1);
+						if (error) throw error;
+						return data.length > 0;
+					};
 					const atelierProps: AtelierProps = {
 						// Atelier owns the shell, built-in extensions, and document views.
 						// Scope its shared Lix handle once so every initial SQL read joins
@@ -1486,24 +1570,8 @@ export function RepositoryAtelier({
 						},
 						branchSession: repositoryBranchSession,
 						extensions: createLixrayRepositoryExtensions(
-							{
-								lixId: repositoryId,
-								namespace,
-								lixSlug: repositorySlug,
-								lixName: repositoryName,
-							},
-							async () => {
-								if (!client || !canEdit || !atelierAccountId) return false;
-								if (!(await getAccessToken())) return false;
-								const { data, error } = await client
-									.from("mcp_lix_connections")
-									.select("last_seen_at")
-									.eq("lix_id", repositoryId)
-									.order("last_seen_at", { ascending: false })
-									.limit(1);
-								if (error) throw error;
-								return data.length > 0;
-							},
+							repositoryConnection,
+							hasAgentConnected,
 							canEdit ? stableTeamApiRef.current : null,
 							canEdit && !isDemoModeEnabled && client
 								? stableSettingsApiRef.current
@@ -1511,9 +1579,17 @@ export function RepositoryAtelier({
 							repositoryVisibility,
 						),
 						onReady: setInstance,
-						mainArea: {
-							home: { extensionId: LIXRAY_HOME_EXTENSION_ID },
-						},
+						// The Library's sidebar is the left panel; its view is an ordinary,
+						// closable tab that the repository and folder URLs open.
+						// The Library sidebar opens by default where it fits beside
+						// the page; on a phone the page gets the width.
+						defaultOpenPanels: window.innerWidth >= 768 ? ["left"] : [],
+						library: createLixrayLibraryOptions(
+							repositoryConnection,
+							hasAgentConnected,
+							canEdit ? stableTeamApiRef.current : null,
+							repositoryVisibility,
+						),
 						sessionStateStore: createRepositorySessionStateStore({
 							accountId: atelierAccountId,
 							repositoryId,
@@ -1670,13 +1746,17 @@ export function RepositoryAtelier({
 			markRouteSynced();
 			return;
 		}
-		// The state reset matters as much as the activation: Home may be
-		// drilled into a folder (flow A), and the root URL means the root
-		// listing.
+		// The state reset matters as much as the activation: the Library may
+		// be open on a folder, and the root URL means the top level. Its kind
+		// and mode stay what the person chose.
 		const controller = beginRouteNavigation();
 		void instance.views
-			.open(LIXRAY_HOME_EXTENSION_ID, {
-				state: lixrayHomeDirState("/"),
+			.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+				state: libraryFolderState("/"),
+				// Activated if open; otherwise beside the tab in front, never in
+				// its place (Back to the root must not close a document).
+				instanceId: LIBRARY_HOME_INSTANCE,
+				newTab: true,
 				signal: controller.signal,
 			})
 			.catch((error: unknown) => {

@@ -36,7 +36,11 @@ export function getRouter() {
 					})
 				: undefined,
 		routeTree,
-		scrollRestoration: true,
+		// Inside a repository the Atelier shell owns every scroll position.
+		// The router's restoration copies the previous URL's element offsets
+		// onto the next one, which scrolled the tab strip back off the tab
+		// that had just opened.
+		scrollRestoration: ({ location }) => !location.pathname.startsWith("/@"),
 	});
 }
 

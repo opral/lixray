@@ -2,15 +2,20 @@ import {
 	ATELIER_BUILTIN_EXTENSION_IDS,
 	useDefaultFolders,
 	type AtelierExtensionRegistration,
+	type AtelierLibraryOptions,
 	type AtelierExtensionRuntime,
 	type AtelierExtensionView,
 } from "@opral/atelier";
 import { Folder, Home, Settings, Users } from "lucide-react";
-import { StrictMode } from "react";
+import { StrictMode, type ReactNode } from "react";
 import { EntryKind } from "../../lib/entry-kind.ts";
 import type { LixConnectionPromptInput } from "~/lib/lix-connection-prompt";
-import { DirectoryView } from "./directory-view";
-import { canonicalDirectoryPath, dirNameFromPath } from "./lix-data";
+import { DirectoryView, GettingStarted } from "./directory-view";
+import {
+	canonicalDirectoryPath,
+	createRepositoryFile,
+	dirNameFromPath,
+} from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
 import { SettingsView, type RepositorySettingsApi } from "./settings-view";
 
@@ -18,6 +23,21 @@ export const LIXRAY_HOME_EXTENSION_ID = "lixray_home";
 export const LIXRAY_DIR_EXTENSION_ID = "lixray_dir";
 export const LIXRAY_PEOPLE_EXTENSION_ID = "lixray_people";
 export const LIXRAY_SETTINGS_EXTENSION_ID = "lixray_settings";
+
+/** The Library tab the repository URL names (Atelier's primary Library tab). */
+export const LIBRARY_HOME_INSTANCE = "library";
+
+/**
+ * Library state for a folder URL: Files, open at that folder. The root keeps
+ * whichever section the person chose and only leaves any folder; the Library
+ * renames its own tab to match.
+ */
+export const libraryFolderState = (dirPath: string) => {
+	const path = canonicalDirectoryPath(dirPath);
+	return path === "/"
+		? { dirPath: "/" }
+		: { kind: "files", mode: "folders", dirPath: path };
+};
 
 export type LixRepositoryConnection = Omit<LixConnectionPromptInput, "origin">;
 export type AgentConnectionProbe = () => Promise<boolean>;
@@ -111,7 +131,8 @@ function openDirFromView(
 
 function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 	void atelier.views
-		.open(LIXRAY_PEOPLE_EXTENSION_ID)
+		// Activated if open; otherwise beside Home, never in its place.
+		.open(LIXRAY_PEOPLE_EXTENSION_ID, { newTab: true })
 		.catch((error: unknown) => {
 			console.error("repository-home: unable to open the People tab", error);
 		});
@@ -119,16 +140,20 @@ function openPeopleFromView(atelier: AtelierExtensionRuntime) {
 
 function openSettingsFromView(atelier: AtelierExtensionRuntime) {
 	void atelier.views
-		.open(LIXRAY_SETTINGS_EXTENSION_ID)
+		// Activated if open; otherwise beside Home, never in its place.
+		.open(LIXRAY_SETTINGS_EXTENSION_ID, { newTab: true })
 		.catch((error: unknown) => {
 			console.error("repository-home: unable to open the Settings tab", error);
 		});
 }
 
 function openSqlExplorerFromView(atelier: AtelierExtensionRuntime) {
-	void atelier.views.open("sql_explorer").catch((error: unknown) => {
-		console.error("repository-home: unable to open SQL Explorer", error);
-	});
+	// Activated if open; otherwise beside Home, never in its place.
+	void atelier.views
+		.open("sql_explorer", { newTab: true })
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open SQL Explorer", error);
+		});
 }
 
 function openHistoryFromView(atelier: AtelierExtensionRuntime) {
@@ -309,3 +334,132 @@ export const createLixrayRepositoryExtensions = (
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
 ];
+
+/** Opens a folder in the Library's Files section, in its primary tab. */
+function openLibraryFolder(
+	atelier: AtelierExtensionRuntime,
+	dirPath: string,
+	options: { newTab: boolean },
+) {
+	void atelier.views
+		.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+			state: libraryFolderState(dirPath),
+			...(options.newTab
+				? { newTab: true }
+				: { instanceId: LIBRARY_HOME_INSTANCE, newTab: true }),
+		})
+		.catch((error: unknown) => {
+			console.error("repository-home: unable to open folder", error);
+		});
+}
+
+/**
+ * The Library's Home: the repository's README and its control plane —
+ * changes, database, connect an agent, invite, settings — without a file
+ * listing, which the Library's Files section is.
+ */
+function LibraryHome({
+	atelier,
+	recent,
+	connection,
+	hasAgentConnected,
+	teamApi,
+	visibility,
+}: {
+	atelier: AtelierExtensionRuntime;
+	recent: ReactNode;
+	connection: LixRepositoryConnection;
+	hasAgentConnected: AgentConnectionProbe;
+	teamApi: RepositoryTeamApi | null;
+	visibility: "private" | "public";
+}) {
+	const { folders: defaultFolders, setFolder } = useDefaultFolders(atelier);
+	return (
+		<StrictMode>
+			<DirectoryView
+				lix={atelier.lix}
+				diffSession={atelier.diff?.session ?? null}
+				onOpenHistory={() => openHistoryFromView(atelier)}
+				{...(atelier.diff
+					? {
+							onOpenDiffFile: (path: string) => atelier.diff?.openFile(path),
+						}
+					: {})}
+				dirPath="/"
+				isHome
+				summary
+				recent={recent}
+				showHiddenFiles={
+					atelier.preferences.get(
+						ATELIER_BUILTIN_EXTENSION_IDS.files,
+						"showHiddenFiles",
+					) === true
+				}
+				defaultFolders={defaultFolders}
+				{...(atelier.readOnly ? {} : { onSetDefaultFolder: setFolder })}
+				readOnly={atelier.readOnly}
+				{...(atelier.documentLinks
+					? { documentLinks: atelier.documentLinks }
+					: {})}
+				connection={connection}
+				teamApi={teamApi}
+				hasAgentConnected={hasAgentConnected}
+				visibility={visibility}
+				onOpenFile={(path, options) => openFileFromView(atelier, path, options)}
+				onOpenDir={(path, options) => openLibraryFolder(atelier, path, options)}
+				onOpenPeople={() => openPeopleFromView(atelier)}
+				onOpenSettings={() => openSettingsFromView(atelier)}
+				onOpenSqlExplorer={() => openSqlExplorerFromView(atelier)}
+				{...(!atelier.readOnly && atelier.diff
+					? {
+							onOpenChangesReview: () =>
+								void atelier.diff?.open({
+									target: { working: true },
+									reveal: false,
+								}),
+						}
+					: {})}
+			/>
+		</StrictMode>
+	);
+}
+
+/**
+ * What LixRay adds to Atelier's Library: Home, the repository's README and
+ * control plane at the top of the Library, and — for a repository with
+ * nothing in it yet — the onboarding (connect an agent, or start yourself).
+ */
+export const createLixrayLibraryOptions = (
+	connection: LixRepositoryConnection,
+	hasAgentConnected: AgentConnectionProbe,
+	teamApi: RepositoryTeamApi | null,
+	visibility: "private" | "public",
+): AtelierLibraryOptions => ({
+	Home: ({ atelier, recent }) => (
+		<LibraryHome
+			atelier={atelier}
+			recent={recent}
+			connection={connection}
+			hasAgentConnected={hasAgentConnected}
+			teamApi={teamApi}
+			visibility={visibility}
+		/>
+	),
+	EmptyWorkspace: ({ atelier }) => (
+		<div className="grid flex-1 content-center py-6">
+			<GettingStarted
+				connection={connection}
+				hasAgentConnected={hasAgentConnected}
+				onCreateFile={(extension) => {
+					void createRepositoryFile(atelier.lix, "/", extension)
+						.then((path) =>
+							openFileFromView(atelier, path, { newTab: false, created: true }),
+						)
+						.catch((error: unknown) => {
+							console.error("repository-home: unable to create a file", error);
+						});
+				}}
+			/>
+		</div>
+	),
+});

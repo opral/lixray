@@ -6,7 +6,7 @@ import {
 } from "~/lib/entity-url";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
 	useConsumeShellEntityNavigation,
 	useMarkRepositoryRouteSynced,
@@ -15,9 +15,10 @@ import {
 	useRepositoryDefaultBranchId,
 	useRepositoryAtelierInstance,
 } from "~/components/repository-atelier";
+import { ATELIER_BUILTIN_EXTENSION_IDS } from "@opral/atelier";
 import {
-	LIXRAY_HOME_EXTENSION_ID,
-	lixrayHomeDirState,
+	LIBRARY_HOME_INSTANCE,
+	libraryFolderState,
 } from "~/components/repository-home/host-extensions";
 
 export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
@@ -29,8 +30,8 @@ export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
 });
 
 /**
- * A folder URL drives the primary Files surface (flow A): the pinned Home
- * tab drills to the named folder in place. Folder tabs a user forked with
+ * A folder URL drives the primary surface: the pinned Library tab opens the
+ * named folder in Folders mode, in place. Folder tabs a user forked with
  * cmd-click keep their own state and claim the URL only while active.
  */
 function RepositoryFolderRoute() {
@@ -40,6 +41,12 @@ function RepositoryFolderRoute() {
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
 	const { _splat: dirSplat, namespace, repository } = Route.useParams();
 	const entityId = parseEntityUrlSplat(dirSplat)?.id;
+	// Read when a resolution starts, not a reason to start one: a new path
+	// for the same folder is the canonicalization effect's business.
+	const dirSplatRef = useRef(dirSplat);
+	useEffect(() => {
+		dirSplatRef.current = dirSplat;
+	}, [dirSplat]);
 	const defaultBranchId = useRepositoryDefaultBranchId();
 	const navigate = useNavigate();
 	const { branch } = Route.useSearch();
@@ -49,6 +56,8 @@ function RepositoryFolderRoute() {
 		branchId: string | null;
 		id: string;
 		path: string;
+		/** The URL the path was resolved for. */
+		splat: string | undefined;
 	} | null>(null);
 
 	// A descriptive path replacement is still the same folder navigation.
@@ -58,7 +67,10 @@ function RepositoryFolderRoute() {
 			!resolvedEntity ||
 			resolvedEntity.atelier !== atelier ||
 			resolvedEntity.branchId !== activeBranchId ||
-			resolvedEntity.id !== entityId
+			resolvedEntity.id !== entityId ||
+			// The shell moved the URL on since (the folder was renamed or
+			// moved while open): that URL is already the current one.
+			resolvedEntity.splat !== dirSplat
 		)
 			return;
 		const canonical = canonicalEntitySplat(dirSplat, resolvedEntity);
@@ -89,6 +101,7 @@ function RepositoryFolderRoute() {
 			return;
 		}
 		const controller = beginRouteNavigation();
+		const resolvingSplat = dirSplatRef.current;
 		void readRepositoryRoute(controller.signal, () =>
 			findLixEntity(atelier.lix, "directory", { id: entityId }),
 		)
@@ -125,8 +138,11 @@ function RepositoryFolderRoute() {
 						}
 					}, 800);
 					atelier.views
-						.open(LIXRAY_HOME_EXTENSION_ID, {
-							state: lixrayHomeDirState(dirPath),
+						.open(ATELIER_BUILTIN_EXTENSION_IDS.library, {
+							state: libraryFolderState(dirPath),
+							// Activated if open; otherwise beside the tab in front.
+							instanceId: LIBRARY_HOME_INSTANCE,
+							newTab: true,
 							signal: controller.signal,
 						})
 						.then(() => {
@@ -139,6 +155,7 @@ function RepositoryFolderRoute() {
 									branchId: activeBranchId,
 									id: entityId,
 									path: dirPath,
+									splat: resolvingSplat,
 								});
 							}
 						})
