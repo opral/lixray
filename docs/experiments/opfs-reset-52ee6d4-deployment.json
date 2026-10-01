@@ -1,0 +1,63 @@
+{
+  "app_release": "52ee6d49500311a42dfff4c161811f83fc6c6461",
+  "engine_pin": "98397ecf730587829fa3c115f2d62300724424cb",
+  "pull_request": "https://github.com/opral/lixray/pull/540",
+  "app_ci": {
+    "run": 36878872368,
+    "head": "66b80dee7684d809e13a11f7191efec294224f55",
+    "conclusion": "success"
+  },
+  "production": {
+    "run": 36880967405,
+    "conclusion": "success",
+    "completed_at_utc": "2026-10-01T15:18:22Z",
+    "completed_at_berlin": "2026-10-01T17:18:22+02:00",
+    "web_image": "ghcr.io/opral/lixray-web@sha256:7a64bdbb457025c249a95d247fa4a36b27f3111d130ace798ba87fba4d322478",
+    "server_image": "ghcr.io/opral/lixray-server@sha256:ba65673e4e0080b8f22269c8cc18a038097498f9fb8688f91025865905615b86",
+    "passed": [
+      "navigation",
+      "editing",
+      "history",
+      "conflicts",
+      "database migration checks",
+      "paired Railway promotion",
+      "existing production canary adoption",
+      "public production canary"
+    ]
+  },
+  "independent_read_only_checks": {
+    "protocol": 12,
+    "sync": 25,
+    "storage": 85,
+    "repositories": [
+      {
+        "ref": "@opral/demo",
+        "duration_ms": 4772,
+        "healthy": 1
+      },
+      {
+        "ref": "@opral/monorepo",
+        "duration_ms": 6023,
+        "healthy": 1
+      }
+    ]
+  },
+  "recovery_semantics": {
+    "automatic_reset": false,
+    "old_physical_copy_deleted": false,
+    "backup_format_when_open_fails": "ZIP",
+    "snapshot_export_when_engine_opens": ".lixsnap",
+    "unsupported_old_journal_automatically_replayed": false,
+    "actual_affected_user_device_reset_confirmed": false
+  },
+  "local_validation": {
+    "repository_tests": 209,
+    "partial_session_tests": 27,
+    "chromium_recovery_components_passed": 12,
+    "typescript": "passed",
+    "lint_and_format": "passed",
+    "review": "GPT-6 Luna xhigh; Retry/reset race corrected",
+    "linux_webkit": "Not qualified: installed build lacks navigator.storage.getDirectory; component page loads also timed out. Actual macOS Safari OPFS recovery unconfirmed."
+  },
+  "incident": "https://github.com/opral/lixray/issues/539"
+}
