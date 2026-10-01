@@ -91,7 +91,9 @@ void test("MCP history, diff, row-ref params and scoped file restoration use the
 		assert.notEqual(result.isError, true, JSON.stringify(result));
 		const content = result.structuredContent as Record<string, unknown>;
 		token = content.context as string;
-		return content;
+		return name === "query_sql"
+			? (content.result as Record<string, unknown>)
+			: content;
 	};
 	type Cell = { kind: string; value?: unknown; base64?: string };
 	type Statement = { columns: string[]; rows: Cell[][] };
@@ -153,7 +155,7 @@ void test("MCP history, diff, row-ref params and scoped file restoration use the
 			(restored.commit as { after: string }).after,
 		);
 		const files = (await call("query_sql", {
-			sql: "SELECT id, path, content FROM lix_file ORDER BY path",
+			sql: "SELECT id, path, content FROM lix_file WHERE path IN ('/deleted.bin', '/unrelated.bin') ORDER BY path",
 		})) as unknown as Statement;
 		assert.deepEqual(
 			files.rows.map((row) => row[1]!.value),
@@ -166,6 +168,10 @@ void test("MCP history, diff, row-ref params and scoped file restoration use the
 		for (const [sql, code] of [
 			[
 				"INSERT INTO lix_file (id, path, content) SELECT id, path, content FROM lix_as_of('lix_file', $1) WHERE id = $2",
+				"LIX_UNSUPPORTED_SQL",
+			],
+			[
+				"INSERT INTO lix_file (id, path, content) SELECT id, path, CAST(content AS BYTEA) FROM lix_as_of('lix_file', $1) WHERE id = $2",
 				"LIX_UNSUPPORTED_SQL",
 			],
 			[
