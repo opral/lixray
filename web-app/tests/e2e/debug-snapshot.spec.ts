@@ -1,3 +1,4 @@
+import { showLibraryFiles, libraryOpenButton } from "./library-fixture";
 import { expect, test } from "@playwright/test";
 
 test("snapshot inspection is temporary and does not write browser storage", async ({
@@ -7,6 +8,7 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 	await expect(
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
 	).toBeVisible();
+	await expect(page.getByLabel("Snapshot file")).toBeEnabled();
 	// Produce a real snapshot using the same browser SDK as the app.
 	const bytes = await page.evaluate(async () => {
 		const sdkUrl = "/node_modules/@lix-js/sdk/dist/index.js";
@@ -58,15 +60,11 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 	await expect(
 		page.getByText("In memory · discarded on close or refresh"),
 	).toBeVisible();
-	await expect(
-		page
-			.getByRole("treeitem", { name: "snapshot-proof.txt", exact: true })
-			.first(),
-	).toBeVisible({ timeout: 30_000 });
-	await page
-		.getByRole("treeitem", { name: "snapshot-proof.txt", exact: true })
-		.first()
-		.dblclick();
+	await showLibraryFiles(page);
+	await expect(libraryOpenButton(page, "snapshot-proof.txt")).toBeVisible({
+		timeout: 30_000,
+	});
+	await libraryOpenButton(page, "snapshot-proof.txt").click();
 	await expect(
 		page.getByText("Snapshot inspection works", { exact: false }).first(),
 	).toBeVisible();
@@ -89,11 +87,8 @@ test("snapshot inspection is temporary and does not write browser storage", asyn
 		mimeType: "application/vnd.lix.snapshot",
 		buffer: Buffer.from(bytes),
 	});
-	await expect(
-		page
-			.getByRole("treeitem", { name: "snapshot-proof.txt", exact: true })
-			.first(),
-	).toBeVisible();
+	await showLibraryFiles(page);
+	await expect(libraryOpenButton(page, "snapshot-proof.txt")).toBeVisible();
 	await page.reload();
 	await expect(
 		page.getByRole("heading", { name: "Open lix repository from snapshot" }),
@@ -190,9 +185,8 @@ test("CSV checkpoint diffs show added company-size columns from a snapshot", asy
 		mimeType: "application/vnd.lix.snapshot",
 		buffer: Buffer.from(bytes),
 	});
-	await expect(
-		page.getByRole("treeitem", { name: "leads.csv", exact: true }).first(),
-	).toBeVisible();
+	await showLibraryFiles(page);
+	await expect(libraryOpenButton(page, "leads.csv")).toBeVisible();
 	await page
 		.getByRole("button", {
 			name: "Latest checkpoint. Review latest checkpoint",

@@ -1,3 +1,4 @@
+import { showLibraryFiles } from "./library-fixture";
 import { getCompatibility } from "../../../vendor/lix/scripts/compatibility.mjs";
 import { randomUUID } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -988,61 +989,76 @@ export async function createSyncFixture({
 		observePage(left, "left");
 		observePage(right, "right");
 
-		const openHome = async (page: Page) => {
+		const openFiles = async (page: Page) => {
 			await page.goto(repositoryUrl);
-			const newButton = page.getByTestId("home-new-button");
-			const gettingStarted = page.getByTestId("home-getting-started");
-			if (!(await newButton.or(gettingStarted).first().isVisible())) {
-				const homeTab = page.getByRole("button", {
-					name: "Home",
-					exact: true,
-				});
-				await homeTab.waitFor({ timeout: 120_000 });
-				await homeTab.click();
-			}
-			await newButton.or(gettingStarted).first().waitFor({ timeout: 120_000 });
+			await showLibraryFiles(page);
+			await libraryFileIds(page);
 		};
 		/**
-		 * Home's New menu is Atelier's, so its rows are named the way Atelier
-		 * names them. The getting-started buttons are home's own.
+		 * Library's New menu is Atelier's, so its rows are named the way Atelier
+		 * names them.
 		 */
 		const newMenuRow = (extension: "md" | "csv" | "excalidraw") =>
 			`[data-attr="file-new-${extension === "md" ? "markdown" : extension}"]`;
-		const createFileFromHome = async (
+		const createFileFromLibrary = async (
 			page: Page,
 			extension: "md" | "csv" | "excalidraw",
 		): Promise<void> => {
-			await openHome(page);
+			await openFiles(page);
 			const homeUrl = page.url();
-			if (await page.getByTestId("home-getting-started").isVisible()) {
-				await page.getByTestId(`home-create-file-${extension}`).click();
-			} else {
-				await page.getByTestId("home-new-button").click();
-				await page.locator(newMenuRow(extension)).click();
-			}
+			await page.getByTestId("library-new").click();
+			await page.locator(newMenuRow(extension)).click();
 			await expect(page).not.toHaveURL(homeUrl, {
 				timeout: repositoryOperationTimeout,
 			});
 		};
-		const homeFileIds = async (page: Page): Promise<string[]> =>
-			page.getByTestId("home-file-entry").evaluateAll((entries) =>
-				entries
-					.map((entry) => entry.getAttribute("data-file-id"))
-					.filter((id): id is string => id !== null)
-					.sort(),
-			);
-		const homeFileEntry = (page: Page, fileId: string) =>
-			page
-				.getByTestId("home-file-entry")
-				.and(page.locator(`[data-file-id="${fileId}"]`));
-		const waitForRepositoryHome = async (page: Page) => {
-			await page
-				.getByTestId("home-new-button")
-				.or(page.getByTestId("home-getting-started"))
-				.first()
-				.waitFor({ timeout: 120_000 });
+		const localFiles = async (page: Page) =>
+			page.evaluate(async () => {
+				const result = await (
+					globalThis as typeof globalThis & {
+						__lixSyncFiles: () => Promise<{
+							rows: Array<Array<{ value: string }>>;
+						}>;
+					}
+				).__lixSyncFiles();
+				if (!result.rows)
+					throw new Error(`Local file probe failed: ${JSON.stringify(result)}`);
+				return result;
+			});
+		const libraryFileIds = async (page: Page) => {
+			const visiblePaths = await page
+				.getByTestId("library-file-row")
+				.evaluateAll((rows) =>
+					rows.map((row) => row.getAttribute("data-path")),
+				);
+			// Read identities from this browser's replica, never from the authority.
+			// Library rows expose paths; later partial-checkpoint assertions need IDs.
+			const result = await localFiles(page);
+			return result.rows
+				.filter((row) => visiblePaths.includes(row[1]!.value))
+				.map((row) => row[0]!.value)
+				.sort();
 		};
-		const waitForNewHomeFileIds = async (
+		const libraryFileEntry = async (page: Page, fileId: string) => {
+			let path: string | undefined;
+			await expect
+				.poll(
+					async () => {
+						const result = await localFiles(page);
+						path = result.rows.find((row) => row[0]!.value === fileId)?.[1]!
+							.value;
+						return path;
+					},
+					{ timeout: repositoryOperationTimeout },
+				)
+				.toBeDefined();
+			return page
+				.getByTestId("library-file-row")
+				.and(page.locator(`[data-path=${JSON.stringify(path)}]`))
+				.locator("button[draggable]");
+		};
+		const waitForRepositoryFiles = showLibraryFiles;
+		const waitForNewLibraryFileIds = async (
 			page: Page,
 			previousIds: readonly string[],
 			expectedCount: number,
@@ -1053,7 +1069,7 @@ export async function createSyncFixture({
 			await expect
 				.poll(
 					async () => {
-						addedIds = (await homeFileIds(page)).filter(
+						addedIds = (await libraryFileIds(page)).filter(
 							(id) => !previous.has(id),
 						);
 						return addedIds.length;
@@ -1089,7 +1105,7 @@ export async function createSyncFixture({
 						.getByTestId("repository-link")
 						.and(left.locator(`[data-repository-id="${repository.id!}"]`))
 						.click();
-					await waitForRepositoryHome(left);
+					await waitForRepositoryFiles(left);
 					await expect(left.getByTestId("repository-picker")).toHaveAttribute(
 						"data-repository-id",
 						repository.id!,
@@ -1097,7 +1113,7 @@ export async function createSyncFixture({
 
 					// Exercise the shareable direct URL independently from the directory link.
 					await left.goto(repository.href);
-					await waitForRepositoryHome(left);
+					await waitForRepositoryFiles(left);
 					await expect(left.getByTestId("repository-picker")).toHaveAttribute(
 						"data-repository-id",
 						repository.id!,
@@ -1141,20 +1157,20 @@ export async function createSyncFixture({
 				// Switch through the real picker, including back to the first repository,
 				// and prove /open restores each selected repository after a navigation.
 				await left.goto(repositories[0]!.href);
-				await waitForRepositoryHome(left);
+				await waitForRepositoryFiles(left);
 				for (const repository of [...repositories.slice(1), repositories[0]!]) {
 					await left.getByTestId("repository-picker").click();
 					await left
 						.getByTestId("repository-picker-item")
 						.and(left.locator(`[data-repository-id="${repository.id!}"]`))
 						.click();
-					await waitForRepositoryHome(left);
+					await waitForRepositoryFiles(left);
 					await expect(left.getByTestId("repository-picker")).toHaveAttribute(
 						"data-repository-id",
 						repository.id!,
 					);
 					await left.goto(new URL("/open", baseURL).toString());
-					await waitForRepositoryHome(left);
+					await waitForRepositoryFiles(left);
 					await expect(left.getByTestId("repository-picker")).toHaveAttribute(
 						"data-repository-id",
 						repository.id!,
@@ -1167,7 +1183,7 @@ export async function createSyncFixture({
 			});
 		}
 		async function editing() {
-			await Promise.all([openHome(left), openHome(right)]);
+			await Promise.all([openFiles(left), openFiles(right)]);
 			const lockState = await left.evaluate(async () => {
 				const snapshot = await navigator.locks.query();
 				return {
@@ -1185,16 +1201,18 @@ export async function createSyncFixture({
 				),
 			).toBe(false);
 
-			if (!(await left.getByTestId("home-entry-list").isVisible())) {
-				await createFileFromHome(left, "md");
-				await right
-					.getByTestId("home-getting-started")
-					.waitFor({ state: "hidden", timeout: repositoryOperationTimeout });
-				await Promise.all([openHome(left), openHome(right)]);
+			if ((await libraryFileIds(left)).length === 0) {
+				await createFileFromLibrary(left, "md");
+				await expect
+					.poll(() => libraryFileIds(right), {
+						timeout: repositoryOperationTimeout,
+					})
+					.not.toEqual([]);
+				await Promise.all([openFiles(left), openFiles(right)]);
 			}
 			await Promise.all([
-				left.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
-				right.getByTestId("home-entry-list").waitFor({ timeout: 120_000 }),
+				left.getByTestId("library-rows").waitFor({ timeout: 120_000 }),
+				right.getByTestId("library-rows").waitFor({ timeout: 120_000 }),
 			]);
 			const initialLeftHistory = await openHistoryPanel(left);
 			const initialCheckpointCount = await waitForHistoryCountsToMatchAuthority(
@@ -1224,9 +1242,9 @@ export async function createSyncFixture({
 				await exitHistory.click();
 				await expect(exitHistory).not.toBeVisible();
 				// Closing review restores a prior tab (including SQL from the entry
-				// tour). Keep the receiving client's live Home open for discovery.
-				await left.getByRole("button", { name: "Home", exact: true }).click();
-				await expect(left.getByTestId("home-entry-list")).toBeVisible();
+				// tour). Keep the receiving client's live Files section open for discovery.
+				await showLibraryFiles(left);
+				await expect(left.getByTestId("library-rows")).toBeVisible();
 			}
 			// Let bootstrap and historical-view hydration finish before attributing
 			// any later blob payload to realtime work.
@@ -1248,30 +1266,30 @@ export async function createSyncFixture({
 				]),
 			);
 
-			// Returning from a historical view restores Home asynchronously. Its shell
+			// Returning from a historical view restores Library asynchronously. Its shell
 			// can be visible before the live file rows have arrived. Establish the
 			// same nonempty baseline in both tabs before measuring one new file.
 			await expect
-				.poll(async () => (await homeFileIds(right)).length)
+				.poll(async () => (await libraryFileIds(right)).length)
 				.toBeGreaterThan(0);
 			await expect
-				.poll(() => homeFileIds(left))
-				.toEqual(await homeFileIds(right));
-			const fileIdsBeforeCreatedFile = await homeFileIds(left);
-			await right.getByTestId("home-new-button").click();
+				.poll(() => libraryFileIds(left))
+				.toEqual(await libraryFileIds(right));
+			const fileIdsBeforeCreatedFile = await libraryFileIds(left);
+			await right.getByTestId("library-new").click();
 			await right.locator(newMenuRow("md")).click();
 			const rightEditor = right.locator(
 				'.ProseMirror[contenteditable="true"]:visible',
 			);
 			await rightEditor.waitFor({ timeout: 30_000 });
 			const createdUrl = right.url();
-			const [createdFileId] = await waitForNewHomeFileIds(
+			const [createdFileId] = await waitForNewLibraryFileIds(
 				left,
 				fileIdsBeforeCreatedFile,
 				1,
 				realtimeTimeout,
 			);
-			await expect(homeFileEntry(left, createdFileId!)).toBeVisible();
+			await expect(await libraryFileEntry(left, createdFileId!)).toBeVisible();
 			await waitForBlobLaneQuiescence([left, right]);
 			await settleBlobLaneResponses();
 			expect(blobLaneObservationFailures).toEqual([]);
@@ -1328,8 +1346,10 @@ export async function createSyncFixture({
 					contexts.push(freshContext);
 					const fresh = await newPage(freshContext);
 					observePage(fresh, "fresh");
-					await fresh.goto(repositoryUrl);
-					await expect(homeFileEntry(fresh, createdFileId!)).toBeVisible({
+					await openFiles(fresh);
+					await expect(
+						await libraryFileEntry(fresh, createdFileId!),
+					).toBeVisible({
 						timeout: 120_000,
 					});
 					const coldReadsBeforeFreshHistory = coldReadCount([fresh]);
@@ -1648,12 +1668,12 @@ export async function createSyncFixture({
 
 			// Both tabs share one OPFS writer, so concurrent UI actions serialize
 			// into one local commit chain and both reach the independent replica.
-			const fileIdsBeforeConcurrentCreates = await homeFileIds(fresh);
+			const fileIdsBeforeConcurrentCreates = await libraryFileIds(fresh);
 			await Promise.all([
-				createFileFromHome(left, "md"),
-				createFileFromHome(right, "csv"),
+				createFileFromLibrary(left, "md"),
+				createFileFromLibrary(right, "csv"),
 			]);
-			const concurrentFileIds = await waitForNewHomeFileIds(
+			const concurrentFileIds = await waitForNewLibraryFileIds(
 				fresh,
 				fileIdsBeforeConcurrentCreates,
 				2,
@@ -1661,10 +1681,10 @@ export async function createSyncFixture({
 			);
 			// Keep both writers alive until the background upload reaches the
 			// independent replica; reopen durability is exercised separately below.
-			await Promise.all([left.goto(repositoryUrl), right.goto(repositoryUrl)]);
+			await Promise.all([openFiles(left), openFiles(right)]);
 			for (const page of [left, right]) {
 				for (const fileId of concurrentFileIds) {
-					await expect(homeFileEntry(page, fileId)).toBeVisible({
+					await expect(await libraryFileEntry(page, fileId)).toBeVisible({
 						timeout: 30_000,
 					});
 				}
@@ -1679,11 +1699,11 @@ export async function createSyncFixture({
 			// push reconciliation; do not hide this behind a second cold bootstrap.
 			const mountedConcurrentViewKinds = new Set<string>();
 			for (const fileId of concurrentFileIds) {
-				await expect(homeFileEntry(fresh, fileId)).toBeVisible({
+				await expect(await libraryFileEntry(fresh, fileId)).toBeVisible({
 					timeout: 30_000,
 				});
 				const homeUrl = fresh.url();
-				await homeFileEntry(fresh, fileId).click();
+				await (await libraryFileEntry(fresh, fileId)).click();
 				await expect(fresh).not.toHaveURL(homeUrl, {
 					timeout: repositoryOperationTimeout,
 				});
@@ -1696,8 +1716,8 @@ export async function createSyncFixture({
 				const mountedViewTestId = await mountedView.getAttribute("data-testid");
 				expect(mountedViewTestId).toBeTruthy();
 				mountedConcurrentViewKinds.add(mountedViewTestId!.split(":")[1]!);
-				await openHome(fresh);
-				await expect(homeFileEntry(fresh, fileId)).toBeVisible({
+				await openFiles(fresh);
+				await expect(await libraryFileEntry(fresh, fileId)).toBeVisible({
 					timeout: repositoryOperationTimeout,
 				});
 			}
@@ -1747,9 +1767,13 @@ export async function createSyncFixture({
 				observePage(fresh, `fresh-reopen-${sample + 1}`);
 				const reopenStartedAt = Date.now();
 				await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
-				await expect(homeFileEntry(fresh, createdFileId!)).toBeVisible({
-					timeout: 30_000,
-				});
+				await showLibraryFiles(fresh);
+				await libraryFileIds(fresh);
+				await expect(await libraryFileEntry(fresh, createdFileId!)).toBeVisible(
+					{
+						timeout: 30_000,
+					},
+				);
 				const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
 				warmReopenColdReads.push(sampleColdReads);
 				warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
@@ -1899,7 +1923,7 @@ export async function createSyncFixture({
 			} = state;
 
 			for (const fileId of concurrentFileIds) {
-				await expect(homeFileEntry(fresh, fileId)).toBeVisible();
+				await expect(await libraryFileEntry(fresh, fileId)).toBeVisible();
 			}
 			const reopenedHistory = await openHistoryPanel(fresh);
 			await waitForHistoryCountsToMatchAuthority(
@@ -1907,9 +1931,9 @@ export async function createSyncFixture({
 				checkpointCountBeforeFirstClick + 1,
 				realtimeTimeout,
 			);
-			const fileIdsBeforeAfterReopenCreate = await homeFileIds(fresh);
-			await createFileFromHome(left, "md");
-			const [afterReopenFileId] = await waitForNewHomeFileIds(
+			const fileIdsBeforeAfterReopenCreate = await libraryFileIds(fresh);
+			await createFileFromLibrary(left, "md");
+			const [afterReopenFileId] = await waitForNewLibraryFileIds(
 				fresh,
 				fileIdsBeforeAfterReopenCreate,
 				1,
@@ -1923,7 +1947,9 @@ export async function createSyncFixture({
 			await afterReopenEditor.click();
 			await left.keyboard.insertText(afterReopenMarker);
 			await left.keyboard.press("Tab");
-			await expect(homeFileEntry(fresh, afterReopenFileId!)).toBeVisible({
+			await expect(
+				await libraryFileEntry(fresh, afterReopenFileId!),
+			).toBeVisible({
 				timeout: realtimeTimeout,
 			});
 			await fresh.goto(afterReopenUrl);
