@@ -23,7 +23,7 @@ Connecting sources such as Google Drive, Notion, GitHub, and Granola is coming s
 - **ChatGPT Space** only works with ChatGPT.
 - **Anthropic Artifacts** only work with Claude.
 
-Notion, Google Drive, and GitHub are not alternatives. LixRay connects to them as sources.
+Notion, Google Drive, and GitHub are sources, not alternatives. LixRay connects to them.
 
 ## Pricing
 
@@ -288,8 +288,8 @@ The Streamable HTTP MCP endpoint is:
 https://lixray.com/mcp
 ```
 
-It exposes repository and branch discovery, file operations, and atomic raw Lix
-SQL execution. OAuth protected-resource metadata is served from
+It exposes repository discovery, branches, checkpoints, undo/redo, diff, and
+atomic SQL for reading and writing files and tables. OAuth protected-resource metadata is served from
 `/.well-known/oauth-protected-resource`; MCP access tokens are Supabase ES256
 tokens bound to `https://lixray.com`.
 

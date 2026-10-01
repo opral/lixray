@@ -1,5 +1,35 @@
 # MCP
 
+LixRay runs a remote MCP server at `https://lixray.com/mcp`. Any MCP client can
+connect: Claude, ChatGPT, Gemini, Codex, or your own agent. Agents read and
+write files and tables with SQL, work on branches, and undo or restore changes.
+
+## Connect a client
+
+Add `https://lixray.com/mcp` as a remote MCP server in your client and sign in
+with your LixRay account. Menus differ by client.
+
+Codex:
+
+```sh
+codex mcp add LixRay --url https://lixray.com/mcp --oauth-resource https://lixray.com
+codex mcp login LixRay
+```
+
+How it works:
+
+- The server is stateless (MCP protocol `2026-07-28`): each request stands
+  alone. There is no session and no `initialize` call.
+- Sign-in uses OAuth 2.1 with PKCE and dynamic client registration. Scopes:
+  `openid email profile offline_access`.
+- [Access tokens](./access-tokens.md) (`lixray_pat_...`) are for the SDK and
+  HTTP API. They do not work on `/mcp`.
+
+## Reference for agent authors
+
+Agents use two tools for data: `query_sql` to read and `execute_sql` to write.
+The rest of this page describes how they behave in detail.
+
 ## Direct SQL calls
 
 For SQL when the repository is known, call `query_sql` or `execute_sql` with `lix_ref` (an exact `@handle/slug` or UUID) and optional `branch_id`. Opening first is unnecessary. The omitted branch is the repository default branch, independent of any browser or previous call's active branch. Alternatively, pass an existing `context` alone to retain its selected branch. `open_lix` remains available for its bounded path manifest and for obtaining contexts used by branch and URL tools.
@@ -54,16 +84,19 @@ diagnostic timestamps or identifiers.
 - `execute_sql`: the write path. Files and directories are tables (`lix_file`,
   `lix_directory`); see [Writing files](#writing-files).
 - `get_entity_urls`: stable document links and readable display links for files and directories.
-- `create_checkpoint`, `restore`, `undo`, `redo`: milestones and moving the
-  branch head.
+- `diff`: list the files that differ between two points (a checkpoint, a
+  commit, a branch, `working`, or `latest_checkpoint`).
+- `create_checkpoint`, `restore`, `undo`, `redo`: mark milestones, copy an old
+  state into a new commit, and undo or redo.
 - `active_branch_id`, `create_branch`, `switch_branch`, `merge_branch_preview`,
-  `merge_branch`: branches. `switch_branch` returns a new context pinned to the
-  branch; nothing is switched server-side.
+  `merge_branch`: branches. `create_branch` takes `name`, an optional `id`, and
+  an optional `from_commit_id`. `switch_branch` returns a new context pinned to
+  the branch; pass it to later calls.
 
 ## Context
 
-`open_lix` returns a encrypted `context` that selects one Lix and one branch, and
-`context_expires_at` (24 hours after opening). SQL calls can instead use lix_ref directly. Other repository tools accept this context, including contexts returned by SQL calls.
+`open_lix` returns an encrypted `context` that selects one Lix and one branch, and
+`context_expires_at` (24 hours after opening). Without `branch_id`, `open_lix` uses the Lix's active branch. SQL calls can instead use `lix_ref` directly; without `branch_id` they use the default branch. Other repository tools accept this context, including contexts returned by SQL calls.
 When a call answers `context_expired`, `malformed_context`, or
 `invalid_context`, call `open_lix` again and take the new context from
 `structuredContent`; nothing else needs redoing, because contexts carry no
@@ -195,8 +228,7 @@ the chat around it, so a closed card reads as one more line of that chat.
 The rendered file does not: it is a document in Atelier, and Atelier is
 light. The foot carries a toggle for a reader who wants that file dark.
 Markdown
-and CSV previews use Atelier's static renderer; they carry no scripts or
-scripts, and the view mounts them in a shadow root. A document's pictures are
+and CSV previews use Atelier's static renderer; they carry no scripts, and the view mounts them in a shadow root. A document's pictures are
 drawn from the addresses it names, so a host that refuses them shows their
 alt text; the resource itself invokes no tools and asks for nothing else.
 
@@ -210,10 +242,7 @@ SQL batch (the files its change log says it touched) and `diff`;
 and because the answer is keyed to the commits rather than to a moment in
 time, nothing another writer does afterwards changes what the card describes.
 Each preview is trimmed to what changed, with a note of what was skipped; a
-change too large for a thread keeps its page and sends the reader to the file,
-which is also what a snapshot over 100 KB or one nested past two dozen levels
-gets — rendering walks the whole document, and the document was written by
-whoever is talking to the server.
+change too large for a thread keeps its page and sends the reader to the file.
 
 `diff` compares two points of the Lix in context: `before` and `after` are each
 `{ checkpoint_id }`, `{ commit_id }`, `{ branch_id }`, `"working"` (the branch
@@ -246,7 +275,7 @@ reversal when that change is still the latest undoable action. The tool executes
 receipt; inspect history if later edits may exist. `redo` uses
 `SELECT commit_id FROM lix_redo()`. Both return `commit_id: null` when there is
 nothing to apply and stop at checkpoints.
-`restore(commit_id)` moves the branch head and is not a substitute for undo.
+`restore(commit_id)` creates a new commit with the old state.
 Targeted reversal needs an engine-supported atomic target check; a separate
 read followed by undo cannot protect against a concurrent writer.
 
@@ -259,16 +288,12 @@ descriptor snapshot was deleted; directories likewise. Renames, writes by
 id, and cascades all show up because Lix recorded them. Reads link
 nothing; deletions are named in the summary but not linked.
 
-## Restore an ancestor
+## Restore a commit
 
-Call `restore` with the open Lix `context` and a `commit_id`. The commit must
-exist and be an ancestor of the selected branch head. Restore moves that branch
-head without creating a new commit. It does not delete the abandoned commits;
-a later checkpoint-driven garbage-collection sweep may reclaim those that are
-not reachable from a retention root. Other branches and branch-local untracked
-rows are unchanged.
-
-Restore is not undoable. `undo` only applies to commits made after the restore.
+Call `restore` with the open Lix `context` and a `commit_id`. It copies the
+content of that commit into a new commit on the context branch. History is
+kept, and `undo` can reverse the restore. It returns the new `commit_id`, or
+`null` if nothing changed.
 
 `create_checkpoint` returns a commit id that can be passed directly to
 `restore`. There is no `restore_checkpoint` tool.

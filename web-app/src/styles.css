@@ -200,20 +200,35 @@
 .docs-content {
 	width: 100%;
 	max-width: 720px;
-	margin-inline: auto;
 }
-@media (min-width: 1024px) {
+/* Below 768px the sidebar collapses into a <details> menu above the article
+   (docs-page.tsx), so the article starts near the top on phones. */
+.docs-navigation {
+	display: none;
+}
+@media (min-width: 768px) {
 	.docs-layout {
-		grid-template-columns: 200px minmax(0, 1fr);
-		gap: 56px;
+		grid-template-columns: 176px minmax(0, 720px);
+		justify-content: center;
+		gap: 40px;
 		padding-top: 40px;
 	}
 	.docs-navigation {
+		display: block;
 		position: sticky;
 		top: 110px;
 		align-self: start;
 		max-height: calc(100vh - 130px);
 		overflow-y: auto;
+	}
+	.docs-navigation-mobile {
+		display: none;
+	}
+}
+@media (min-width: 1024px) {
+	.docs-layout {
+		grid-template-columns: 200px minmax(0, 720px);
+		gap: 56px;
 	}
 }
 
@@ -230,7 +245,7 @@
 .docs-article :is(h2, h3, h4):hover .anchor {
 	opacity: 1;
 }
-.docs-article pre .copy {
+.docs-article .copy {
 	position: absolute;
 	top: 10px;
 	right: 10px;
@@ -246,10 +261,42 @@
 	opacity: 0;
 	transition: opacity var(--atelier-duration-slow);
 }
-.docs-article pre:hover .copy {
+.docs-article pre:hover .copy,
+.docs-code:hover .copy,
+.docs-article .copy:focus-visible {
 	opacity: 1;
 }
-.docs-article pre .copy:hover {
+@media (hover: none) {
+	.docs-article .copy {
+		opacity: 1;
+	}
+}
+/* The copy button sits on a non-scrolling wrapper, so it stays put while a
+   wide code block scrolls sideways. */
+.docs-code {
+	position: relative;
+	margin-block: var(--atelier-doc-gap);
+}
+.docs-code > pre {
+	margin-block: 0;
+}
+/* macOS hides overlay scrollbars, so a clipped code block gives no hint that
+   it scrolls. Keep a thin, always-visible scrollbar. */
+.docs-article pre {
+	scrollbar-width: thin;
+	scrollbar-color: var(--atelier-fg-subtle) transparent;
+}
+.docs-article pre::-webkit-scrollbar {
+	height: 6px;
+}
+.docs-article pre::-webkit-scrollbar-thumb {
+	background: var(--atelier-border);
+	border-radius: 3px;
+}
+.docs-article :not(pre) > code {
+	overflow-wrap: anywhere;
+}
+.docs-article .copy:hover {
 	color: var(--atelier-fg);
 	background: var(--atelier-bg-active);
 }

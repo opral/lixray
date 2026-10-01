@@ -1,47 +1,64 @@
 # What is LixRay?
 
-LixRay hosts [Lix](https://lix.dev/) repositories. Lix is an open source
-version control system for files and application data. It stores ordinary
-files and SQL tables in one repository and versions changes to both.
-LixRay gives people a browser app and gives agents access through MCP.
+LixRay is a shared repository for you and your AI agents. It holds documents,
+files, and database tables in one place. Claude, ChatGPT, or any MCP agent
+reads and edits the same data, and every change is versioned.
 
 ```
-people (browser)      agents (MCP)
-       │                   │
-       ▼                   ▼
-┌───────────────────────────────────┐
-│  LixRay    hosting · sharing · UI │
-├───────────────────────────────────┤
-│  Lix       repository:            │
-│            files + database +     │
-│            version control        │
-└───────────────────────────────────┘
+you (browser)      agents (MCP)
+      │                 │
+      ▼                 ▼
+┌──────────────────────────────┐
+│ LixRay   hosting · UI · MCP  │
+├──────────────────────────────┤
+│ Lix      files + tables +    │
+│          version control     │
+└──────────────────────────────┘
 ```
 
-File plugins provide structured diffs for supported formats, including
-Markdown and CSV. Other files still have whole-file history. People and
-agents can work in the same repository and review its changes.
+LixRay runs on [Lix](https://github.com/opral/lix), an open-source (MIT)
+version control system for files and SQL tables.
 
-LixRay adds:
+## What you get
 
-- **Hosting**: repositories are stored, versioned, and available at a URL.
-- **Browser UI**: read, edit, and review changes without local tooling.
-- **Sharing**: every file has a URL; read-only by default, edit by invite.
-- **Agent access**: agents connect over MCP with OAuth-scoped permissions.
+- **One repository for everything.** Markdown, CSV, Excel, PDFs, images, and
+  SQL tables live side by side.
+- **Any agent.** Any MCP client, such as Claude, ChatGPT, Gemini, or Codex,
+  connects with OAuth. See [MCP](./mcp.md).
+- **Version control.** Every change records who made it and what changed.
+  Markdown and CSV get structured diffs (paragraphs, rows). Other files keep
+  whole-file history. Agents can work on a branch that you review and merge.
+  You can restore any version.
+- **Sharing.** Every file has a URL. Read-only by default, edit by invite.
+- **No lock-in.** Files stay in their own formats. You can
+  [self-host](./self-host.md) the storage server and the web UI. Sign-in,
+  sharing, and the MCP server are not open source yet.
 
-The hosted app is at [lixray.com](https://lixray.com/). To build on LixRay,
-email [hello@opral.com](mailto:hello@opral.com).
+## Planned
+
+- **Connect your sources.** Pull in Google Drive, Notion, GitHub, and Granola.
+  Track it in [opral/lix#1934](https://github.com/opral/lix/issues/1934).
+- **Automations.** Run checks and scripts on every change. Track it in
+  [opral/lix#256](https://github.com/opral/lix/issues/256).
+
+## Compared to
+
+- **ChatGPT Space** only works with ChatGPT.
+- **Anthropic Artifacts** only work with Claude.
+
+Notion, Google Drive, and GitHub are sources, not alternatives. LixRay connects
+to them.
 
 ## Internal apps
 
-Lix repositories have a SQL interface and JavaScript bindings. Companies can
-build internal apps on top of their repository: a task tracker, an approval
-queue, or a dashboard alongside the files and context their teams already use.
-Application data can share the repository's version history.
-
-[Build a mini app](./internal-apps.md) to try it with a small task tracker.
+Repositories have SQL and a JavaScript SDK. You can build small
+apps on top of a repository, such as a task tracker or an approval queue. Their
+data shares the repository's version history.
+[Build a mini app](./internal-apps.md) to try it.
 
 ## Next steps
 
-- [Get started](./getting-started.md) — create a repository, add files, and connect an agent.
-- [MCP](./mcp.md) — the LixRay MCP server in depth.
+- [Get started](./getting-started.md): create a repository, add files, and
+  connect an agent.
+- [MCP](./mcp.md): the LixRay MCP server in depth.
+- [Self-host](./self-host.md): run LixRay on your own infrastructure.

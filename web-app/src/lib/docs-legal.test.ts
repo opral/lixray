@@ -113,7 +113,6 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 		// SiteFooter, used by the landing and pricing pages.
 		"site-header.tsx",
 		"legal-page.tsx",
-		"docs-page.tsx",
 		"vs-github-page.tsx",
 	] as const) {
 		const source = readFileSync(join(webAppSrc, "components", file), "utf8");
@@ -121,4 +120,10 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 		assert.match(source, /to="\/terms"/, file);
 		assert.match(source, /to="\/support"/, file);
 	}
+
+	const docsPage = readFileSync(
+		join(webAppSrc, "components", "docs-page.tsx"),
+		"utf8",
+	);
+	assert.match(docsPage, /<SiteFooter \/>/);
 });
