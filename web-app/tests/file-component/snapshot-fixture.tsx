@@ -46,7 +46,9 @@ declare global {
 			isTrusted: boolean;
 			reasonType: string;
 		}>;
-		snapshotPostHogStatus: () => Record<string, unknown>;
+		snapshotPostHogStatus: () => Record<string, unknown> & {
+			beforeSendEvents: string[];
+		};
 	}
 }
 

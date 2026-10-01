@@ -438,16 +438,6 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 			}
 		).triggerPostHogWireExceptions(),
 	);
-	const posthogStatus = await page.evaluate(() => {
-		const testWindow = window as Window & {
-			snapshotPostHogStatus: () => Record<string, unknown>;
-			snapshotPostHogCaptureExceptionCalls: number;
-		};
-		return {
-			...testWindow.snapshotPostHogStatus(),
-			captureExceptionCalls: testWindow.snapshotPostHogCaptureExceptionCalls,
-		};
-	});
 	await expect
 		.poll(
 			() =>
@@ -459,6 +449,32 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		true,
 	);
 	expect(externalRequests).toEqual([]);
+	const posthogStatus = await page.evaluate(() => {
+		const testWindow = window as Window & {
+			snapshotPostHogStatus: () => Record<string, unknown> & {
+				beforeSendEvents: string[];
+			};
+			snapshotPostHogCaptureExceptionCalls: number;
+		};
+		return {
+			...testWindow.snapshotPostHogStatus(),
+			captureExceptionCalls: testWindow.snapshotPostHogCaptureExceptionCalls,
+		};
+	});
+	expect(posthogStatus).toMatchObject({
+		loaded: true,
+		tokenPresent: true,
+		apiHost: fixtureOrigin,
+		captureDisabled: false,
+		optedOut: false,
+		optedIn: true,
+		beforeSendPresent: true,
+		optOutUserAgentFilter: true,
+		captureUnhandledErrors: true,
+		captureUnhandledRejections: true,
+		captureExceptionCalls: 1,
+	});
+	expect(posthogStatus.beforeSendEvents).toContain("$exception");
 
 	const wireExceptions = posthogWireEvents.filter(
 		(event) => event.event === "$exception",
@@ -538,6 +554,9 @@ test("snapshot 404 is correlated and sanitized, then retry downloads successfull
 		rejectionWireException,
 		JSON.stringify({ wireExceptionSummary, unhandledRejectionEvents }),
 	).toBeDefined();
+	expect(unhandledRejectionEvents).toEqual([
+		{ isTrusted: false, reasonType: "SnapshotFixtureRejectionError" },
+	]);
 	for (const event of [uncaughtWireException!, rejectionWireException!]) {
 		const properties = event.properties!;
 		const exception = firstException(event);
