@@ -23,6 +23,7 @@ import {
 	type CommitSpan,
 	createLixError,
 	isLixError,
+	markMcpLocalAdapterFailure,
 	type LixError,
 	type LixRuntimeClient,
 	type LixSummary,
@@ -739,6 +740,7 @@ function encodeLixValue(
 							valueType: "blob",
 						},
 					},
+
 				);
 			}
 			return { kind: "blob", base64: bytesToBase64(value) };
@@ -756,6 +758,7 @@ function encodeLixValue(
 				valueType: type,
 			},
 		},
+
 	);
 }
 

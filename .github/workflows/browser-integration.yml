@@ -47,7 +47,7 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - run: pnpm --dir web-app exec playwright install --with-deps chromium
+      - run: bash .github/scripts/install-playwright-browser.sh
       - name: Run independent sync scenarios
         if: inputs.performance != true
         run: pnpm --dir web-app exec playwright test tests/e2e/sync-preview.spec.ts --grep "@${{ matrix.scenario }}"

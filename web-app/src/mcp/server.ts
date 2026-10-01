@@ -32,11 +32,13 @@ import {
 import {
 	createLixError,
 	isLixError,
+	mcpLocalAdapterFailureStage,
 	LixService,
 	type CommitSpan,
 	type DiffRef,
 	type ExecuteRequest,
 	type FileChange,
+	type McpLocalAdapterFailureStage,
 } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
@@ -159,6 +161,15 @@ export interface McpServerOptions {
 	posthogHost?: string;
 	posthogDistinctId?: string;
 	posthogClientId?: string;
+	serverRelease?: string;
+	onLocalAdapterFailure?: (failure: {
+		requestId: string;
+		toolName: string;
+		stage: McpLocalAdapterFailureStage;
+		errorCode?: string;
+		traceId?: string;
+		spanId?: string;
+	}) => void;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
 	/** Internal transport factory installs tracing outside official analytics. */
 	deferToolTracing?: boolean;
@@ -573,6 +584,9 @@ interface ToolCallState {
 	completed?: Promise<void>;
 	observation?: McpToolCallObservation;
 	commitOutcome?: "not_committed" | "committed" | "unknown";
+	traceId?: string;
+	spanId?: string;
+	onLocalAdapterFailure?: McpServerOptions["onLocalAdapterFailure"];
 }
 const TOOL_CALL_STATE = createContextKey("lixray.mcp.tool-call");
 
@@ -599,6 +613,7 @@ function traceToolDispatch(
 			completed: new Promise<void>((resolve) => {
 				complete = resolve;
 			}),
+			onLocalAdapterFailure: options.onLocalAdapterFailure,
 		};
 		// Only advertise known tool names; unknown names can contain private input.
 		const requestedTool = request.params?.name ?? "";
@@ -619,8 +634,11 @@ function traceToolDispatch(
 			state.commitOutcome = "not_committed";
 		const work = withSpan(
 			"mcp.tool",
-			async (span) =>
-				otelContext.with(
+			async (span) => {
+				const spanContext = span.spanContext();
+				state.traceId = spanContext.traceId;
+				state.spanId = spanContext.spanId;
+				return otelContext.with(
 					otelContext.active().setValue(TOOL_CALL_STATE, state),
 					async () => {
 						let outcome: "success" | "error" = "error";
@@ -659,7 +677,8 @@ function traceToolDispatch(
 							complete();
 						}
 					},
-				),
+				);
+			},
 			{ "mcp.tool.name": toolName, "request.id": options.requestId ?? "" },
 		);
 		pendingCalls?.add(work);
@@ -1372,13 +1391,24 @@ async function handleMcpTransportRequest(
 	}
 	const handler = createMcpHandler(
 		() => {
-			const server = createLixrayMcpServer(service, {
+			const serverOptions: McpServerOptions = {
 				...options,
 				requestId,
 				deferToolTracing: true,
 				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 				urlOrigin: options.urlOrigin ?? new URL(request.url).origin,
-			});
+				onLocalAdapterFailure:
+					posthog && options.posthogDistinctId
+						? (failure) =>
+								captureMcpLocalAdapterException(
+									posthog,
+									options.posthogDistinctId!,
+									options.serverRelease,
+									failure,
+								)
+						: options.onLocalAdapterFailure,
+			};
+			const server = createLixrayMcpServer(service, serverOptions);
 			if (posthog) {
 				// Instrument inside the factory so 0.11.x can wrap v2 string
 				// `tools/call` and later `server/discover` registrations.
@@ -1430,7 +1460,7 @@ async function handleMcpTransportRequest(
 					requestId,
 				});
 			}
-			traceToolDispatch(server, { ...options, requestId }, pendingCalls);
+			traceToolDispatch(server, serverOptions, pendingCalls);
 			return server;
 		},
 		{
@@ -1470,6 +1500,63 @@ async function handleMcpTransportRequest(
 		finishAnalytics();
 		throw error;
 	}
+}
+
+function captureMcpLocalAdapterException(
+	posthog: PostHogMCP,
+	distinctId: string,
+	serverRelease: string | undefined,
+	failure: {
+		requestId: string;
+		toolName: string;
+		stage: McpLocalAdapterFailureStage;
+		errorCode?: string;
+		traceId?: string;
+		spanId?: string;
+	},
+): void {
+	const errorId = crypto.randomUUID();
+	const properties: Record<string, string> = {
+		error_id: errorId,
+		service_name: "lixray-mcp",
+		operation: "mcp.tool",
+		http_method: "POST",
+		http_route: MCP_PATH,
+		request_id: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(failure.requestId)
+			? failure.requestId
+			: "unknown",
+		tool_name: /^[a-z][a-z0-9_]{0,63}$/.test(failure.toolName)
+			? failure.toolName
+			: "unknown",
+		failure_stage: failure.stage,
+		server_release:
+			serverRelease && /^[A-Za-z0-9._:-]{1,128}$/.test(serverRelease)
+				? serverRelease
+				: "unknown",
+	};
+	if (
+		failure.errorCode &&
+		/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(failure.errorCode)
+	)
+		properties.error_code = failure.errorCode;
+	const validTraceId =
+		typeof failure.traceId === "string" &&
+		/^[a-f0-9]{32}$/.test(failure.traceId) &&
+		!/^0+$/.test(failure.traceId);
+	const validSpanId =
+		typeof failure.spanId === "string" &&
+		/^[a-f0-9]{16}$/.test(failure.spanId) &&
+		!/^0+$/.test(failure.spanId);
+	if (validTraceId && validSpanId) {
+		properties.$otel_trace_id = failure.traceId!;
+		properties.$otel_span_id = failure.spanId!;
+		properties.error_correlation = "active_trace";
+	} else {
+		properties.error_correlation = "no_trace_provider";
+	}
+	const safeError = new Error("MCP adapter failure");
+	safeError.name = "McpAdapterError";
+	posthog.captureException(safeError, distinctId, properties, errorId);
 }
 
 interface McpDiscoveryOptions {
@@ -1709,6 +1796,23 @@ function registerTool(
 				const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
 					| ToolCallState
 					| undefined;
+				const adapterStage =
+					mcpLocalAdapterFailureStage(caught) ??
+					(executionCompleted ? "tool_result_serialization" : undefined);
+				if (adapterStage) {
+					try {
+						callState?.onLocalAdapterFailure?.({
+							requestId,
+							toolName: name,
+							stage: adapterStage,
+							errorCode: error.code,
+							...(callState.traceId ? { traceId: callState.traceId } : {}),
+							...(callState.spanId ? { spanId: callState.spanId } : {}),
+						});
+					} catch {
+						/* Error tracking cannot affect the tool result. */
+					}
+				}
 				if (
 					callState &&
 					"outcome" in error &&

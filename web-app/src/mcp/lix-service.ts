@@ -124,6 +124,32 @@ export type LixError = Error & {
 	status?: number;
 };
 
+export type McpLocalAdapterFailureStage =
+	| "sdk_result_encoding"
+	| "tool_result_serialization";
+
+const mcpLocalAdapterFailures = new WeakMap<
+	object,
+	McpLocalAdapterFailureStage
+>();
+
+/** Mark an adapter-owned failure without putting internal metadata on the wire. */
+export function markMcpLocalAdapterFailure<T extends Error>(
+	error: T,
+	stage: McpLocalAdapterFailureStage,
+): T {
+	mcpLocalAdapterFailures.set(error, stage);
+	return error;
+}
+
+export function mcpLocalAdapterFailureStage(
+	error: unknown,
+): McpLocalAdapterFailureStage | undefined {
+	return error && typeof error === "object"
+		? mcpLocalAdapterFailures.get(error)
+		: undefined;
+}
+
 export function createLixError(
 	code: string,
 	message: string,

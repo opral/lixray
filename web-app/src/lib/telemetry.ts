@@ -9,8 +9,11 @@ import {
 	AUTOCAPTURE_ATTRIBUTE_IGNORELIST,
 	AUTOCAPTURE_SELECTOR_IGNORELIST,
 	SESSION_RECORDING_BLOCK_SELECTOR,
-	scrubPostHogEvent,
 } from "./telemetry-privacy.ts";
+import {
+	exceptionTraceability,
+	preparePostHogEvent,
+} from "./exception-traceability.ts";
 import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions.ts";
 import type { ProductEvent } from "./telemetry-events.ts";
 
@@ -115,7 +118,7 @@ function buildPostHogConfig(
 			css_selector_ignorelist: AUTOCAPTURE_SELECTOR_IGNORELIST,
 			capture_copied_text: false,
 		},
-		before_send: scrubPostHogEvent,
+		before_send: preparePostHogEvent,
 		capture_exceptions: BROWSER_EXCEPTION_CAPTURE_CONFIG,
 		capture_pageview: "history_change",
 		capture_pageleave: true,
@@ -184,12 +187,13 @@ export function captureExceptionTelemetry(
 	error: unknown,
 	properties: Properties = {},
 ): void {
+	const captured = exceptionTraceability({
+		...lixErrorTelemetryProperties(error),
+		...properties,
+	});
 	void initializeTelemetry()
 		.then((posthog) => {
-			posthog?.captureException(error, {
-				...lixErrorTelemetryProperties(error),
-				...properties,
-			});
+			posthog?.captureException(error, captured);
 		})
 		.catch((telemetryError: unknown) => {
 			console.warn("Failed to capture browser exception", telemetryError);
@@ -201,12 +205,13 @@ export async function captureExceptionTelemetryAsync(
 	error: unknown,
 	properties: Properties = {},
 ): Promise<void> {
+	const captured = exceptionTraceability({
+		...lixErrorTelemetryProperties(error),
+		...properties,
+	});
 	try {
 		const posthog = await initializeTelemetry();
-		posthog?.captureException(error, {
-			...lixErrorTelemetryProperties(error),
-			...properties,
-		});
+		posthog?.captureException(error, captured);
 	} catch (telemetryError: unknown) {
 		console.warn("Failed to capture browser exception", telemetryError);
 	}

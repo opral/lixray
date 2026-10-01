@@ -1,3 +1,4 @@
+import { fetchRepositoryRemoteSnapshot } from "./repository-debug-remote.ts";
 import { withIdleDeviceReplica } from "./repository-device-backup.ts";
 import {
 	openLix,
@@ -16,7 +17,7 @@ import {
 } from "./repository-replica-replacement.ts";
 import { currentReplicaStorage } from "./repository-migration.ts";
 import { captureExceptionTelemetry } from "./telemetry.ts";
-import { fetchLixWithTrace } from "../telemetry.ts";
+import { fetchLixWithTrace, lixRequestTraceProperties } from "../telemetry.ts";
 import {
 	createLixTelemetryOptions,
 	lixTelemetryParentContext,
@@ -86,7 +87,33 @@ export function openRepositoryRemoteLix(
 	});
 }
 
-/** User-confirmed reset: bootstrap a fresh replica while retaining its physical source.
+/** Repository-wide export uses its authenticated endpoint, without a SQL handshake. */
+export function downloadRepositoryRemoteSnapshot(
+	options: OpenRepositoryLixSessionOptions,
+): Promise<Blob> {
+	const parent = lixTelemetryParentContext();
+	if (options.allowAnonymous || options.publicPath)
+		return Promise.reject(
+			new Error("A remote snapshot requires repository membership."),
+		);
+	const url = new URL(
+		`/lix/v1/${options.repositoryId}/snapshot`,
+		repositoryUrl(options),
+	);
+	return fetchRepositoryRemoteSnapshot({
+		url,
+		headers: () => repositoryRequestHeaders(options),
+		fetch: createTelemetryFetch(options.fetch ?? networkFetch, {
+			repositoryId: options.repositoryId,
+			refreshAccessToken: options.refreshAccessToken,
+			signal: options.signal,
+			openingParent: () => parent,
+		}),
+		signal: options.signal,
+	});
+}
+
+/** User-triggered reset: bootstrap a fresh replica while retaining its physical source.
  * Never open, migrate, or delete the incompatible source to perform recovery.
  */
 export async function resetRepositoryLocalReplica(
@@ -647,6 +674,7 @@ async function reportLixRequestFailure(
 		},
 	);
 	captureException(error, {
+		...lixRequestTraceProperties(response),
 		operation: "repository_request",
 		lix_request_endpoint: endpoint,
 		lix_request_method: method,
@@ -675,6 +703,7 @@ function reportLixTransportFailure(
 	if (reportedFailures.get(key) === fingerprint) return;
 	reportedFailures.set(key, fingerprint);
 	captureException(exception, {
+		...lixRequestTraceProperties(error),
 		operation: "repository_request",
 		lix_request_endpoint: lixRequestEndpoint(input),
 		lix_request_method: lixRequestMethod(input, init),

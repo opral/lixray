@@ -1,4 +1,6 @@
 import { SpanStatusCode } from "@opentelemetry/api";
+import { createServer } from "node:http";
+import { gunzipSync } from "node:zlib";
 import {
 	NodeTracerProvider,
 	InMemorySpanExporter,
@@ -19,6 +21,7 @@ import {
 } from "@modelcontextprotocol/client";
 import {
 	createLixError,
+	markMcpLocalAdapterFailure,
 	LixService,
 	type ExecuteBatchRequest,
 	type ExecuteRequest,
@@ -1836,11 +1839,13 @@ void test("failed execute_sql then successful retry both emit $mcp_tool_call", a
 	}> = [];
 	type CaptureMethod = typeof PostHog.prototype.capture;
 	type ShutdownMethod = typeof PostHog.prototype.shutdown;
-	const originalCapture = PostHog.prototype.capture.bind(
+	const originalCapture = Reflect.get(
 		PostHog.prototype,
+		"capture",
 	) as CaptureMethod;
-	const originalShutdown = PostHog.prototype.shutdown.bind(
+	const originalShutdown = Reflect.get(
 		PostHog.prototype,
+		"shutdown",
 	) as ShutdownMethod;
 	PostHog.prototype.capture = function capture(event) {
 		const distinctId = event.distinctId;
@@ -1992,16 +1997,19 @@ type CapturedMcpEvent = {
 	event: string;
 	distinctId: string;
 	properties: Record<string, unknown>;
+	uuid?: string;
 };
 
 function stubPosthogCapture(captured: CapturedMcpEvent[]): () => void {
 	type CaptureMethod = typeof PostHog.prototype.capture;
 	type ShutdownMethod = typeof PostHog.prototype.shutdown;
-	const originalCapture = PostHog.prototype.capture.bind(
+	const originalCapture = Reflect.get(
 		PostHog.prototype,
+		"capture",
 	) as CaptureMethod;
-	const originalShutdown = PostHog.prototype.shutdown.bind(
+	const originalShutdown = Reflect.get(
 		PostHog.prototype,
+		"shutdown",
 	) as ShutdownMethod;
 	PostHog.prototype.capture = function capture(event) {
 		const distinctId =
@@ -2975,6 +2983,137 @@ void test("late serialization and SDK output validation publish only terminal er
 			.find((span) => span.spanContext().spanId === calls.at(-1)?.spanId)!;
 		assert.equal(span.status.code, SpanStatusCode.ERROR);
 	}
+});
+
+void test("captures typed MCP adapter conversion failures once without private values", async (t) => {
+	const received: CapturedMcpEvent[] = [];
+	const receiver = createServer((request, response) => {
+		const chunks: Buffer<ArrayBufferLike>[] = [];
+		request.on("data", (chunk: Uint8Array) => {
+			chunks.push(Buffer.from(chunk));
+		});
+		request.on("end", () => {
+			try {
+				const body = Buffer.concat(chunks);
+				const decoded =
+					request.headers["content-encoding"] === "gzip"
+						? gunzipSync(body)
+						: body;
+				const payload = JSON.parse(decoded.toString("utf8")) as {
+					batch?: unknown;
+				};
+				const events = Array.isArray(payload.batch) ? payload.batch : [];
+				for (const rawEvent of events) {
+					if (!rawEvent || typeof rawEvent !== "object") continue;
+					const event = rawEvent as Record<string, unknown>;
+					const properties =
+						event.properties &&
+						typeof event.properties === "object" &&
+						!Array.isArray(event.properties)
+							? (event.properties as Record<string, unknown>)
+							: {};
+					received.push({
+						event: typeof event.event === "string" ? event.event : "",
+						distinctId:
+							typeof event.distinct_id === "string"
+								? event.distinct_id
+								: "anonymous",
+						properties,
+						...(typeof event.uuid === "string" ? { uuid: event.uuid } : {}),
+					});
+				}
+				response.writeHead(200, { "content-type": "application/json" });
+				response.end('{"status":"ok"}');
+			} catch {
+				response.writeHead(400);
+				response.end();
+			}
+		});
+	});
+	await new Promise<void>((resolve) =>
+		receiver.listen(0, "127.0.0.1", resolve),
+	);
+	const address = receiver.address();
+	assert.ok(address && typeof address === "object");
+	t.after(
+		() =>
+			new Promise<void>((resolve, reject) =>
+				receiver.close((error) => (error ? reject(error) : resolve())),
+			),
+	);
+	const posthogFlushes: Promise<void>[] = [];
+	const service = new LixService(new FakeRuntime(), {
+		contextSigningKey: "test",
+		principal: { userId: "verified-user-123", clientId: "client-private" },
+	});
+	const calls: McpToolCallObservation[] = [];
+	const client = await telemetryClient(service, calls, {
+		posthogToken: "phc_test",
+		posthogHost: `http://127.0.0.1:${address.port}`,
+		posthogDistinctId: "verified-user-123",
+		posthogClientId: "client-private",
+		serverRelease: "release-2026.10.01",
+		onPosthogFlush: (flush) => posthogFlushes.push(flush()),
+	});
+	t.after(() => client.close());
+	const opened = await client.callTool({
+		name: "open_lix",
+		arguments: { lix_ref: LIX_ID },
+	});
+	await Promise.all(posthogFlushes.splice(0));
+	const context = (opened.structuredContent as { context: string }).context;
+	const privateValue = "private SQL literal and row payload";
+	service.execute = async () => {
+		throw markMcpLocalAdapterFailure(
+			createLixError("upstream_error", privateValue),
+			"sdk_result_encoding",
+		);
+	};
+	const before = received.length;
+	const failed = await client.callTool({
+		name: "query_sql",
+		arguments: { context, sql: "SELECT 1" },
+	});
+	assert.equal(failed.isError, true);
+	await Promise.all(posthogFlushes.splice(0));
+	const exceptions = received
+		.slice(before)
+		.filter((event) => event.event === "$exception");
+	assert.equal(
+		exceptions.length,
+		1,
+		JSON.stringify({ events: received.slice(before), call: calls.at(-1) }),
+	);
+	const [exception] = exceptions;
+	assert.ok(exception);
+	assert.equal(exception.distinctId, "verified-user-123");
+	assert.equal(exception.properties.operation, "mcp.tool");
+	assert.equal(exception.properties.service_name, "lixray-mcp");
+	assert.equal(exception.properties.http_method, "POST");
+	assert.equal(exception.properties.http_route, "/mcp");
+	assert.equal(exception.properties.request_id, "same-http-id");
+	assert.equal(exception.properties.tool_name, "query_sql");
+	assert.equal(exception.properties.failure_stage, "sdk_result_encoding");
+	assert.equal(exception.properties.error_code, "upstream_error");
+	assert.equal(exception.properties.server_release, "release-2026.10.01");
+	assert.equal(exception.properties.error_correlation, "active_trace");
+	assert.match(String(exception.properties.error_id), /^[0-9a-f-]{36}$/);
+	assert.equal(exception.uuid, exception.properties.error_id);
+	const call = calls.at(-1)!;
+	assert.equal(exception.properties.$otel_trace_id, call.traceId);
+	assert.equal(exception.properties.$otel_span_id, call.spanId);
+	const exceptionList = exception.properties.$exception_list as Array<{
+		type?: unknown;
+		value?: unknown;
+	}>;
+	assert.ok(Array.isArray(exceptionList));
+	assert.equal(exceptionList.length, 1);
+	assert.equal(exceptionList[0]?.type, "McpAdapterError");
+	assert.equal(exceptionList[0]?.value, "MCP adapter failure");
+	const eventText = JSON.stringify(exception);
+	assert.equal(eventText.includes(privateValue), false);
+	assert.equal(eventText.includes("SELECT 1"), false);
+	assert.equal(eventText.includes("client-private"), false);
 });
 
 void test("concurrent tools sharing an HTTP request ID keep distinct native identities", async (t) => {

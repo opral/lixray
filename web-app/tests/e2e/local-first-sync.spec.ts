@@ -289,7 +289,7 @@ test("file and directory links survive offline moves, renames, checkpoints, and 
 		admissionFailures = 5;
 		await page.goto(savedFileUrl);
 		await expect(
-			page.getByText("Unable to open Atelier", { exact: true }),
+			page.getByText("Unable to open repository", { exact: true }),
 		).toBeVisible({ timeout: 30_000 });
 		expect(admissionRequests - beforeRetry).toBe(5);
 		await page.getByRole("button", { name: "Retry", exact: true }).click();

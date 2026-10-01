@@ -385,6 +385,9 @@ export async function handleOtlpTelemetry(
 											? "browser"
 											: "server",
 										resourceAttributes: resource.resource?.attributes,
+										browserUserId: dependencies.authenticatedBrowser
+											? dependencies.browserUserId
+											: undefined,
 									}),
 								),
 							),

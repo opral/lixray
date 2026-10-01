@@ -103,7 +103,10 @@ void test("preserves sanitized PostHog exception messages", () => {
 						frames: [
 							{
 								filename: "file:///Users/samuel/private/protocol.ts",
-								vars: { value: "private document content" },
+							},
+							{
+								filename:
+									"https://assets.example/app.js?token=private#repository-content",
 							},
 						],
 					},
@@ -122,8 +125,8 @@ void test("preserves sanitized PostHog exception messages", () => {
 					frames: [
 						{
 							filename: "[redacted_path]",
-							vars: {},
 						},
+						{ filename: "https://assets.example/app.js" },
 					],
 				},
 			},
@@ -182,6 +185,63 @@ void test("does not misclassify exceptions that contain a stack", () => {
 			},
 		],
 	});
+});
+
+void test("scrubs SQL and response bodies from bounded exception diagnostics", () => {
+	const event = scrubPostHogEvent({
+		uuid: "event_content_bearing_exception",
+		event: "$exception",
+		properties: {
+			$exception_list: [
+				{
+					type: "LixError",
+					value:
+						"Repository read failed: SELECT private_column FROM secret_repository",
+					stacktrace: {
+						frames: [
+							{
+								filename:
+									"https://assets.example/app.js?token=private#document-content",
+								function: "loadRepository",
+								code: "SELECT * FROM private_table",
+								vars: { document: "private repository content" },
+							},
+						],
+					},
+				},
+			],
+			lix_error_code: "LIX_READ_FAILED",
+			response_body: "private response body",
+			"http.response.body": '{"document":"private repository content"}',
+			response_diagnostic: 'Response body: {"secret":"private response"}',
+			long_message: `Request failed ${"x".repeat(20_000)}`,
+		},
+	});
+	const properties = event?.properties as Record<string, unknown>;
+	const exception = (
+		properties.$exception_list as Array<Record<string, unknown>>
+	)[0]!;
+	const frames = (
+		exception.stacktrace as { frames: Array<Record<string, unknown>> }
+	).frames;
+	assert.equal(
+		exception.value,
+		"Repository read failed: [SQL statement omitted]",
+	);
+	assert.equal(properties.lix_error_code, "LIX_READ_FAILED");
+	assert.equal(properties.response_body, undefined);
+	assert.equal(properties["http.response.body"], undefined);
+	assert.equal(properties.response_diagnostic, "[response body omitted]");
+	assert.equal((properties.long_message as string).length, 16_384);
+	assert.deepEqual(frames[0], {
+		filename: "https://assets.example/app.js",
+		function: "loadRepository",
+		code: "[SQL statement omitted]",
+	});
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private_column|secret_repository|private_table|private repository content|private response/,
+	);
 });
 
 void test("retains only safe HTTP origins when inventorying external scripts", () => {

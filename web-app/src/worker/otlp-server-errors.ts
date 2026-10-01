@@ -3,6 +3,26 @@ import {
 	repositoryOpenFailureMessage,
 } from "../lib/repository-open-telemetry.ts";
 
+const UUID =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const FIXED_EXCEPTION_TYPES = new Set([
+	"AggregateError",
+	"DOMException",
+	"Error",
+	"EvalError",
+	"LixBrowserError",
+	"LixOperationError",
+	"LixServerError",
+	"RangeError",
+	"ReferenceError",
+	"RepositorySnapshotDownloadError",
+	"SyntaxError",
+	"TypeError",
+	"URIError",
+]);
+const EXCEPTION_CLASS =
+	/^(?:[a-z][A-Za-z0-9_]{0,63}(?:::|\.)+)*[A-Z][A-Za-z0-9_]{0,63}$/;
+
 /** Project operation diagnostics at the authenticated gateway, never in HTTP errors. */
 export interface OtlpAttribute {
 	key?: string;
@@ -24,6 +44,7 @@ export interface OtlpSpan {
 	name?: string;
 	traceId?: Uint8Array;
 	spanId?: Uint8Array;
+	parentSpanId?: Uint8Array;
 	startTimeUnixNano?: { toString(): string };
 	status?: { code?: number };
 	attributes?: OtlpAttribute[];
@@ -55,21 +76,153 @@ function hex(bytes: Uint8Array): string {
 	);
 }
 
-/** Bound diagnostics and redact credentials that can occur in transport errors. */
+/** Keep only short, printable identifiers suitable for correlation metadata. */
+function boundedId(value: string | undefined): string | undefined {
+	return value &&
+		value.length <= 128 &&
+		/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(value)
+		? value
+		: undefined;
+}
+
+function safeUuid(value: string | undefined): string | undefined {
+	return value && UUID.test(value) ? value.toLowerCase() : undefined;
+}
+
+/** Exception types are class labels, never free-form diagnostics. */
+function safeExceptionType(
+	value: string | undefined,
+	fallback: string,
+): string {
+	if (
+		value &&
+		value.length <= 128 &&
+		(FIXED_EXCEPTION_TYPES.has(value) || EXCEPTION_CLASS.test(value))
+	)
+		return value;
+	return fallback;
+}
+
+function safeOperation(value: string | undefined): string {
+	if (!value || value.length > 128) return "unknown";
+	if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(value)) return value;
+	// Native spans use these fixed display names as `otel.name`. Normalize the
+	// protocol names and retain known SQL summaries without accepting free text.
+	switch (value) {
+		case "Lix protocol request":
+			return "lix.protocol.request";
+		case "Lix repository admission":
+			return "lix.repository.admission";
+		case "BATCH SELECT":
+		case "BATCH UPDATE":
+			return value;
+		default:
+			return "unknown";
+	}
+}
+
+function safeServiceName(value: string | undefined): string | undefined {
+	return value &&
+		value.length <= 128 &&
+		/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value)
+		? value
+		: undefined;
+}
+
+function safeHttpMethod(value: string | undefined): string | undefined {
+	return value &&
+		[
+			"GET",
+			"POST",
+			"PUT",
+			"PATCH",
+			"DELETE",
+			"HEAD",
+			"OPTIONS",
+			"CONNECT",
+			"TRACE",
+		].includes(value)
+		? value
+		: undefined;
+}
+
+/**
+ * Accept only a bounded path-shaped route template. Raw targets and query
+ * strings are intentionally ignored; route attributes must use `{parameter}`
+ * segments for dynamic values.
+ */
+function safeHttpRoute(value: string | undefined): string | undefined {
+	if (
+		!value ||
+		value.length > 256 ||
+		!value.startsWith("/") ||
+		!value.includes("{")
+	)
+		return undefined;
+	const segment = "(?:[a-z0-9_-]{1,31}|\\{\\*?[a-z][a-z0-9_]{0,31}\\})";
+	return new RegExp(`^/${segment}(?:/${segment})*$`).test(value)
+		? value
+		: undefined;
+}
+
+function safeHttpStatus(value: string | undefined): number | undefined {
+	return value && /^[1-5][0-9]{2}$/.test(value) ? Number(value) : undefined;
+}
+
+/** Bound diagnostic messages and omit common content-bearing payload forms. */
 function diagnostic(value: string): string {
-	return (
-		value
-			// ANSI styling is useful in Railway's console, not in captured exceptions.
-			// eslint-disable-next-line no-control-regex
-			.replace(/\x1b\[[0-9;]*m/g, "")
-			.replace(/\bBearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
-			.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
-			.replace(
-				/([?&](?:[^=\s&]*(?:token|secret|password|signature|credential|key)[^=\s&]*)=)[^\s&#"']*/gi,
-				"$1[REDACTED]",
-			)
-			.slice(0, 16_384)
+	let sanitized = value
+		// ANSI styling is useful in Railway's console, not in captured exceptions.
+		// eslint-disable-next-line no-control-regex
+		.replace(/\x1b\[[0-9;]*m/g, "")
+		.replace(/\bBearer\s+[^\s,;"']+/gi, "Bearer [REDACTED]")
+		.replace(/\bBasic\s+[A-Za-z0-9+/]+=*/gi, "Basic [REDACTED]")
+		.replace(/\blixray_pat_[A-Za-z0-9_-]+\b/gi, "[REDACTED_TOKEN]")
+		.replace(
+			/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
+			"[REDACTED_TOKEN]",
+		)
+		.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[REDACTED]@")
+		.replace(
+			/([?&](?:[^=\s&]*(?:token|secret|password|signature|credential|key)[^=\s&]*)=)[^\s&#"']*/gi,
+			"$1[REDACTED]",
+		)
+		.replace(
+			/\/@[^/\s]+\/[^/\s]+\/file(?:\/[^\s)"'<>]*)?/g,
+			"/repository/:repository/file/:file",
+		)
+		.replace(/\/@[^/\s]+\/[^/\s?#)]+/g, "/repository/:repository")
+		.replace(
+			/\/lix\/v1\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/snapshot/gi,
+			"/lix/v1/{lix_id}/snapshot",
+		);
+	const sql =
+		/\b(?:WITH\b[\s\S]*?\bSELECT\b[\s\S]*?\bFROM\b|SELECT\b[\s\S]*?\bFROM\b|INSERT\s+INTO\b|UPDATE\s+[\w."`]+\s+SET\b|DELETE\s+FROM\b|(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|SCHEMA)\b)/i.exec(
+			sanitized,
+		);
+	if (sql?.index !== undefined)
+		sanitized = `${sanitized.slice(0, sql.index)}[SQL statement omitted]`;
+	const responseBody = /(?:response\s+(?:body|text)|http\s+body)\s*[:=]/i.exec(
+		sanitized,
 	);
+	if (responseBody?.index !== undefined)
+		sanitized = `${sanitized.slice(0, responseBody.index)}[response body omitted]`;
+	const htmlBody = /<!doctype\s+html|<html\b|<body\b/i.exec(sanitized);
+	if (htmlBody?.index !== undefined)
+		sanitized = `${sanitized.slice(0, htmlBody.index)}[response body omitted]`;
+	if (
+		sanitized.trimStart().startsWith("{") ||
+		sanitized.trimStart().startsWith("[")
+	) {
+		try {
+			const parsed: unknown = JSON.parse(sanitized);
+			if (parsed && typeof parsed === "object")
+				sanitized = "[structured response body omitted]";
+		} catch {
+			// Keep ordinary diagnostics that happen to start with a brace.
+		}
+	}
+	return sanitized.slice(0, 16_384);
 }
 
 export async function serverErrorEvents(
@@ -77,6 +230,8 @@ export async function serverErrorEvents(
 	options: {
 		source?: "server" | "browser";
 		resourceAttributes?: OtlpAttribute[];
+		/** Verified by the authenticated browser route; span identity is untrusted. */
+		browserUserId?: string;
 	} = {},
 ) {
 	if (
@@ -94,6 +249,20 @@ export async function serverErrorEvents(
 	if (context["lix.error.owner"] === "diagnostic") return [];
 	const resource = attributes(options.resourceAttributes);
 	const source = options.source ?? "server";
+	const operation = safeOperation(span.name);
+	const errorId = safeUuid(context["exception.capture_id"]);
+	const serviceName =
+		safeServiceName(resource["service.name"]) ??
+		(source === "server" ? "lix-server" : "lix-browser");
+	const parentSpanId =
+		span.parentSpanId?.length === 8 && span.parentSpanId.some(Boolean)
+			? hex(span.parentSpanId)
+			: undefined;
+	const httpMethod = safeHttpMethod(
+		context["http.request.method"] ?? context["http.method"],
+	);
+	const httpRoute = safeHttpRoute(context["http.route"]);
+	const httpStatus = safeHttpStatus(context["http.response.status_code"]);
 	const candidateCode = context["lix.error.code"] ?? context["error.type"];
 	const failureCode =
 		candidateCode && /^LIX_[A-Z0-9_]{1,100}$/.test(candidateCode)
@@ -106,6 +275,15 @@ export async function serverErrorEvents(
 			payloadFailureReason: context["lix.payload.failure_reason"],
 		},
 	});
+	const snapshot = snapshotReproductionContext(span.name, context);
+	const snapshotStage =
+		typeof snapshot.failure_stage === "string"
+			? snapshot.failure_stage
+			: undefined;
+	const snapshotStatus = httpStatus?.toString();
+	const snapshotMessage = snapshotStage
+		? `Remote snapshot download failed (${snapshotStage}${snapshotStatus ? `, HTTP ${snapshotStatus}` : ""})`
+		: undefined;
 	const events = [...(span.events ?? [])];
 	const hasErrorEvent = events.some((event) => {
 		const fields = attributes(event.attributes);
@@ -120,15 +298,21 @@ export async function serverErrorEvents(
 			attributes: [
 				{
 					key: "exception.type",
-					value: { stringValue: failureCode ?? "LixOperationError" },
+					value: {
+						stringValue: snapshotMessage
+							? "RepositorySnapshotDownloadError"
+							: (failureCode ?? "LixOperationError"),
+					},
 				},
 				{
 					key: "exception.message",
 					value: {
-						stringValue: repositoryOpenFailureMessage(
-							{ details: migrationCause },
-							failureCode ?? "Lix operation failed",
-						),
+						stringValue:
+							snapshotMessage ??
+							repositoryOpenFailureMessage(
+								{ details: migrationCause },
+								failureCode ?? "Lix operation failed",
+							),
 					},
 				},
 			],
@@ -154,7 +338,6 @@ export async function serverErrorEvents(
 		["lix.migration.missing_field", "missingField"],
 		["lix.receipt.version", "receiptVersion"],
 		["lix.receipt.expected_version", "expectedReceiptVersion"],
-		["http.response.status_code", "httpStatus"],
 		["lix.recovery.attempts", "recoveryAttempts"],
 		["lix.recovery.stage", "recoveryStage"],
 		["lix.payload.standalone_status", "payloadStandaloneStatus"],
@@ -176,6 +359,7 @@ export async function serverErrorEvents(
 		["lix.payload.source_commit_id", "sourceCommitId"],
 	])
 		details[field!] = context[key!];
+	if (httpStatus !== undefined) details.httpStatus = httpStatus;
 	for (const [key, field] of [
 		["lix.error.retryable", "retryable"],
 		["lix.recovery.retry_exhausted", "admissionRetryExhausted"],
@@ -240,17 +424,22 @@ export async function serverErrorEvents(
 				} catch {
 					return null;
 				}
-				const lixId =
-					fields.lix_id ?? context["lix.id"] ?? context["lix.lix.id"];
-				const account = context["lix.account_id"];
+				const lixId = boundedId(
+					fields.lix_id ?? context["lix.id"] ?? context["lix.lix.id"],
+				);
+				const account =
+					source === "browser"
+						? safeUuid(options.browserUserId)
+						: context["lix.account_id"];
 				const value = diagnostic(message);
 				const summary = diagnostic(
 					fields.message ?? event.name ?? "Server error",
 				);
-				const type =
-					fields["exception.type"] ??
+				const type = safeExceptionType(
+					fields["exception.type"],
 					failureCode ??
-					(source === "server" ? "LixServerError" : "LixBrowserError");
+						(source === "server" ? "LixServerError" : "LixBrowserError"),
+				);
 				const digest = new Uint8Array(
 					await crypto.subtle.digest(
 						"SHA-256",
@@ -262,10 +451,11 @@ export async function serverErrorEvents(
 				digest[6] = (digest[6]! & 0x0f) | 0x80;
 				digest[8] = (digest[8]! & 0x3f) | 0x80;
 				const id = hex(digest.subarray(0, 16));
+				const eventId = `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
 				return {
 					event: "$exception",
 					distinct_id: account || `lix-${source}:${lixId ?? "system"}`,
-					uuid: `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`,
+					uuid: eventId,
 					timestamp,
 					properties: {
 						$exception_list: [
@@ -277,11 +467,13 @@ export async function serverErrorEvents(
 						$geoip_disable: true,
 						$otel_trace_id: traceId,
 						$otel_span_id: spanId,
+						...(parentSpanId ? { $otel_parent_span_id: parentSpanId } : {}),
 						$ai_trace_id: traceId,
 						$ai_span_id: spanId,
 						environment: "production",
 						source,
 						service: source === "server" ? "lix-server" : "lix-browser",
+						service_name: serviceName,
 						...structural,
 						...repositoryOpenDiagnostics({
 							details: {
@@ -289,17 +481,56 @@ export async function serverErrorEvents(
 								toVersion: fields.to_version,
 							},
 						}),
-						operation: span.name,
-						server_span_name: span.name,
+						operation,
+						error_id: errorId ?? eventId,
+						...(httpMethod ? { http_method: httpMethod } : {}),
+						...(httpRoute ? { http_route: httpRoute } : {}),
+						...snapshot,
+						server_span_name: operation,
 						server_log_message: summary,
 						server_error_detail: value,
 						...(lixId ? { lix_id: lixId, repository_id: lixId } : {}),
-						...(context["lix.request.id"]
-							? { request_id: context["lix.request.id"] }
+						...(boundedId(context["lix.request.id"])
+							? { request_id: boundedId(context["lix.request.id"]) }
 							: {}),
 					},
 				};
 			}),
 		)
 	).filter((event) => event !== null);
+}
+
+/** Application-owned fields sufficient to replay a download without its private bytes. */
+function snapshotReproductionContext(
+	name: string | undefined,
+	fields: Record<string, string>,
+): Record<string, unknown> {
+	if (
+		name !== "repository.snapshot.download" ||
+		fields["snapshot.action"] !== "download_remote_snapshot"
+	)
+		return {};
+	const repositoryId = boundedId(fields["lix.id"]);
+	const stage = fields["snapshot.failure_stage"];
+	const attempt = fields["snapshot.attempt_id"];
+	return {
+		reproduction: {
+			action: "download_remote_snapshot",
+			...(repositoryId ? { repository_id: repositoryId } : {}),
+			method: "GET",
+			endpoint: "/lix/v1/{lix_id}/snapshot",
+		},
+		lix_request_endpoint: "snapshot",
+		lix_request_method: "GET",
+		...([
+			"request_headers",
+			"request",
+			"http_response",
+			"response_body",
+			"download",
+		].includes(stage ?? "")
+			? { failure_stage: stage }
+			: {}),
+		...(safeUuid(attempt) ? { snapshot_attempt_id: safeUuid(attempt) } : {}),
+	};
 }

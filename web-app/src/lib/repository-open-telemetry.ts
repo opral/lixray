@@ -469,6 +469,7 @@ export async function reportRepositoryOpenFailure(
 	context: {
 		repositoryId: string;
 		release: string;
+		correlation?: Record<string, unknown>;
 		getAccessToken: () => Promise<string | null>;
 	},
 	fetcher: typeof fetch = fetch,
@@ -484,6 +485,7 @@ export async function reportRepositoryOpenFailure(
 			body: JSON.stringify({
 				repositoryId: context.repositoryId,
 				release: context.release,
+				...(context.correlation ? { correlation: context.correlation } : {}),
 				diagnostic: repositoryOpenDiagnostics(error),
 				frames: repositoryErrorFrames(error),
 			}),

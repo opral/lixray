@@ -1,4 +1,3 @@
-import { unzipSync, strFromU8 } from "fflate";
 import { readFile } from "node:fs/promises";
 import { expect, test } from "@playwright/test";
 
@@ -117,44 +116,39 @@ test("opening errors keep their diagnostic and can retry without lock recovery",
 	await expect(page.getByRole("status")).toHaveText("Opening repository");
 });
 
-test("reset requires acknowledgement and exports the incompatible local copy before recovery", async ({
+test("reset and its error stay in the main view without storage panels", async ({
 	page,
 }) => {
 	await page.goto("/recovery.html?mode=device-reset-error");
-	await page
-		.getByRole("button", { name: "Reset OPFS cache", exact: true })
-		.click();
-	const reset = page.getByRole("button", {
-		name: "Reset and reload from server",
-	});
-	await expect(reset).toBeDisabled();
-	await expect(page.getByText(/Changes that have not synced/)).toBeVisible();
-	const downloading = page.waitForEvent("download");
-	await page
-		.getByRole("button", { name: "Download local backup (ZIP)" })
-		.click();
-	const download = await downloading;
-	expect(download.suggestedFilename()).toBe("lix-saved-device-copy-1.zip");
-	const files = unzipSync(await readFile((await download.path())!));
-	expect(strFromU8(files["opfs/saved-data"]!)).toBe("unpublished fixture work");
-	await page.getByRole("checkbox").check();
-	await reset.click();
-	await expect(page.getByRole("alert")).toContainText("another tab owns");
-	await expect(page.getByText("Reset requests: 1")).toBeVisible();
+	const main = page.getByRole("main");
 	await expect(
-		page.getByRole("button", { name: "Download local backup (ZIP)" }),
+		main.getByRole("button", { name: "Reset from server", exact: true }),
+	).toBeVisible();
+	await expect(page.getByRole("complementary")).toHaveCount(0);
+	await expect(page.getByRole("checkbox")).toHaveCount(0);
+	await expect(page.getByText("Saved device copies")).toHaveCount(0);
+	await main
+		.getByRole("button", { name: "Reset from server", exact: true })
+		.click();
+	await expect(main).toContainText("another tab owns");
+	await expect(
+		main.getByRole("button", { name: "Reset from server", exact: true }),
 	).toBeEnabled();
 });
 test("successful reset reloads into the new replica flow", async ({ page }) => {
 	await page.goto("/recovery.html?mode=device-reset-success");
 	await page
-		.getByRole("button", { name: "Reset OPFS cache", exact: true })
-		.click();
-	await page.getByRole("checkbox").check();
-	await page
-		.getByRole("button", { name: "Reset and reload from server" })
+		.getByRole("main")
+		.getByRole("button", { name: "Reset from server", exact: true })
 		.click();
 	await expect(page.getByText("Fresh replica opening")).toBeVisible();
+});
+test("a healthy replica has no device recovery controls", async ({ page }) => {
+	await page.goto("/recovery.html?mode=device-reset-healthy");
+	await expect(
+		page.getByRole("button", { name: "Reset from server", exact: true }),
+	).toHaveCount(0);
+	await expect(page.getByRole("complementary")).toHaveCount(0);
 });
 
 test("protocol update action reloads the document instead of retrying the old client", async ({
