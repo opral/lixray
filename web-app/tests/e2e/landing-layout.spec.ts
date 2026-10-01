@@ -24,7 +24,7 @@ for (const width of [1440, 390, 320]) {
 			).toHaveAttribute("href", "/privacy");
 			await expect(
 				page.getByRole("img", {
-					name: /Claude proposes changes to a repository, checks pass, and the changes are accepted/,
+					name: /AI agents, apps, and services connect to one repository/,
 				}),
 			).toHaveCount(1);
 

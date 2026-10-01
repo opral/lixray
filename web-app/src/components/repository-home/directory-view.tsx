@@ -24,6 +24,8 @@ import {
 	Check,
 	ChevronDown,
 	Copy,
+	Database,
+	GitCompareArrows,
 	Globe2,
 	Link2,
 	LockKeyhole,
@@ -98,6 +100,13 @@ type DirectoryViewProps = {
 	readonly dirPath: string;
 	/** The pinned home shows the connect row. */
 	readonly isHome: boolean;
+	/**
+	 * The Library's Home: the repository's README and its control plane, with
+	 * no listing of files — the Library's Files section is the listing.
+	 */
+	readonly summary?: boolean;
+	/** Home: the Library's Recent row, placed under the status line. */
+	readonly recent?: ReactNode;
 	/** Mirrors the bundled Atelier Files extension's authoritative preference. */
 	readonly showHiddenFiles?: boolean;
 	/**
@@ -172,6 +181,8 @@ export function DirectoryView({
 	onOpenDiffFile,
 	dirPath,
 	isHome,
+	summary = false,
+	recent = null,
 	showHiddenFiles = false,
 	defaultFolders = NO_DEFAULT_FOLDERS,
 	onSetDefaultFolder,
@@ -607,10 +618,38 @@ export function DirectoryView({
 		);
 	}
 
+	// Connect an agent and Invite: in the rail, and above the stats when
+	// the rail folds into the page on a narrow screen.
+	const teamSection = detailsEnabled ? (
+		<>
+			{hasAgentConnected ? (
+				<ConnectAgentButton
+					connection={connection}
+					hasAgentConnected={hasAgentConnected}
+					disabled={readOnly}
+					className={RAIL_CHIP_CLASS}
+				/>
+			) : null}
+			{onOpenPeople ? (
+				<InviteControl
+					teamApi={teamApi}
+					onOpenPeople={onOpenPeople}
+					disabled={readOnly || !teamApi}
+					className={RAIL_CHIP_CLASS}
+				/>
+			) : null}
+		</>
+	) : null;
+
 	return (
 		<div
 			ref={newButtonRef}
-			className="@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
+			className={
+				summary
+					? // Embedded in the Library's Home, which scrolls and frames it.
+						"@container relative flex flex-col bg-panel font-sans text-fg"
+					: "@container relative flex h-full min-h-0 flex-col overflow-y-auto bg-panel font-sans text-fg"
+			}
 			{...dragHandlers}
 		>
 			{isDropTarget ? <DropImportOverlay /> : null}
@@ -618,9 +657,11 @@ export function DirectoryView({
 				className={
 					// Reserve space for the outboard checkboxes and selection toolbar,
 					// including when the app shell makes this panel narrower.
-					isHome
-						? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
-						: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
+					summary
+						? "flex flex-col"
+						: isHome
+							? "mx-auto grid w-[min(1020px,calc(100%-96px))] grid-cols-[minmax(0,1fr)_244px] gap-12 pt-10 pb-10 max-sm:w-[calc(100%-48px)] @max-[1100px]:grid-cols-1 @max-[1100px]:gap-8"
+							: "mx-auto flex w-[min(760px,calc(100%-96px))] flex-col pt-10 pb-10 max-sm:w-[calc(100%-48px)]"
 				}
 			>
 				<main
@@ -631,14 +672,48 @@ export function DirectoryView({
 						showGettingStarted ? "grid min-w-0 content-center" : "min-w-0"
 					}
 				>
-					{showGettingStarted ? null : (
-						<div className="flex items-center gap-2 pb-5">
-							<Breadcrumb
-								dirPath={dirPath}
-								onNavigate={(path, event) =>
-									onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
-								}
-							/>
+					{summary && !showGettingStarted ? (
+						<HomeStatusLine
+							data={controlPlaneData}
+							visibility={visibility}
+							connection={connection}
+							hasAgentConnected={hasAgentConnected}
+							readOnly={readOnly}
+							invite={
+								onOpenPeople && detailsEnabled ? (
+									<InviteControl
+										teamApi={teamApi}
+										onOpenPeople={onOpenPeople}
+										disabled={readOnly || !teamApi}
+										className={HOME_CHIP_CLASS}
+									/>
+								) : null
+							}
+							{...(onOpenChangesReview ? { onOpenChangesReview } : {})}
+							{...(onOpenHistory ? { onOpenHistory } : {})}
+							{...(onOpenSqlExplorer ? { onOpenSqlExplorer } : {})}
+							{...(onOpenSettings ? { onOpenSettings } : {})}
+						/>
+					) : null}
+					{summary && !showGettingStarted && recent ? (
+						<div className="pb-10">{recent}</div>
+					) : null}
+					{showGettingStarted || summary ? null : (
+						<div
+							className={`flex items-center gap-2 ${summary ? "pb-6" : "pb-5"}`}
+						>
+							{summary ? (
+								<h1 className="m-0 min-w-0 truncate text-[22px] leading-8 font-semibold tracking-[-0.01em] text-fg">
+									Home
+								</h1>
+							) : (
+								<Breadcrumb
+									dirPath={dirPath}
+									onNavigate={(path, event) =>
+										onOpenDir(path, { newTab: newTabFromMouseEvent(event) })
+									}
+								/>
+							)}
 							<span className="flex-1" />
 							<div
 								className={`flex shrink-0 items-center gap-2 transition-opacity${
@@ -692,7 +767,7 @@ export function DirectoryView({
 							hasAgentConnected={hasAgentConnected}
 							onCreateFile={(extension) => void createFile(extension)}
 						/>
-					) : (
+					) : summary ? null : (
 						<DirectoryFileList
 							key={`${dirPath}:${historicalCommitId ?? "live"}`}
 							lix={lix}
@@ -741,13 +816,46 @@ export function DirectoryView({
 							Importing files and folders…
 						</p>
 					) : null}
-					{isHome ? (
+					{isHome && !summary ? (
 						<RepositoryNarrowStats
 							fileCount={tree.files.length}
 							data={controlPlaneData}
 							onOpenSqlExplorer={onOpenSqlExplorer}
 							onOpenChangesReview={onOpenChangesReview}
 							onOpenHistory={onOpenHistory}
+							teamSection={teamSection}
+							embedded={summary}
+						/>
+					) : null}
+					{summary &&
+					!showGettingStarted &&
+					!listing.readmePath &&
+					!readOnly &&
+					!viewingHistory ? (
+						<AddReadmeCard
+							onCreate={() =>
+								void (async () => {
+									try {
+										setActionError(null);
+										await lix.execute(
+											"INSERT INTO lix_file (path, content) VALUES ($1, $2)",
+											[
+												"/README.md",
+												new TextEncoder().encode(
+													"# README\n\nWhat this repository is for, and how it is organised.\n",
+												),
+											],
+										);
+										onOpenFile("/README.md", { newTab: true });
+									} catch (error) {
+										console.error(
+											"repository-home: unable to create README",
+											error,
+										);
+										setActionError("Couldn’t create the README.");
+									}
+								})()
+							}
 						/>
 					) : null}
 					{listing.readmePath && readme !== null && !viewingHistory ? (
@@ -759,6 +867,7 @@ export function DirectoryView({
 							}`}
 						>
 							<ReadmePreview
+								section={summary}
 								lix={lix}
 								sourceFilePath={listing.readmePath}
 								fileId={
@@ -895,8 +1004,9 @@ export function DirectoryView({
 						/>
 					) : null}
 				</main>
-				{isHome ? (
+				{isHome && !summary ? (
 					<RepositoryControlPlaneRail
+						embedded={summary}
 						reviewFocus={reviewFocus}
 						visibility={visibility}
 						fileCount={tree.files.length}
@@ -905,28 +1015,7 @@ export function DirectoryView({
 						onOpenSqlExplorer={onOpenSqlExplorer}
 						onOpenChangesReview={onOpenChangesReview}
 						onOpenHistory={onOpenHistory}
-						teamSection={
-							detailsEnabled ? (
-								<>
-									{hasAgentConnected ? (
-										<ConnectAgentButton
-											connection={connection}
-											hasAgentConnected={hasAgentConnected}
-											disabled={readOnly}
-											className={RAIL_CHIP_CLASS}
-										/>
-									) : null}
-									{onOpenPeople ? (
-										<InviteControl
-											teamApi={teamApi}
-											onOpenPeople={onOpenPeople}
-											disabled={readOnly || !teamApi}
-											className={RAIL_CHIP_CLASS}
-										/>
-									) : null}
-								</>
-							) : null
-						}
+						teamSection={teamSection}
 					/>
 				) : null}
 			</div>
@@ -979,9 +1068,12 @@ function RepositoryControlPlaneRail({
 	onOpenChangesReview,
 	onOpenHistory,
 	teamSection,
+	embedded = false,
 }: {
 	/** Review focus: sections other than Changes recede with the page. */
 	readonly reviewFocus?: boolean;
+	/** In the Library's narrower column: folds into the page at 820px. */
+	readonly embedded?: boolean;
 	readonly visibility: "private" | "public";
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
@@ -997,7 +1089,11 @@ function RepositoryControlPlaneRail({
 	return (
 		<aside
 			aria-label="Repository overview"
-			className="min-w-0 @max-[1100px]:hidden"
+			className={
+				embedded
+					? "min-w-0 @max-[820px]:hidden"
+					: "min-w-0 @max-[1100px]:hidden"
+			}
 		>
 			{teamSection ? (
 				<section className={`border-b border-border pb-7${mutedSection}`}>
@@ -1054,7 +1150,7 @@ function RepositoryControlPlaneRail({
 			</section>
 
 			<section
-				className={`border-b border-border py-7 @max-[1100px]:border-t-0${mutedSection}`}
+				className={`border-b border-border py-7 ${embedded ? "@max-[820px]:border-t-0" : "@max-[1100px]:border-t-0"}${mutedSection}`}
 			>
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
@@ -1090,18 +1186,30 @@ function RepositoryNarrowStats({
 	onOpenSqlExplorer,
 	onOpenChangesReview,
 	onOpenHistory,
+	teamSection,
+	embedded = false,
 }: {
+	readonly embedded?: boolean;
 	readonly fileCount: number;
 	readonly data: RepositoryControlPlaneData | null;
 	readonly onOpenSqlExplorer?: () => void;
 	readonly onOpenChangesReview?: () => void;
 	readonly onOpenHistory?: () => void;
+	readonly teamSection?: ReactNode;
 }) {
 	return (
 		<aside
 			aria-label="Repository statistics"
-			className="mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border px-3 pt-7 @max-[1100px]:grid @max-[640px]:grid-cols-1"
+			className={`mt-7 hidden min-w-0 grid-cols-2 gap-8 border-t border-border px-3 pt-7 @max-[640px]:grid-cols-1 ${
+				embedded ? "@max-[820px]:grid" : "@max-[1100px]:grid"
+			}`}
 		>
+			{teamSection ? (
+				<section className="col-span-full min-w-0">
+					<RailHeading>Team & agents</RailHeading>
+					<div className="mt-2.5 flex flex-wrap gap-2">{teamSection}</div>
+				</section>
+			) : null}
 			<section className="min-w-0">
 				<RailHeading>Changes</RailHeading>
 				{data?.changeHistoryUnavailable ? (
@@ -1660,6 +1768,171 @@ function DropImportOverlay() {
 	);
 }
 
+/** Home's status chips: quiet, rounded, one line of them. */
+const HOME_CHIP_CLASS =
+	"h-7 gap-1.5 rounded-full border border-border bg-panel px-2.5 text-[12px] font-medium text-fg-muted shadow-none hover:bg-bg-hover hover:text-fg [&_img]:size-3 [&_svg]:size-3.5";
+
+/**
+ * Home's one line about the repository: whether an agent is connected, what
+ * has changed since the last checkpoint, the database, who can see it, and
+ * Invite. Each chip is the way into that part of the product.
+ */
+function HomeStatusLine({
+	data,
+	visibility,
+	connection,
+	hasAgentConnected,
+	readOnly,
+	invite,
+	onOpenChangesReview,
+	onOpenHistory,
+	onOpenSqlExplorer,
+	onOpenSettings,
+}: {
+	readonly data: RepositoryControlPlaneData | null;
+	readonly visibility: "private" | "public";
+	readonly connection: Omit<LixConnectionPromptInput, "origin">;
+	readonly hasAgentConnected: (() => Promise<boolean>) | null;
+	readonly readOnly: boolean;
+	readonly invite: ReactNode;
+	readonly onOpenChangesReview?: () => void;
+	readonly onOpenHistory?: () => void;
+	readonly onOpenSqlExplorer?: () => void;
+	readonly onOpenSettings?: () => void;
+}) {
+	const [agentConnected, setAgentConnected] = useState<boolean | null>(null);
+	const [dialogOpen, setDialogOpen] = useState(false);
+	useEffect(() => {
+		if (!hasAgentConnected) return;
+		let disposed = false;
+		hasAgentConnected()
+			.then((connected) => {
+				if (!disposed) setAgentConnected(connected);
+			})
+			.catch(() => {
+				if (!disposed) setAgentConnected(false);
+			});
+		return () => {
+			disposed = true;
+		};
+	}, [hasAgentConnected, dialogOpen]);
+	const changed = data?.workingFileCount ?? null;
+	return (
+		<div
+			className="flex flex-wrap items-center gap-2 pb-8"
+			data-testid="home-status-line"
+		>
+			{hasAgentConnected && !readOnly ? (
+				<>
+					<Button
+						type="button"
+						variant="outline"
+						className={HOME_CHIP_CLASS}
+						onClick={() => setDialogOpen(true)}
+					>
+						{agentConnected ? (
+							<>
+								<span
+									aria-hidden="true"
+									className="size-1.5 rounded-full bg-success"
+								/>
+								Agent connected
+							</>
+						) : (
+							<>
+								<span className="flex items-center gap-1" aria-hidden="true">
+									<img src="/landing/claude-spark.svg" alt="" />
+									<img src="/landing/brand-openai.svg" alt="" />
+									<img src="/landing/brand-gemini.svg" alt="" />
+								</span>
+								Connect an agent
+							</>
+						)}
+					</Button>
+					<AgentConnectionDialog
+						connection={connection}
+						hasAgentConnected={hasAgentConnected}
+						open={dialogOpen}
+						onOpenChange={setDialogOpen}
+					/>
+				</>
+			) : null}
+			{changed !== null && changed > 0 && onOpenChangesReview ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenChangesReview}
+				>
+					<GitCompareArrows aria-hidden="true" />
+					{changed} {changed === 1 ? "change" : "changes"}
+					<span className="text-link">Review</span>
+				</Button>
+			) : changed === 0 && onOpenHistory ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenHistory}
+				>
+					<Check aria-hidden="true" />
+					All checkpointed
+				</Button>
+			) : null}
+			{data?.tableCount != null && onOpenSqlExplorer ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenSqlExplorer}
+				>
+					<Database aria-hidden="true" />
+					Database
+					<span className="text-fg-subtle">
+						{data.tableCount} {data.tableCount === 1 ? "table" : "tables"}
+					</span>
+				</Button>
+			) : null}
+			{onOpenSettings ? (
+				<Button
+					type="button"
+					variant="outline"
+					className={HOME_CHIP_CLASS}
+					onClick={onOpenSettings}
+					title="Visibility and settings"
+				>
+					{visibility === "public" ? (
+						<Globe2 aria-hidden="true" />
+					) : (
+						<LockKeyhole aria-hidden="true" />
+					)}
+					{visibility === "public" ? "Public" : "Private"}
+				</Button>
+			) : null}
+			{invite}
+		</div>
+	);
+}
+
+/** Home without a README: the one thing that would make it useful. */
+function AddReadmeCard({ onCreate }: { readonly onCreate: () => void }) {
+	return (
+		<div
+			data-testid="home-add-readme"
+			className="flex flex-col items-start gap-3 rounded-xl border border-dashed border-border px-6 py-8"
+		>
+			<p className="m-0 text-[14px] font-semibold text-fg">Add a README</p>
+			<p className="m-0 max-w-md text-[13px] leading-relaxed text-fg-subtle">
+				Say what this repository is for and how it is organised. Your team, and
+				the agents you connect, read it first.
+			</p>
+			<Button variant="outline" onClick={onCreate}>
+				Write README
+			</Button>
+		</div>
+	);
+}
+
 function ReadmePreview({
 	lix,
 	sourceFilePath,
@@ -1670,7 +1943,10 @@ function ReadmePreview({
 	onOpen,
 	onOpenLinkedFile,
 	onNavigate,
+	section = false,
 }: {
+	/** Home: a "README" heading like the page's other sections, Edit beside it. */
+	readonly section?: boolean;
 	readonly lix: Lix;
 	readonly sourceFilePath: string;
 	readonly fileId: string | null;
@@ -1704,30 +1980,49 @@ function ReadmePreview({
 		<section
 			aria-label={`${fileName} preview`}
 			data-testid="home-readme-preview"
-			className="mt-7 border-t border-border"
+			className={section ? "" : "mt-7 border-t border-border"}
 		>
-			<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-fg-subtle">
-				<img
-					src={fileIconUrl(fileName)}
-					alt=""
-					draggable={false}
-					className="size-[19px] shrink-0"
-				/>
-				<span className="min-w-0 flex-1 truncate" title={fileName}>
-					{fileName}
-				</span>
-				<button
-					type="button"
-					data-testid="home-readme-edit"
-					aria-label={`Edit ${fileName}`}
-					title={`Edit ${fileName}`}
-					onClick={(event) => onOpen(event)}
-					className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
-				>
-					<PencilLine aria-hidden="true" className="size-3.5" />
-					Edit
-				</button>
-			</div>
+			{section ? (
+				<div className="flex items-center gap-1 pb-3">
+					<h2 className="m-0 text-[13px] font-semibold text-fg-muted">
+						Readme
+					</h2>
+					<button
+						type="button"
+						data-testid="home-readme-edit"
+						aria-label={`Edit ${fileName}`}
+						title={`Edit ${fileName}`}
+						// On Home, the README opens beside the Library tab.
+						onClick={(event) => onOpen(event, { newTab: true })}
+						className="grid size-6 place-items-center rounded-md text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					>
+						<PencilLine aria-hidden="true" className="size-3.5" />
+					</button>
+				</div>
+			) : (
+				<div className="flex h-11 items-center gap-3 px-3 text-xs font-medium text-fg-subtle">
+					<img
+						src={fileIconUrl(fileName)}
+						alt=""
+						draggable={false}
+						className="size-[19px] shrink-0"
+					/>
+					<span className="min-w-0 flex-1 truncate" title={fileName}>
+						{fileName}
+					</span>
+					<button
+						type="button"
+						data-testid="home-readme-edit"
+						aria-label={`Edit ${fileName}`}
+						title={`Edit ${fileName}`}
+						onClick={(event) => onOpen(event)}
+						className="-mr-2 flex h-7 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium text-fg-subtle hover:bg-bg-hover hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					>
+						<PencilLine aria-hidden="true" className="size-3.5" />
+						Edit
+					</button>
+				</div>
+			)}
 			{/* Relative README links navigate the tab in place (rule 3) instead
 			    of escaping to a full page load. */}
 			{/* Click delegation only augments the anchors inside, which stay
@@ -1745,7 +2040,7 @@ function ReadmePreview({
 						event.preventDefault();
 					}
 				}}
-				className="px-3 pt-2 pb-9"
+				className={section ? "pb-9" : "px-3 pt-2 pb-9"}
 			>
 				{/* Quick Look: the extension that owns the file type renders
 				    the preview — and during a review, the diff — so every
@@ -1990,7 +2285,7 @@ function GettingStartedIllustration() {
  * home listing would be: connect an agent, start a document yourself, or
  * drop files anywhere to import.
  */
-function GettingStarted({
+export function GettingStarted({
 	connection,
 	hasAgentConnected,
 	onCreateFile,
