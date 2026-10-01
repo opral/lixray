@@ -1024,6 +1024,7 @@ export async function handleRequest(
 						posthogHost: env.POSTHOG_HOST,
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
+						serverRelease: env.LIXRAY_RELEASE_ID,
 						onPosthogFlush,
 					}),
 					requestId,

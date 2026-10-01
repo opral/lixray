@@ -5,7 +5,7 @@ import {
 	WorkerLixRuntimeClient,
 	type WorkerLixRuntimeEnv,
 } from "./runtime-client.ts";
-import { isLixError } from "./lix-service.ts";
+import { isLixError, mcpLocalAdapterFailureStage } from "./lix-service.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -151,6 +151,45 @@ void test("active branch, switch, and execution use one serialized Lix session",
 	});
 	await runtime.execute(LIX_ID, { sql: "SELECT 1" });
 	assert.deepEqual(operations, ["active-branch", "switch:main", "execute"]);
+});
+
+void test("unsupported SDK result values carry an internal adapter failure origin", async () => {
+	const runtime = client(async (_lixId, request) => {
+		if (testProtocolPath(request) === "/lix/v1/")
+			return branchProtocolResponse(request);
+		return Response.json({
+			columns: [{ name: "row_ref", type: "row_ref" }],
+			rows: [
+				[
+					{
+						kind: "row_ref",
+						value: "lix_row_ref:v2:AAAADWxpeF9rZXlfdmFsdWUAAAEDAAAABWhlbGxv",
+					},
+				],
+			],
+			rowsAffected: 1,
+			notices: [],
+		});
+	});
+
+	await assert.rejects(
+		runtime.execute(LIX_ID, {
+			sql: "SELECT * FROM lix_history('lix_file') LIMIT 1",
+		}),
+		(error: unknown) => {
+			assert.equal(isLixError(error), true);
+			assert.equal(
+				mcpLocalAdapterFailureStage(error),
+				"sdk_result_encoding",
+				`${(error as Error).name}: ${(error as Error).message}`,
+			);
+			assert.equal(
+				(error as Error).message,
+				"Lix returned an invalid row_ref value.",
+			);
+			return true;
+		},
+	);
 });
 
 void test("executeBatch uses the canonical atomic endpoint", async () => {

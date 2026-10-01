@@ -22,6 +22,7 @@ import {
 	type CommitSpan,
 	createLixError,
 	isLixError,
+	markMcpLocalAdapterFailure,
 	type LixError,
 	type LixRuntimeClient,
 	type LixSummary,
@@ -708,17 +709,20 @@ function encodeLixValue(
 			return { kind: "json", value };
 		case "blob": {
 			if (!(value instanceof Uint8Array)) {
-				throw createLixError(
-					"upstream_error",
-					"Lix returned an invalid blob value.",
+				throw markMcpLocalAdapterFailure(
+					createLixError(
+						"upstream_error",
+						"Lix returned an invalid blob value.",
+					),
+					"sdk_result_encoding",
 				);
 			}
 			return { kind: "blob", base64: bytesToBase64(value) };
 		}
 	}
-	throw createLixError(
-		"upstream_error",
-		`Lix returned an invalid ${type} value.`,
+	throw markMcpLocalAdapterFailure(
+		createLixError("upstream_error", `Lix returned an invalid ${type} value.`),
+		"sdk_result_encoding",
 	);
 }
 
