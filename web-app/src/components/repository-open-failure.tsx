@@ -1,19 +1,23 @@
+import type { ReactNode } from "react";
+
 export function RepositoryOpenFailure({
 	message,
 	storageBusy,
 	resetInProgress,
 	reloadRequired,
 	onRetry,
+	children,
 }: {
 	message: string;
 	storageBusy: boolean;
 	resetInProgress: boolean;
 	reloadRequired: boolean;
 	onRetry: () => void;
+	children?: ReactNode;
 }) {
 	const onAction = reloadRequired ? () => window.location.reload() : onRetry;
 	return (
-		<main className="absolute inset-0 grid place-content-center bg-bg p-6 text-center text-fg-muted">
+		<main className="absolute inset-0 grid place-content-center overflow-auto bg-bg p-6 text-center text-fg-muted">
 			<div
 				className="grid justify-items-center gap-2 [&_span]:max-w-[640px] [&_span]:text-fg-subtle"
 				role="alert"
@@ -21,7 +25,7 @@ export function RepositoryOpenFailure({
 				<strong>
 					{storageBusy
 						? "Repository is already open"
-						: "Unable to open Atelier"}
+						: "Unable to open repository"}
 				</strong>
 				<span className="whitespace-pre-wrap break-words">
 					{storageBusy
@@ -41,6 +45,7 @@ export function RepositoryOpenFailure({
 							: "Retry"}
 				</button>
 			</div>
+			{children}
 		</main>
 	);
 }

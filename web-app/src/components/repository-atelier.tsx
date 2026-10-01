@@ -1,4 +1,5 @@
 import { repositoryOpenTrace } from "~/lib/repository-open-performance";
+import { exceptionTraceability } from "~/lib/exception-traceability";
 import { reportRepositoryOpenFailure } from "~/lib/repository-open-telemetry";
 import { createRepositoryRouteLifecycle } from "~/lib/repository-route-lifecycle";
 import { RepositoryUpgradeProgress } from "./repository-upgrade-progress";
@@ -98,18 +99,19 @@ import {
 	type RepositoryMigrationState,
 	type RepositoryLixSession,
 	resetRepositoryLocalReplica,
+	downloadRepositoryRemoteSnapshot,
 } from "~/lib/repository-lix-session";
 import { buildRepositoryReproduction } from "~/lib/repository-reproduction";
+import { downloadRepositorySnapshot } from "~/lib/repository-snapshot-telemetry";
 import { createRepositoryDebugRemote } from "~/lib/repository-debug-remote";
 import {
 	formatRepositoryOpenError,
 	isRepositoryStorageInUse,
+	isRepositoryLocalReplicaBroken,
 	REPOSITORY_CLIENT_UPDATE_MESSAGE,
 } from "~/lib/repository-open-error";
 import { RepositoryOpenFailure } from "./repository-open-failure";
-import { ReplicaRecovery } from "./replica-recovery";
 import { DeviceReplicaRecovery } from "./device-replica-recovery";
-import { DeviceStorageProtection } from "./device-storage-protection";
 import {
 	LIXRAY_DIR_EXTENSION_ID,
 	LIXRAY_HOME_EXTENSION_ID,
@@ -278,6 +280,7 @@ export function RepositoryAtelier({
 	>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [storageBusy, setStorageBusy] = useState(false);
+	const [localReplicaBroken, setLocalReplicaBroken] = useState(false);
 	const [resetInProgress, setResetInProgress] = useState(false);
 	const [openAttempt, setOpenAttempt] = useState(0);
 	const [migration, setMigration] = useState<RepositoryMigrationState | null>(
@@ -1282,6 +1285,7 @@ export function RepositoryAtelier({
 		setRepositoryDefaultBranchId(null);
 		setError(null);
 		setStorageBusy(false);
+		setLocalReplicaBroken(false);
 		setMigration(null);
 		routeSyncedRef.current = false;
 
@@ -1501,7 +1505,19 @@ export function RepositoryAtelier({
 						() => session.activeBranchSnapshot(),
 					);
 					const getDebugRemoteLix = () => debugRemoteSession!.selectedBranch();
-					const getDebugRemoteSnapshot = () => debugRemoteSession!.snapshot();
+					const getDebugRemoteSnapshot = () =>
+						downloadRepositorySnapshot(
+							() =>
+								downloadRepositoryRemoteSnapshot({
+									namespace,
+									repositorySlug,
+									repositoryId,
+									authIdentity: atelierAccountId,
+									getAccessToken,
+									refreshAccessToken,
+								}),
+							repositoryId,
+						);
 					const repositoryConnection = {
 						lixId: repositoryId,
 						namespace,
@@ -1559,7 +1575,8 @@ export function RepositoryAtelier({
 						}),
 						debug: {
 							remoteLix: getDebugRemoteLix,
-							remoteSnapshot: getDebugRemoteSnapshot,
+							remoteSnapshot:
+								canEdit && !publicPath ? getDebugRemoteSnapshot : undefined,
 							snapshotName: `${namespace}-${repositorySlug}`,
 							createReproduction: ({ query, diffCsv }) =>
 								buildRepositoryReproduction({
@@ -1633,14 +1650,17 @@ export function RepositoryAtelier({
 								: undefined;
 						if (failedFileId) fileOpenTrace.failed(failedFileId);
 						setMigration(null);
-						captureExceptionTelemetry(caught, {
+						const failureCorrelation = exceptionTraceability({
 							operation: "repository_open",
 							lix_id: repositoryId,
 							namespace_id: namespace,
 						});
+						captureExceptionTelemetry(caught, failureCorrelation);
 						setStorageBusy(isRepositoryStorageInUse(caught));
+						setLocalReplicaBroken(isRepositoryLocalReplicaBroken(caught));
 						void reportRepositoryOpenFailure(caught, {
 							repositoryId,
+							correlation: failureCorrelation,
 							release: import.meta.env.VITE_LIXRAY_RELEASE_ID ?? "unknown",
 							getAccessToken,
 						});
@@ -1822,12 +1842,6 @@ export function RepositoryAtelier({
 												/>
 											</div>
 											<Outlet />
-											{shellProps.lix ? (
-												<ReplicaRecovery lix={shellProps.lix} />
-											) : null}
-											{shellProps.lix && canEdit && !publicPath ? (
-												<DeviceStorageProtection lix={shellProps.lix} />
-											) : null}
 										</RepositoryFileOpenTraceContext.Provider>
 									</RepositoryAtelierContext.Provider>
 								</RepositoryShellNavigationContext.Provider>
@@ -1856,34 +1870,36 @@ export function RepositoryAtelier({
 					onRetry={() => {
 						setError(null);
 						setStorageBusy(false);
+						setLocalReplicaBroken(false);
 						setOpenAttempt((attempt) => attempt + 1);
 					}}
-				/>
-			) : null}
-			{canEdit && !publicPath && atelierAccountId ? (
-				<DeviceReplicaRecovery
-					repositoryId={repositoryId}
-					authIdentity={atelierAccountId}
-					openingFailed={error !== null}
-					resetAvailable={error !== REPOSITORY_CLIENT_UPDATE_MESSAGE}
-					onReset={async (expectedStorageName, signal) => {
-						setResetInProgress(true);
-						try {
-							return await resetRepositoryLocalReplica({
-								repositoryId,
-								namespace,
-								repositorySlug,
-								authIdentity: atelierAccountId,
-								getAccessToken,
-								refreshAccessToken,
-								expectedStorageName,
-								signal,
-							});
-						} finally {
-							setResetInProgress(false);
-						}
-					}}
-				/>
+				>
+					{canEdit && !publicPath && atelierAccountId && localReplicaBroken ? (
+						<DeviceReplicaRecovery
+							repositoryId={repositoryId}
+							authIdentity={atelierAccountId}
+							openingFailed={error !== null}
+							resetAvailable={error !== REPOSITORY_CLIENT_UPDATE_MESSAGE}
+							onReset={async (expectedStorageName, signal) => {
+								setResetInProgress(true);
+								try {
+									return await resetRepositoryLocalReplica({
+										repositoryId,
+										namespace,
+										repositorySlug,
+										authIdentity: atelierAccountId,
+										getAccessToken,
+										refreshAccessToken,
+										expectedStorageName,
+										signal,
+									});
+								} finally {
+									setResetInProgress(false);
+								}
+							}}
+						/>
+					) : null}
+				</RepositoryOpenFailure>
 			) : null}
 		</div>
 	);

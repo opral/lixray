@@ -329,6 +329,8 @@ jobs:
         run: pnpm --dir web-app test:published
       - name: Test device recovery and directory review controls
         run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts
+      - name: Test snapshot download and PostHog reproduction telemetry
+        run: pnpm --dir web-app test:snapshot-telemetry
       - uses: actions/upload-artifact@v4
         if: failure()
         with:

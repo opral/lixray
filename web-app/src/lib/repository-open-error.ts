@@ -1,6 +1,13 @@
 export const REPOSITORY_CLIENT_UPDATE_MESSAGE =
 	"LixRay has been updated. Save any unsaved edits, then reload this tab to continue syncing.";
 
+export function isRepositoryLocalReplicaBroken(caught: unknown): boolean {
+	return [
+		"LIX_PARTIAL_INTEREST_JOURNAL_INVALID",
+		"LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED",
+	].includes(getErrorCode(caught) ?? "");
+}
+
 export function isRepositoryStorageInUse(caught: unknown): boolean {
 	return getErrorCode(caught) === "LIX_STORAGE_IN_USE";
 }
@@ -8,8 +15,8 @@ export function isRepositoryStorageInUse(caught: unknown): boolean {
 export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
-	if (code === "LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED") {
-		return "Saved device changes need recovery before this copy can be upgraded. Download the saved device copy and contact support. Your original copy has been preserved; do not clear browser storage.";
+	if (isRepositoryLocalReplicaBroken(caught)) {
+		return "This device copy could not be opened. Reset from server to load a fresh copy.";
 	}
 
 	if (

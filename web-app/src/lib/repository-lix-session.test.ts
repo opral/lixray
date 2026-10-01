@@ -146,6 +146,7 @@ void test("captures a terminal request failure as one structured exception", asy
 	assert.deepEqual(captured[0].properties, {
 		operation: "repository_request",
 		lix_request_endpoint: "sync",
+		http_route: "/lix/v1/{lix_id}/sync/pull",
 		lix_request_method: "GET",
 		lix_http_status: 410,
 		lix_error_code: "LIX_ERROR_PROTOCOL_SESSION_GONE",

@@ -39,7 +39,7 @@ function span(name = "lix.repository.opened", account = "account-123") {
 		],
 	};
 }
-function encode(spans: object[]) {
+function encode(spans: object[], resourceAttributes: object[] = []) {
 	return codec
 		.encode(
 			codec.fromObject({
@@ -48,6 +48,7 @@ function encode(spans: object[]) {
 						resource: {
 							attributes: [
 								{ key: "service.name", value: { stringValue: "lix-server" } },
+								...resourceAttributes,
 							],
 						},
 						scopeSpans: [{ spans }],
@@ -231,6 +232,8 @@ void test("server error logs become exceptions with diagnostics, correlation and
 	);
 	assert.equal(captured.properties.$otel_trace_id, "01".repeat(16));
 	assert.equal(captured.properties.$otel_span_id, "02".repeat(8));
+	assert.equal(captured.properties.error_id, captured.uuid);
+	assert.equal(captured.properties.service_name, "lix-server");
 	assert.equal(captured.properties.fromVersion, 78);
 	assert.equal(captured.properties.toVersion, 79);
 	assert.equal(captured.properties.repository_id, "lix-123");
@@ -558,6 +561,170 @@ void test("status-only admission failures reach PostHog with code, versions, HTT
 	assert.equal(props.request_id, "request-123");
 	assert.equal(props.$otel_trace_id, "01".repeat(16));
 	assert.doesNotMatch(JSON.stringify(props), /must-not-project/);
+});
+
+void test("non-snapshot HTTP errors include safe request and trace context", async () => {
+	const body = encode(
+		[
+			{
+				...span("lix.protocol.request"),
+				parentSpanId: Array(8).fill(3),
+				status: { code: 2 },
+				attributes: [
+					...span().attributes,
+					{ key: "http.request.method", value: { stringValue: "GET" } },
+					{
+						key: "http.route",
+						value: { stringValue: "/lix/v1/{lix_id}/branches" },
+					},
+					{ key: "http.response.status_code", value: { intValue: 404 } },
+					{ key: "lix.request.id", value: { stringValue: "request-404" } },
+					{
+						key: "exception.capture_id",
+						value: {
+							stringValue: "11111111-1111-4111-8111-111111111111",
+						},
+					},
+					{
+						key: "http.target",
+						value: {
+							stringValue:
+								"/lix/v1/private-repository/snapshot?token=private-token",
+						},
+					},
+					{
+						key: "http.response.body",
+						value: { stringValue: "private response body" },
+					},
+					{
+						key: "db.statement",
+						value: { stringValue: "SELECT private data" },
+					},
+				],
+			},
+		],
+		[
+			{ key: "service.name", value: { stringValue: "lixray-api" } },
+			{
+				key: "vcs.ref.head.revision",
+				value: { stringValue: "a".repeat(40) },
+			},
+		],
+	);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.operation, "lix.protocol.request");
+	assert.equal(properties.http_method, "GET");
+	assert.equal(properties.http_route, "/lix/v1/{lix_id}/branches");
+	assert.equal(properties.httpStatus, 404);
+	assert.equal(properties.request_id, "request-404");
+	assert.equal(properties.server_release, "a".repeat(40));
+	assert.equal(properties.service_name, "lixray-api");
+	assert.equal(properties.$otel_trace_id, "01".repeat(16));
+	assert.equal(properties.$otel_span_id, "02".repeat(8));
+	assert.equal(properties.$otel_parent_span_id, "03".repeat(8));
+	assert.equal(properties.error_id, "11111111-1111-4111-8111-111111111111");
+	assert.equal(properties.reproduction, undefined);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private-repository|private-token|private response body|SELECT private data|http.target/,
+	);
+});
+
+void test("non-HTTP errors keep their operation and reject unsafe replay metadata", async () => {
+	const rawRoute = "/lix/v1/private-repository/snapshot?token=private-token";
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			parentSpanId: new Uint8Array(8),
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "StorageError" } },
+						{
+							key: "exception.message",
+							value: {
+								stringValue:
+									"Database failed: SELECT secret FROM private_repository",
+							},
+						},
+						{
+							key: "exception.stacktrace",
+							value: {
+								stringValue: "stack vars contained private document text",
+							},
+						},
+						{
+							key: "http.response.body",
+							value: { stringValue: "private response body" },
+						},
+						{
+							key: "db.statement",
+							value: { stringValue: "SELECT * FROM private_table" },
+						},
+					],
+				},
+			],
+			attributes: [
+				...span().attributes,
+				{
+					key: "exception.capture_id",
+					value: { stringValue: "11111111--1111-4111-8111-111111111111" },
+				},
+				{
+					key: "http.request.method",
+					value: { stringValue: "GET\nBearer secret" },
+				},
+				{ key: "http.route", value: { stringValue: rawRoute } },
+				{
+					key: "lix.request.id",
+					value: { stringValue: `repository-content-${"x".repeat(200)}` },
+				},
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.operation, "lix.repository.open");
+	assert.equal(properties.http_method, undefined);
+	assert.equal(properties.http_route, undefined);
+	assert.equal(properties.httpStatus, undefined);
+	assert.equal(properties.request_id, undefined);
+	assert.equal(properties.$otel_parent_span_id, undefined);
+	assert.equal(properties.error_id, batch!.batch[0]!.uuid);
+	assert.equal(properties.reproduction, undefined);
+	assert.deepEqual(properties.$exception_list, [
+		{
+			type: "StorageError",
+			value: "Database failed: [SQL statement omitted]",
+			mechanism: { type: "generic", handled: true },
+		},
+	]);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private-repository|private-token|repository-content|Bearer secret|private response body|private document text|SELECT|private_repository|private_table/,
+	);
 });
 
 void test("read fulfillment validation details reach PostHog without request content", async () => {

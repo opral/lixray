@@ -53,16 +53,26 @@ const SENSITIVE_DOM_ATTRIBUTE_KEYS = new Set([
 const SENSITIVE_EVENT_PROPERTY_KEYS = new Set([
 	"access_token",
 	"authorization",
+	"db.statement",
 	"document_content",
 	"file_content",
 	"file_name",
 	"file_path",
+	"http.response.body",
+	"http.response_body",
+	"httpresponsebody",
+	"http_response_body",
 	"invite_token",
 	"organization_name",
 	"refresh_token",
+	"response_body",
+	"responsebody",
 	"sql",
+	"sql.query.text",
 	"repository_name",
 ]);
+
+const MAX_TELEMETRY_STRING_LENGTH = 16_384;
 
 const URL_PROPERTY_KEYS = new Set([
 	"$current_url",
@@ -211,7 +221,8 @@ function scrubPostHogValue(
 		if (
 			(SENSITIVE_DOM_ATTRIBUTE_KEYS.has(normalizedKey) &&
 				!(preserveExceptionValue && normalizedKey === "value")) ||
-			SENSITIVE_EVENT_PROPERTY_KEYS.has(normalizedKey)
+			SENSITIVE_EVENT_PROPERTY_KEYS.has(normalizedKey) ||
+			normalizedKey === "vars"
 		) {
 			continue;
 		}
@@ -236,14 +247,19 @@ export function sanitizeLixrayPathname(value: string): string {
 }
 
 function scrubPostHogString(value: string, propertyKey?: string): string {
+	const input =
+		propertyKey === "filename" ? sanitizeStackFrameFilename(value) : value;
 	if (propertyKey && URL_PROPERTY_KEYS.has(propertyKey)) {
-		if (propertyKey === "$referring_domain") return hostnameOnly(value);
-		if (propertyKey === "$referrer") return referrerOrigin(value);
-		return sanitizeUrlOrPath(value);
+		if (propertyKey === "$referring_domain")
+			return hostnameOnly(input).slice(0, MAX_TELEMETRY_STRING_LENGTH);
+		if (propertyKey === "$referrer")
+			return referrerOrigin(input).slice(0, MAX_TELEMETRY_STRING_LENGTH);
+		return sanitizeUrlOrPath(input).slice(0, MAX_TELEMETRY_STRING_LENGTH);
 	}
 
-	return value
+	const scrubbed = input
 		.replaceAll(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
+		.replaceAll(/Basic\s+[A-Za-z0-9+/]+=*/gi, "Basic [redacted]")
 		.replaceAll(/\blixray_pat_[A-Za-z0-9_-]+\b/g, "[redacted_token]")
 		.replaceAll(
 			/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
@@ -259,6 +275,60 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 			/\/@[^/\s]+\/[^/\s]+\/file(?:\/[^\s)"'<>[\]{}]*)?/g,
 			"/repository/:repository/file/:file",
 		);
+	return scrubDiagnosticContent(scrubbed).slice(0, MAX_TELEMETRY_STRING_LENGTH);
+}
+
+function sanitizeStackFrameFilename(value: string): string {
+	const withoutFragmentOrQuery = value.split(/[?#]/, 1)[0] || "";
+	try {
+		const url = new URL(withoutFragmentOrQuery);
+		if (url.protocol === "http:" || url.protocol === "https:")
+			return `${url.origin}${sanitizeLixrayPathname(url.pathname)}`;
+	} catch {
+		// Local and relative bundle paths are handled by the generic path scrubber.
+	}
+	return withoutFragmentOrQuery;
+}
+
+/** Preserve useful error context while removing common content-bearing text. */
+function scrubDiagnosticContent(value: string): string {
+	let sanitized = value
+		.replace(/(https?:\/\/)[^\s/@]+:[^\s/@]+@/gi, "$1[redacted]@")
+		.replace(
+			/([?&](?:[^=\s&]*(?:token|secret|password|signature|credential|key)[^=\s&]*)=)[^\s&#"']*/gi,
+			"$1[redacted]",
+		)
+		.replace(
+			/\/lix\/v1\/[0-9a-f-]{36}\/snapshot/gi,
+			"/lix/v1/{lix_id}/snapshot",
+		);
+	const sql =
+		/\b(?:WITH\b[\s\S]*?\bSELECT\b[\s\S]*?\bFROM\b|SELECT\b[\s\S]*?\bFROM\b|INSERT\s+INTO\b|UPDATE\s+[\w."`]+\s+SET\b|DELETE\s+FROM\b|(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|VIEW|SCHEMA)\b)/i.exec(
+			sanitized,
+		);
+	if (sql?.index !== undefined)
+		sanitized = `${sanitized.slice(0, sql.index)}[SQL statement omitted]`;
+	const responseBody = /(?:response\s+(?:body|text)|http\s+body)\s*[:=]/i.exec(
+		sanitized,
+	);
+	if (responseBody?.index !== undefined)
+		sanitized = `${sanitized.slice(0, responseBody.index)}[response body omitted]`;
+	const htmlBody = /<!doctype\s+html|<html\b|<body\b/i.exec(sanitized);
+	if (htmlBody?.index !== undefined)
+		sanitized = `${sanitized.slice(0, htmlBody.index)}[response body omitted]`;
+	if (
+		sanitized.trimStart().startsWith("{") ||
+		sanitized.trimStart().startsWith("[")
+	) {
+		try {
+			const parsed: unknown = JSON.parse(sanitized);
+			if (parsed && typeof parsed === "object")
+				sanitized = "[structured response body omitted]";
+		} catch {
+			// Keep ordinary diagnostics that happen to start with a brace.
+		}
+	}
+	return sanitized;
 }
 
 function sanitizeUrlOrPath(value: string): string {

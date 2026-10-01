@@ -6,6 +6,8 @@ import {
 } from "./repository-open-telemetry.ts";
 
 const id = "11111111-1111-4111-8111-111111111111";
+const UUID_PATTERN =
+	/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 void test("server independently sanitizes browser diagnostics", () => {
 	const report = parseRepositoryOpenReport({
 		repositoryId: id,
@@ -17,13 +19,54 @@ void test("server independently sanitizes browser diagnostics", () => {
 			message: "secret",
 		},
 	});
-	assert.deepEqual(report, {
-		repositoryId: id,
-		release: "a".repeat(40),
-		fields: { lix_error_code: "LIX_ADMISSION_EPOCH", httpStatus: 426 },
-		frames: [],
+	assert.equal(report?.repositoryId, id);
+	assert.equal(report?.release, "a".repeat(40));
+	assert.deepEqual(report?.fields, {
+		lix_error_code: "LIX_ADMISSION_EPOCH",
+		httpStatus: 426,
 	});
+	assert.match(report?.correlation.error_id ?? "", UUID_PATTERN);
+	assert.equal(report?.correlation.error_correlation, "diagnostic_only");
+	assert.equal(report?.correlation.$otel_trace_id, undefined);
 	assert.equal(parseRepositoryOpenReport({ repositoryId: "invalid" }), null);
+});
+
+void test("repository open correlation accepts only complete validated trace context", () => {
+	const valid = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {},
+		correlation: {
+			error_id: "11111111-1111-4111-8111-111111111111",
+			$otel_trace_id: "a".repeat(32),
+			$otel_span_id: "b".repeat(16),
+			error_correlation: "standalone_trace",
+		},
+	});
+	assert.deepEqual(valid?.correlation, {
+		error_id: "11111111-1111-4111-8111-111111111111",
+		error_correlation: "standalone_trace",
+		$otel_trace_id: "a".repeat(32),
+		$otel_span_id: "b".repeat(16),
+	});
+
+	const invalid = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {},
+		correlation: {
+			error_id: "11111111--1111-4111-8111-111111111111",
+			$otel_trace_id: "0".repeat(32),
+			$otel_span_id: "b".repeat(16),
+			error_correlation: "invented_quality",
+		},
+	});
+	assert.match(invalid?.correlation.error_id ?? "", UUID_PATTERN);
+	assert.notEqual(
+		invalid?.correlation.error_id,
+		"11111111--1111-4111-8111-111111111111",
+	);
+	assert.equal(invalid?.correlation.error_correlation, "diagnostic_only");
+	assert.equal(invalid?.correlation.$otel_trace_id, undefined);
+	assert.equal(invalid?.correlation.$otel_span_id, undefined);
 });
 
 void test("server delivers exceptions independently of browser PostHog", async () => {
@@ -51,6 +94,42 @@ void test("server delivers exceptions independently of browser PostHog", async (
 	const properties = payload.properties as Record<string, unknown>;
 	assert.equal(properties.operation, "repository_open");
 	assert.equal(properties.delivery, "first_party");
+	assert.equal(properties.service_name, "lixray-web");
+	assert.match(String(properties.error_id), UUID_PATTERN);
+	assert.equal(properties.error_correlation, "diagnostic_only");
+	assert.equal(properties.$otel_trace_id, undefined);
+});
+
+void test("server includes a validated browser trace on first-party open exceptions", async () => {
+	const report = parseRepositoryOpenReport({
+		repositoryId: id,
+		diagnostic: {},
+		correlation: {
+			error_id: "22222222-2222-4222-8222-222222222222",
+			$otel_trace_id: "a".repeat(32),
+			$otel_span_id: "b".repeat(16),
+			error_correlation: "active_trace",
+		},
+	})!;
+	let payload: Record<string, unknown> = {};
+	await captureRepositoryOpenReport(
+		report,
+		"actor",
+		{
+			POSTHOG_PROJECT_TOKEN: "project-token",
+			POSTHOG_ENVIRONMENT: "production",
+		},
+		async (_url, init) => {
+			payload = JSON.parse(init?.body as string) as Record<string, unknown>;
+			return new Response("{}", { status: 200 });
+		},
+	);
+	const properties = payload.properties as Record<string, unknown>;
+	assert.equal(properties.error_id, "22222222-2222-4222-8222-222222222222");
+	assert.equal(properties.error_correlation, "active_trace");
+	assert.equal(properties.$otel_trace_id, "a".repeat(32));
+	assert.equal(properties.$otel_span_id, "b".repeat(16));
+	assert.equal(properties.reproduction, undefined);
 });
 
 void test("first-party worker projection retains code-gated WASM asset diagnostics", async () => {
