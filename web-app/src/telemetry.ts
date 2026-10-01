@@ -5,6 +5,7 @@ import {
 	SpanKind,
 	SpanStatusCode,
 	ROOT_CONTEXT,
+	isSpanContextValid,
 	type Attributes,
 	type Context,
 	type Span,
@@ -13,6 +14,15 @@ import {
 import { repositoryOpenDiagnostics } from "./lib/repository-open-telemetry.ts";
 
 export const tracer = trace.getTracer("lixray");
+
+const requestContexts = new WeakMap<object, Record<string, string>>();
+export function lixRequestTraceProperties(
+	value: unknown,
+): Record<string, string> {
+	return value && typeof value === "object"
+		? (requestContexts.get(value) ?? {})
+		: {};
+}
 
 /** Only bounded, application-owned error categories belong in traces. */
 export function failSpan(span: Span, category = "operation_failed"): void {
@@ -181,6 +191,15 @@ export function fetchLixWithTrace(
 		},
 		parent,
 		async (span) => {
+			const correlation = {
+				...(isSpanContextValid(span.spanContext())
+					? {
+							$otel_trace_id: span.spanContext().traceId,
+							$otel_span_id: span.spanContext().spanId,
+						}
+					: {}),
+				http_route: route,
+			};
 			try {
 				const headers = new Headers(request.headers);
 				headers.delete("traceparent");
@@ -193,9 +212,23 @@ export function fetchLixWithTrace(
 					new Request(request, { headers }),
 				);
 				span.setAttribute("http.response.status_code", response.status);
+				const requestId = response.headers.get("x-request-id");
+				if (requestId && /^[a-zA-Z0-9_-]{1,128}$/.test(requestId)) {
+					span.setAttribute("lix.request.id", requestId);
+					Object.assign(correlation, { request_id: requestId });
+				}
 				if (response.status >= 400) failSpan(span, `HTTP_${response.status}`);
-				return traceResponse(response, span, context.active(), request.signal);
+				const traced = traceResponse(
+					response,
+					span,
+					trace.setSpan(parent, span),
+					request.signal,
+				);
+				requestContexts.set(traced, correlation);
+				return traced;
 			} catch (error) {
+				if (error && typeof error === "object")
+					requestContexts.set(error, correlation);
 				failSpan(span, request.signal.aborted ? "cancelled" : "fetch_failed");
 				span.end();
 				throw error;

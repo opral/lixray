@@ -3,15 +3,16 @@ import { test } from "node:test";
 import {
 	formatRepositoryOpenError,
 	isRepositoryStorageInUse,
+	isRepositoryLocalReplicaBroken,
 } from "./repository-open-error.ts";
 
-void test("a preserved conversion attempt explains recovery without suggesting storage reset", () => {
+void test("a broken device copy explains the server reset", () => {
 	assert.equal(
 		formatRepositoryOpenError({
 			code: "LIX_PARTIAL_REPLICA_CONVERSION_RECOVERY_REQUIRED",
 			message: "pending journal",
 		}),
-		"Saved device changes need recovery before this copy can be upgraded. Download the saved device copy and contact support. Your original copy has been preserved; do not clear browser storage.",
+		"This device copy could not be opened. Reset from server to load a fresh copy.",
 	);
 });
 
@@ -73,7 +74,6 @@ void test("tells an older tab to reload after a sync protocol upgrade", () => {
 void test("explains a terminal automatic migration failure", () => {
 	for (const code of [
 		"LIX_ERROR_MIGRATION_FAILED",
-		"LIX_ERROR_MIGRATION_FAILED",
 		"LIX_ERROR_REPOSITORY_UPGRADE",
 	]) {
 		assert.equal(
@@ -108,4 +108,26 @@ void test("only the typed storage ownership conflict offers recovery", () => {
 	]) {
 		assert.equal(isRepositoryStorageInUse(error), false);
 	}
+});
+
+void test("only known broken local copies offer a server reset", () => {
+	assert.equal(
+		isRepositoryLocalReplicaBroken({
+			code: "LIX_PARTIAL_INTEREST_JOURNAL_INVALID",
+		}),
+		true,
+	);
+	for (const code of [
+		"LIX_ADMISSION_EPOCH",
+		"LIX_PROTOCOL_VERSION_MISMATCH",
+		"LIX_STORAGE_IN_USE",
+		"LIX_ERROR_MIGRATION_FAILED",
+		"LIX_ERROR_UNSUPPORTED_STORAGE_FORMAT",
+	]) {
+		assert.equal(isRepositoryLocalReplicaBroken({ code }), false);
+	}
+	assert.equal(
+		isRepositoryLocalReplicaBroken(new Error("fetch failed")),
+		false,
+	);
 });

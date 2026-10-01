@@ -72,10 +72,9 @@ inside an isolated compatible recovery environment; never overwrite the
 active browser store. Source data exceeding the current 64 MiB limit fails
 without modifying the source; ZIP headers and the manifest add output bytes.
 
-Check persistent-storage permission and quota separately from local commit
-success. When permission is denied or usage reaches 80 percent, the editor
-offers a current snapshot download. Retained sibling copies remain available
-from the recovery control even when native opening fails. Replacement retry
+Browser-managed eviction is separate from local commit durability. Retained
+sibling copies remain preserved internally even when native opening fails.
+The editor does not show storage opt-in or backup prompts. Replacement retry
 uses a persisted attempt identity and the authority's canonical response, so
 a lost acknowledgment cannot silently select another physical store.
 
@@ -84,10 +83,20 @@ that each candidate is absent from pending commit, prepared-scope and recovery
 roots. An immutable storage key can still contain irreplaceable unpublished
 work; its mutability label alone is not permission to discard it.
 
-## User-confirmed cache reset
+## Reset from server
 
-The failed-opening screen offers **Reset OPFS cache** for a current client with a readable replica route. This bootstraps a fresh repository replica through the authenticated replacement endpoint; it preserves the original physical OPFS copy and the existing recovery catalog. Both provider ownership fences must be idle, and Retry is disabled during the transaction. Replacement intent is durable before authority retirement, and only the acknowledged canonical destination becomes active. No other repository or origin storage is cleared.
+Normal repository opening is silent: the native browser engine opens its partial replica, with no storage opt-in, backup panel or saved-copy popup. Known broken local copies offer **Reset from server** in the main failure view. Reset errors appear in that same view. Authentication, network, protocol mismatch and live-owner errors do not offer a reset.
 
-The confirmation explains that unpublished changes will not appear automatically in the new copy. It offers a raw ZIP download and requires acknowledgement before continuing, including an explicit choice to proceed without a download. Failed or incompatible replicas cannot be promised a `.lixsnap` export; their raw physical archive preserves their journals without opening or migrating them. An open repository's storage-protection control still offers a native `.lixsnap` export.
+The action bootstraps a fresh repository replica through the authenticated replacement endpoint. It preserves the original physical OPFS copy and recovery catalog internally; it does not automatically replay unsupported unpublished work. Both provider ownership fences must be idle, and Retry is disabled during the transaction. Replacement intent is durable before authority retirement, and only the acknowledged canonical destination becomes active. No other repository or origin storage is cleared.
 
-Protocol/admission mismatch screens offer a full-page **Reload LixRay** action instead of retrying within the old runtime, and hide reset until the client has been updated. This distinction matters: October 1 Safari failures ran September 30 release `a85ac4da`, while the current-release Chromium failure involved the separate v2 read-interest journal (#539).
+Protocol/admission mismatch offers a full-page **Reload LixRay**. Safari telemetry on October 1 showed an older client hitting protocol mismatch, then the current client hitting the separate v2 read-interest journal failure (#539).
+
+## Snapshot download telemetry
+
+Debug remote snapshot export performs an authenticated GET to `/lix/v1/{id}/snapshot` directly; it does not open a diagnostic SQL session or switch branches first. Public/path-scoped views do not advertise a repository-wide remote export.
+
+`repository_snapshot_download` records started/succeeded/failed/cancelled outcomes with a shared `snapshot_attempt_id`. Handled failures also produce an exception with the download action, repository ID, sanitized endpoint/method, status, failure stage, request ID when supplied, client release, and trace/span IDs. The named `repository.snapshot.download` span parents the HTTP request and covers response consumption. The OTLP gateway projects the same bounded reproduction context into PostHog error tracking. Response bodies, snapshot contents, authorization headers and SQL are excluded.
+
+`pnpm --dir web-app test:snapshot-telemetry` exercises browser clicks, a real intercepted 404, application capture callbacks, OTLP export and successful retry/download. It also exercises the shared PostHog before-send callback with handled, uncaught-error and unhandled-rejection event shapes, including invalid trace IDs and standalone error-span export. It does not test the browser SDK's network ingestion. The repository snapshot telemetry integration test additionally exercises a real local HTTP server and the OTLP-to-PostHog gateway wire payload. These tests validate payload delivery through controlled receivers; they do not assert ingestion by the production PostHog service.
+
+All handled browser exception captures and PostHog uncaught error/rejection events receive a stable error ID, operation, service, client release and trace/span IDs. Context is captured before asynchronous SDK initialization. An exception outside an active operation gets a standalone error span; its correlation is labeled explicitly. Generic HTTP failures retain their actual request span and sanitized route, status and validated server request ID. The gateway also projects parent span linkage and bounded request context for non-snapshot failures. Opaque cross-origin browser errors remain explicitly labeled as opaque; telemetry cannot recover a stack hidden by the browser.

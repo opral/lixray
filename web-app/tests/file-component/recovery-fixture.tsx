@@ -95,18 +95,26 @@ function ResetFixture() {
 	return (
 		<>
 			<p>Reset requests: {calls}</p>
-			<DeviceReplicaRecovery
-				repositoryId="reset-fixture"
-				authIdentity="account"
-				openingFailed
-				onReset={async () => {
-					setCalls((value) => value + 1);
-					if (mode === "device-reset-error")
-						throw new Error("Reset refused: another tab owns the repository");
-					sessionStorage.setItem("reset-complete", "yes");
-					return "fresh-copy";
-				}}
-			/>
+			<RepositoryOpenFailure
+				message="This device copy could not be opened."
+				storageBusy={false}
+				resetInProgress={false}
+				reloadRequired={false}
+				onRetry={() => {}}
+			>
+				<DeviceReplicaRecovery
+					repositoryId="reset-fixture"
+					authIdentity="account"
+					openingFailed={mode !== "device-reset-healthy"}
+					onReset={async () => {
+						setCalls((value) => value + 1);
+						if (mode === "device-reset-error")
+							throw new Error("Reset refused: another tab owns the repository");
+						sessionStorage.setItem("reset-complete", "yes");
+						return "fresh-copy";
+					}}
+				/>
+			</RepositoryOpenFailure>
 		</>
 	);
 }
