@@ -217,9 +217,9 @@
 	.docs-navigation {
 		display: block;
 		position: sticky;
-		top: 110px;
+		top: 94px; /* 70px docs header + 24px */
 		align-self: start;
-		max-height: calc(100vh - 130px);
+		max-height: calc(100vh - 114px);
 		overflow-y: auto;
 	}
 	.docs-navigation-mobile {

@@ -38,8 +38,12 @@ export function SiteHeader({
 		>
 			<div
 				className={cn(
-					"flex items-center justify-between gap-4 py-6",
-					contained ? "mx-auto w-full max-w-[1024px] px-6" : "px-5 sm:px-14",
+					"flex items-center justify-between gap-4",
+					// The docs bar is sticky, so it stays compact; the marketing
+					// pages keep the roomier hero spacing.
+					contained
+						? "mx-auto w-full max-w-[1024px] px-6 py-3"
+						: "px-5 py-6 sm:px-14",
 				)}
 			>
 				<div className="flex items-center gap-3.5 sm:gap-[18px]">
