@@ -73,11 +73,21 @@ function safeUuid(value: string | undefined): string | undefined {
 }
 
 function safeOperation(value: string | undefined): string {
-	return value &&
-		value.length <= 128 &&
-		/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(value)
-		? value
-		: "unknown";
+	if (!value || value.length > 128) return "unknown";
+	if (/^[A-Za-z][A-Za-z0-9_.:-]*$/.test(value)) return value;
+	// Native spans use these fixed display names as `otel.name`. Normalize the
+	// protocol names and retain known SQL summaries without accepting free text.
+	switch (value) {
+		case "Lix protocol request":
+			return "lix.protocol.request";
+		case "Lix repository admission":
+			return "lix.repository.admission";
+		case "BATCH SELECT":
+		case "BATCH UPDATE":
+			return value;
+		default:
+			return "unknown";
+	}
 }
 
 function safeServiceName(value: string | undefined): string | undefined {
@@ -118,7 +128,7 @@ function safeHttpRoute(value: string | undefined): string | undefined {
 		!value.includes("{")
 	)
 		return undefined;
-	const segment = "(?:[a-z][a-z0-9_]{0,31}|\\{[a-z][a-z0-9_]{0,31}\\})";
+	const segment = "(?:[a-z0-9_-]{1,31}|\\{\\*?[a-z][a-z0-9_]{0,31}\\})";
 	return new RegExp(`^/${segment}(?:/${segment})*$`).test(value)
 		? value
 		: undefined;

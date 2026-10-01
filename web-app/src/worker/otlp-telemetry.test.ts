@@ -624,6 +624,7 @@ void test("non-snapshot HTTP errors include safe request and trace context", asy
 	);
 	const properties = batch!.batch[0]!.properties;
 	assert.equal(properties.operation, "lix.protocol.request");
+	assert.equal(properties.server_span_name, "lix.protocol.request");
 	assert.equal(properties.http_method, "GET");
 	assert.equal(properties.http_route, "/lix/v1/{lix_id}/branches");
 	assert.equal(properties.httpStatus, 404);
@@ -639,6 +640,245 @@ void test("non-snapshot HTTP errors include safe request and trace context", asy
 		JSON.stringify(properties),
 		/private-repository|private-token|private response body|SELECT private data|http.target/,
 	);
+});
+
+void test("native protocol catch-all routes keep linked HTTP error context", async () => {
+	const route = "/lix/v1/{lix_id}/{*protocol_path}";
+	const body = encode(
+		[
+			{
+				...span("Lix protocol request"),
+				parentSpanId: Array(8).fill(3),
+				status: { code: 2 },
+				attributes: [
+					...span().attributes,
+					{ key: "http.request.method", value: { stringValue: "POST" } },
+					{ key: "http.route", value: { stringValue: route } },
+					{ key: "http.response.status_code", value: { intValue: 404 } },
+					{
+						key: "lix.request.id",
+						value: { stringValue: "native-request-404" },
+					},
+					{
+						key: "exception.capture_id",
+						value: {
+							stringValue: "11111111-1111-4111-8111-111111111111",
+						},
+					},
+				],
+			},
+		],
+		[
+			{ key: "service.name", value: { stringValue: "lix-server" } },
+			{ key: "service.version", value: { stringValue: "b".repeat(40) } },
+		],
+	);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.operation, "lix.protocol.request");
+	assert.equal(properties.server_span_name, "lix.protocol.request");
+	assert.equal(properties.http_method, "POST");
+	assert.equal(properties.http_route, route);
+	assert.equal(properties.httpStatus, 404);
+	assert.equal(properties.request_id, "native-request-404");
+	assert.equal(properties.$otel_trace_id, "01".repeat(16));
+	assert.equal(properties.$otel_span_id, "02".repeat(8));
+	assert.equal(properties.$otel_parent_span_id, "03".repeat(8));
+	assert.equal(properties.error_id, "11111111-1111-4111-8111-111111111111");
+	assert.equal(properties.service_name, "lix-server");
+	assert.equal(properties.server_release, "b".repeat(40));
+	assert.equal(properties.reproduction, undefined);
+});
+
+void test("browser read-fulfillment routes retain their hyphenated request context", async () => {
+	const route = "/lix/v1/{lix_id}/sync/read-fulfillment";
+	const body = encode(
+		[
+			{
+				...span("lix.client.rpc"),
+				parentSpanId: Array(8).fill(4),
+				status: { code: 2 },
+				attributes: [
+					...span().attributes,
+					{ key: "http.request.method", value: { stringValue: "GET" } },
+					{ key: "http.route", value: { stringValue: route } },
+					{ key: "http.response.status_code", value: { intValue: 503 } },
+					{
+						key: "lix.request.id",
+						value: { stringValue: "browser-request-503" },
+					},
+					{
+						key: "exception.capture_id",
+						value: {
+							stringValue: "22222222-2222-4222-8222-222222222222",
+						},
+					},
+				],
+			},
+		],
+		[
+			{ key: "service.name", value: { stringValue: "lixray-web" } },
+			{ key: "service.version", value: { stringValue: "c".repeat(40) } },
+		],
+	);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(
+			await handleOtlpTelemetry(request(body), env, {
+				fetch: fetcher,
+				authenticatedBrowser: true,
+			})
+		).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.equal(properties.operation, "lix.client.rpc");
+	assert.equal(properties.source, "browser");
+	assert.equal(properties.http_method, "GET");
+	assert.equal(properties.http_route, route);
+	assert.equal(properties.httpStatus, 503);
+	assert.equal(properties.request_id, "browser-request-503");
+	assert.equal(properties.$otel_trace_id, "01".repeat(16));
+	assert.equal(properties.$otel_span_id, "02".repeat(8));
+	assert.equal(properties.$otel_parent_span_id, "04".repeat(8));
+	assert.equal(properties.error_id, "22222222-2222-4222-8222-222222222222");
+	assert.equal(properties.service_name, "lixray-web");
+	assert.equal(properties.client_release, "c".repeat(40));
+});
+
+void test("known native SQL operation names remain stable and arbitrary names are hidden", async () => {
+	const body = encode([
+		{ ...span("BATCH SELECT"), status: { code: 2 } },
+		{
+			...span("BATCH UPDATE"),
+			spanId: Array(8).fill(6),
+			status: { code: 2 },
+		},
+		{
+			...span("BATCH SELECT private_table"),
+			spanId: Array(8).fill(7),
+			status: { code: 2 },
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	assert.deepEqual(
+		batch!.batch.map((event) => event.properties.operation),
+		["BATCH SELECT", "BATCH UPDATE", "unknown"],
+	);
+	assert.doesNotMatch(
+		JSON.stringify(batch),
+		/BATCH SELECT private_table|private_table/,
+	);
+});
+
+void test("HTTP route projection rejects raw UUIDs, filenames and query strings", async () => {
+	const rawRoutes = [
+		"/lix/v1/private-repository/snapshot?token=private-token",
+		"/lix/v1/11111111-1111-4111-8111-111111111111/sync/read-fulfillment",
+		"/lix/v1/{lix_id}/files/private-notes-2026.md",
+	];
+	const body = encode(
+		rawRoutes.map((route, index) => ({
+			...span(`lix.protocol.request.${index}`),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{ key: "http.route", value: { stringValue: route } },
+			],
+		})),
+	);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	assert.deepEqual(
+		batch!.batch.map((event) => event.properties.http_route),
+		[undefined, undefined, undefined],
+	);
+	assert.doesNotMatch(
+		JSON.stringify(batch),
+		/private-repository|private-token|11111111-1111-4111-8111-111111111111|private-notes-2026\.md/,
+	);
+});
+
+void test("gateway snapshot reproduction metadata keeps its established shape", async () => {
+	const repositoryId = "33333333-3333-4333-8333-333333333333";
+	const attemptId = "44444444-4444-4444-8444-444444444444";
+	const body = encode([
+		{
+			...span("repository.snapshot.download"),
+			status: { code: 2 },
+			attributes: [
+				...span().attributes,
+				{ key: "lix.id", value: { stringValue: repositoryId } },
+				{
+					key: "snapshot.action",
+					value: { stringValue: "download_remote_snapshot" },
+				},
+				{ key: "snapshot.attempt_id", value: { stringValue: attemptId } },
+				{
+					key: "snapshot.failure_stage",
+					value: { stringValue: "http_response" },
+				},
+				{ key: "http.response.status_code", value: { intValue: 404 } },
+			],
+		},
+	]);
+	let batch: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batch = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = batch!.batch[0]!.properties;
+	assert.deepEqual(properties.reproduction, {
+		action: "download_remote_snapshot",
+		repository_id: repositoryId,
+		method: "GET",
+		endpoint: "/lix/v1/{lix_id}/snapshot",
+	});
+	assert.equal(properties.operation, "repository.snapshot.download");
+	assert.equal(properties.httpStatus, 404);
+	assert.equal(properties.failure_stage, "http_response");
+	assert.equal(properties.snapshot_attempt_id, attemptId);
 });
 
 void test("non-HTTP errors keep their operation and reject unsafe replay metadata", async () => {
