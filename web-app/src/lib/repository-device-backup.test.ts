@@ -3,6 +3,7 @@ import test from "node:test";
 import { readFile } from "node:fs/promises";
 import { unzipSync, strFromU8 } from "fflate";
 import {
+	discoverDeviceReplicaStorageNames,
 	exportDeviceReplicaBackup,
 	inspectDeviceStorage,
 	opfsBackupName,
@@ -12,6 +13,83 @@ import {
 
 const storageName =
 	"lixray:local-first-v1:repo:account:device:replacement:saved";
+
+void test("corrupt-route discovery returns only canonical names in this replica namespace", async () => {
+	const paths: string[] = [];
+	const matchingNames = [
+		storageName,
+		`${storageName}:format81:interrupted`,
+		`${storageName}:format81:legacy:route:id`,
+		`${storageName}:format81:published:replacement:one:replacement:two`,
+		`${storageName}:replacement:current`,
+		`${storageName}:replacement:legacy:server:id`,
+	];
+	const foreignNames = [
+		"lixray:local-first-v1:other-repo:account:device:replacement:one",
+		"lixray:local-first-v1:repo:other-account:device:replacement:one",
+		`${storageName}-foreign:replacement:one`,
+		`${storageName}:format81:`,
+		`${storageName}:unknown:copy`,
+	];
+	const entries = [
+		...matchingNames.map((name) => ({
+			kind: "directory" as const,
+			name: opfsBackupName(name),
+		})),
+		...foreignNames.map((name) => ({
+			kind: "directory" as const,
+			name: opfsBackupName(name),
+		})),
+		{
+			kind: "directory" as const,
+			name: `${opfsBackupName(`${storageName}:replacement:noncanonical`)}=`,
+		},
+		{
+			kind: "file" as const,
+			name: opfsBackupName(`${storageName}:replacement:not-a-directory`),
+		},
+	];
+	const directory = {
+		getDirectoryHandle: async (name: string) => {
+			paths.push(name);
+			return directory;
+		},
+		async *values() {
+			for (const entry of entries) yield entry;
+		},
+	};
+	const discovered = await discoverDeviceReplicaStorageNames(storageName, {
+		getDirectory: async () =>
+			directory as unknown as Awaited<
+				ReturnType<DeviceBackupEnvironment["getDirectory"]>
+			>,
+	});
+	assert.deepEqual(discovered, [storageName, ...matchingNames.slice(1).sort()]);
+	assert.deepEqual(paths, ["lix", "sqlite-sahpool"]);
+});
+
+void test("corrupt-route discovery stops after the bounded provider entry scan", async () => {
+	let enumerated = 0;
+	const directory = {
+		getDirectoryHandle: async () => directory,
+		async *values() {
+			for (let index = 0; index < 4097; index += 1) {
+				enumerated += 1;
+				yield { kind: "file" as const, name: `entry-${index}` };
+			}
+		},
+	};
+	await assert.rejects(
+		discoverDeviceReplicaStorageNames(storageName, {
+			getDirectory: async () =>
+				directory as unknown as Awaited<
+					ReturnType<DeviceBackupEnvironment["getDirectory"]>
+				>,
+		}),
+		/safe scan limit of 4096 entries/u,
+	);
+	assert.equal(enumerated, 4097);
+});
 
 void test("physical backup uses the pinned provider directory and both ownership fences", async () => {
 	const source = await readFile(
@@ -126,7 +204,7 @@ void test("oversized raw stores stop before reading payload bytes and release bo
 				name: "large-database",
 				getFile: async () =>
 					({
-						size: 256 * 1024 * 1024 + 1,
+						size: 64 * 1024 * 1024 + 1,
 						arrayBuffer: async () => {
 							payloadRead = true;
 							throw new Error("payload must stay unread");

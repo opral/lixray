@@ -69,7 +69,7 @@ worker-owner and SQLite ownership fences, reads the physical OPFS directory
 without opening its engine, and releases both fences on success or failure.
 The archive is private repository data. Preserve it locally and restore only
 inside an isolated compatible recovery environment; never overwrite the
-active browser store. Archives exceeding the current 256 MiB limit fail
+active browser store. Archives exceeding the current 64 MiB limit fail
 without modifying the source.
 
 Check persistent-storage permission and quota separately from local commit

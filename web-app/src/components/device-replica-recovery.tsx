@@ -11,7 +11,10 @@ import {
 	activeReplicaStorage,
 	retainedReplicaStorageNames as replacementSources,
 } from "../lib/repository-replica-replacement.ts";
-import { exportDeviceReplicaBackup } from "../lib/repository-device-backup.ts";
+import {
+	discoverDeviceReplicaStorageNames,
+	exportDeviceReplicaBackup,
+} from "../lib/repository-device-backup.ts";
 
 /** App-routed old stores are siblings, not native generations of the new store.
  * Recovery stays available even when the native engine cannot open an old format.
@@ -37,7 +40,7 @@ export function DeviceReplicaRecovery({
 		setNames([]);
 		setBusy(null);
 		void repositoryBrowserReplicaId({ repositoryId, authIdentity })
-			.then((replicaId) => {
+			.then(async (replicaId) => {
 				const original = repositoryOpfsCacheName({ repositoryId, replicaId });
 				try {
 					const migrated = currentReplicaStorage(original);
@@ -51,11 +54,29 @@ export function DeviceReplicaRecovery({
 					];
 					if (active) setNames(sources);
 				} catch {
-					if (active) {
-						setNames([original]);
-						setError(
-							"The saved-copy catalog is invalid. You can download the original device copy; other copies remain preserved for support recovery.",
-						);
+					try {
+						const discovered =
+							await discoverDeviceReplicaStorageNames(original);
+						if (active) {
+							setNames(discovered);
+							setError(
+								"The saved-copy catalog is invalid. The copies listed here were found in this repository's OPFS namespace. Download each needed copy and contact support; no local copy was changed.",
+							);
+						}
+					} catch (scanError) {
+						if (active) {
+							setNames([original]);
+							const scanLimit =
+								scanError instanceof Error &&
+								scanError.message.startsWith(
+									"The saved-copy directory exceeds the safe scan limit",
+								);
+							setError(
+								scanLimit
+									? `${scanError.message} Only the original copy can be listed safely; other copies may remain on this device.`
+									: "The saved-copy catalog is invalid and its OPFS directory could not be scanned safely. Only the original copy can be listed here; other matching copies may remain on this device. Keep browser storage intact and contact support.",
+							);
+						}
 					}
 				}
 			})
