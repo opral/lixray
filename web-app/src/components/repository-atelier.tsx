@@ -1789,7 +1789,7 @@ export function RepositoryAtelier({
 	);
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
+			className="fixed inset-0 flex h-full w-full flex-col overflow-hidden bg-bg"
 			aria-busy={!shellProps && !error}
 		>
 			{shellProps ? (
@@ -1808,14 +1808,16 @@ export function RepositoryAtelier({
 										<RepositoryFileOpenTraceContext.Provider
 											value={fileOpenTrace}
 										>
-											<Atelier
-												{...shellProps}
-												topBarProps={REPOSITORY_TOP_BAR_PROPS}
-												slots={{
-													navbarBrand,
-													navbarEnd: headerActions,
-												}}
-											/>
+											<div className="min-h-0 flex-1">
+												<Atelier
+													{...shellProps}
+													topBarProps={REPOSITORY_TOP_BAR_PROPS}
+													slots={{
+														navbarBrand,
+														navbarEnd: headerActions,
+													}}
+												/>
+											</div>
 											<Outlet />
 											{shellProps.lix ? (
 												<ReplicaRecovery lix={shellProps.lix} />
