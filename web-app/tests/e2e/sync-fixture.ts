@@ -996,7 +996,7 @@ export async function createSyncFixture({
 				const homeTab = page.getByRole("button", {
 					name: "Home",
 					exact: true,
-				});
+				}).and(page.locator('[data-view-key="atelier_library"]'));
 				await homeTab.waitFor({ timeout: 120_000 });
 				await homeTab.click();
 			}
