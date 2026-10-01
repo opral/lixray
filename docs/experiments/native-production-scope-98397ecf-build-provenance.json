@@ -100,5 +100,15 @@
     "change": "Device-storage protection moved into a reserved normal-flow footer below Atelier.",
     "profileAttribution": "Measurements remain attributed to clean b4c671c4d4d4647516dd2b46caed90a0340824fd.",
     "verification": "All eight recorded app profile source hashes, vendor Lix revision, and all five installed CI SDK manifest hashes remain identical after the layout correction. Final UI qualification is a separate application CI gate."
+  },
+  "releaseQualification": {
+    "appCi": 36862753622,
+    "qualifiedAppRevision": "e3cf2dd5374deaba70b97d3d10cd80c2b70ada4c",
+    "productionRun": 36864074092,
+    "productionAttempt": 2,
+    "deployedAppMerge": "4095463523cb68df76b203d225c88d278fc4b22b",
+    "conclusion": "success",
+    "evidence": "native-production-98397ecf-deployment.json",
+    "note": "Raw measurements remain attributed to b4c; later layout reviewed and qualified separately."
   }
 }

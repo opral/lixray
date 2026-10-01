@@ -129,6 +129,31 @@ export async function discoverDeviceReplicaStorageNames(
 	];
 }
 
+/** Hold both provider ownership fences; never steal ownership from another tab. */
+export async function withIdleDeviceReplica<T>(
+	storageName: string,
+	callback: () => Promise<T>,
+	locks: Pick<LockManager, "request"> = navigator.locks,
+): Promise<T> {
+	if (!storageName.startsWith("lixray:local-first-v1:"))
+		throw new Error("This saved copy is not a repository replica.");
+	const withFence = async (prefix: string, run: () => Promise<T>): Promise<T> =>
+		await locks.request(
+			`${prefix}${storageName}`,
+			{ mode: "exclusive", ifAvailable: true },
+			async (lock) => {
+				if (!lock)
+					throw new Error(
+						"Close other LixRay tabs using this repository, then retry. Saved changes are preserved.",
+					);
+				return run();
+			},
+		);
+	return withFence(OPFS_BACKUP_LOCK_PREFIXES[0]!, () =>
+		withFence(OPFS_BACKUP_LOCK_PREFIXES[1]!, callback),
+	);
+}
+
 /** Export an idle retained physical store without changing any source bytes.
  * Both provider fences are held until every file has been copied. An active
  * owner is rejected immediately, including old deployments using the RPC fence.
@@ -141,22 +166,9 @@ export async function exportDeviceReplicaBackup(
 			navigator.storage.getDirectory() as unknown as Promise<BackupDirectory>,
 	},
 ): Promise<Blob> {
-	if (!storageName.startsWith("lixray:local-first-v1:"))
-		throw new Error("This saved copy is not a repository replica.");
-	const withFence = <T>(prefix: string, callback: () => Promise<T>) =>
-		environment.locks.request(
-			`${prefix}${storageName}`,
-			{ mode: "exclusive", ifAvailable: true },
-			async (lock) => {
-				if (!lock)
-					throw new Error(
-						"Close other LixRay tabs using this saved copy, then retry the download. Saved changes are preserved.",
-					);
-				return callback();
-			},
-		);
-	return withFence(OPFS_BACKUP_LOCK_PREFIXES[0]!, () =>
-		withFence(OPFS_BACKUP_LOCK_PREFIXES[1]!, async () => {
+	return withIdleDeviceReplica(
+		storageName,
+		async () => {
 			let directory = await environment.getDirectory();
 			for (const segment of [
 				...OPFS_BACKUP_DIRECTORY,
@@ -232,7 +244,8 @@ export async function exportDeviceReplicaBackup(
 			if (zipError) throw zipError;
 			if (!completed) throw new Error("The saved-copy archive did not finish.");
 			return new Blob(parts, { type: "application/zip" });
-		}),
+		},
+		environment.locks,
 	);
 }
 
