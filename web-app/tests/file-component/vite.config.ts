@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
+import { privateTailwind } from "../../../vendor/atelier/scripts/private-tailwind.mjs";
 
 const at = (path: string) => fileURLToPath(new URL(path, import.meta.url));
 export default defineConfig({
@@ -15,18 +16,6 @@ export default defineConfig({
 				replacement: at("../../../vendor/atelier/src/index.css"),
 			},
 			{
-				find: "@opral/atelier/theme.css",
-				replacement: at("../../../vendor/atelier/src/shell/theme.css"),
-			},
-			{
-				find: "@opral/atelier/tailwind.css",
-				replacement: at("../../../vendor/atelier/src/shell/tailwind.css"),
-			},
-			{
-				find: "@opral/atelier/document.css",
-				replacement: at("../../../vendor/atelier/src/shell/document.css"),
-			},
-			{
 				find: "@opral/atelier/file-icons",
 				replacement: at("../../../vendor/atelier/src/file-icons.ts"),
 			},
@@ -38,7 +27,8 @@ export default defineConfig({
 			{ find: "@", replacement: at("../../../vendor/atelier/src") },
 		],
 	},
-	plugins: [react(), tailwindcss()],
+	plugins: [react(), tailwindcss(), privateTailwind()],
+	build: { cssTarget: ["chrome123", "firefox120", "safari17.5"] },
 	server: {
 		hmr: false,
 		host: "127.0.0.1",

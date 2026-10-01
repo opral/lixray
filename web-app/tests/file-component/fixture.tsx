@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { Lix } from "@lix-js/sdk";
 import type { AtelierDiffSession } from "@opral/atelier";
 import { DirectoryView } from "../../src/components/repository-home/directory-view";
+import "@opral/atelier/style.css";
 import "./fixture.css";
 
 type Entry = { id: string; path: string; content?: Uint8Array };
