@@ -24,28 +24,60 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				if (!args[0].startsWith("lix:repository-rpc:v1:")) return channel;
 				const listeners = new Set<(event: MessageEvent) => void>();
 				let envelope: { client: string; generation: string } | undefined;
+				const sessions = new Set<number>();
 				const post = channel.postMessage.bind(channel);
-				channel.postMessage = (message) => {
-					if (message?.kind === "input")
+				channel.postMessage = (raw: unknown) => {
+					const message = raw as {
+						kind?: string;
+						client: string;
+						generation: string;
+						message?: { sessionId?: number; operation?: { kind?: string } };
+					} | null;
+					if (message?.kind === "input") {
 						envelope = {
 							client: message.client,
 							generation: message.generation,
 						};
-					post(message);
+						const sessionId = message.message?.sessionId;
+						if (typeof sessionId === "number") {
+							sessions.delete(sessionId);
+							if (message.message?.operation?.kind !== "close")
+								sessions.add(sessionId);
+						}
+					}
+					post(raw);
 				};
-				channel.addEventListener("message", (event) => {
-					if (
-						event.data?.kind !== "output" ||
-						event.data.client !== envelope?.client
-					)
-						return;
-					for (const listener of listeners)
-						listener(new MessageEvent("message", { data: event.data.message }));
-				});
+				channel.addEventListener(
+					"message",
+					(
+						event: MessageEvent<{
+							kind?: string;
+							client?: string;
+							message?: unknown;
+						}>,
+					) => {
+						if (
+							event.data?.kind !== "output" ||
+							event.data.client !== envelope?.client
+						)
+							return;
+						for (const listener of listeners)
+							listener(
+								new MessageEvent("message", { data: event.data.message }),
+							);
+					},
+				);
 				ports.push({
 					postMessage: (message) => {
 						if (!envelope) throw new Error("Repository client is not ready");
-						post({ kind: "input", ...envelope, message });
+						const sessionId = [...sessions].at(-1);
+						if (sessionId === undefined)
+							throw new Error("Repository session is not ready");
+						post({
+							kind: "input",
+							...envelope,
+							message: { ...(message as object), sessionId },
+						});
 					},
 					addEventListener: (_type, listener) => {
 						listeners.add(listener);

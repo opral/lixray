@@ -1014,13 +1014,16 @@ export async function createSyncFixture({
 		};
 		const localFiles = async (page: Page) =>
 			page.evaluate(async () => {
-				return (
+				const result = await (
 					globalThis as typeof globalThis & {
 						__lixSyncFiles: () => Promise<{
 							rows: Array<Array<{ value: string }>>;
 						}>;
 					}
 				).__lixSyncFiles();
+				if (!result.rows)
+					throw new Error(`Local file probe failed: ${JSON.stringify(result)}`);
+				return result;
 			});
 		const libraryFileIds = async (page: Page) => {
 			const visiblePaths = await page
