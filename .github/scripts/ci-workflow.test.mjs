@@ -106,3 +106,15 @@ test("static UI selects fast checks without implicitly starting heavy jobs", () 
     assert.doesNotMatch(job(name), /outputs.fast/);
   }
 });
+
+
+test("local browser acceptance covers the component and telemetry lanes with the WASM SDK", () => {
+	const local = read("scripts/ci-local.mjs");
+	assert.doesNotMatch(local, /lix:build:native/);
+	for (const testCase of ["home-history.spec.ts", "test:snapshot-telemetry"]) {
+		assert.ok(local.includes(testCase), `${testCase} must run locally`);
+		assert.ok(read(".github/workflows/pr.yml").includes(testCase), `${testCase} must run remotely`);
+	}
+	assert.match(local, /"--filter", "@opral\/atelier", "test:styles"/);
+	assert.match(local, /"--dir", "web-app", "test:styles"/);
+});

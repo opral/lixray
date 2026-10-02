@@ -118,14 +118,16 @@ run("Prepare pinned Lix browser SDK", "pnpm", ["--dir", "web-app", "lix:build"],
 	LIXRAY_LIX_ARTIFACTS: "only",
 	LIXRAY_SKIP_VENDORED_LIX_WASM: "0",
 });
-run("Prepare native Lix SDK", "pnpm", ["--dir", "web-app", "lix:build:native"]);
 run("MCP recovery with real engine", "pnpm", ["--dir", "web-app", "test:mcp-recovery"]);
 run("Source, tooling, and frontend CI", "pnpm", ["run", "ci"]);
 run("Install Chromium", "pnpm", ["--dir", "web-app", "exec", "playwright", "install", "chromium"]);
+run("Atelier styles", "pnpm", ["--filter", "@opral/atelier", "test:styles"]);
+run("LixRay styles", "pnpm", ["--dir", "web-app", "test:styles"]);
+run("Snapshot and repository opening telemetry", "pnpm", ["--dir", "web-app", "test:snapshot-telemetry"]);
 run("MCP Apps browser component tests", "pnpm", ["--dir", "web-app", "test:mcp-ui"]);
 run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published"],
 	{ ...localEnv, LIXRAY_PUBLISHED_PORT: await uniquePort() });
-run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts"],
+run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts", "home-history.spec.ts"],
 	{ ...localEnv, LIXRAY_COMPONENT_PORT: await uniquePort() });
 
 const databaseLease = await acquireDatabaseLease();

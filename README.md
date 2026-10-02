@@ -146,10 +146,8 @@ proves Lix access before a request reaches `lix-server`.
 ## Setup
 
 Requirements: Node.js 24, pnpm 10.13.1, Docker, and the Supabase CLI.
-Rust is only needed for explicitly building native SDK development binaries.
-The workspace excludes released optional native SDK packages so Node uses the
-pinned Wasm artifact instead of mixing a released addon with vendored JavaScript.
-Explicitly prepared local native binaries still take precedence.
+Node memory sessions use the SDK's WASM engine. Native filesystem builds belong
+to `@lix-js/storage-filesystem`; LixRay does not install or prepare that addon.
 
 ```sh
 git submodule update --init --recursive
