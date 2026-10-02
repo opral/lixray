@@ -7137,12 +7137,6 @@ packages:
   zwitch@2.0.4:
     resolution: {integrity: sha512-bXE4cR/kVZhKZX/RjPEflHaKVhUVl85noU3v6b8apfQEc1x4A+zBxjZ4lN8LqGd6WZ3dl98pY4o717VFmoPp+A==}
 
-ignoredOptionalDependencies:
-  - '@lix-js/sdk-darwin-arm64'
-  - '@lix-js/sdk-linux-arm64'
-  - '@lix-js/sdk-linux-x64'
-  - '@lix-js/sdk-win32-x64'
-
 snapshots:
 
   '@adobe/css-tools@4.5.0': {}
