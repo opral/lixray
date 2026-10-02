@@ -26,6 +26,289 @@ const traceRequestType = protobuf.Root.fromJSON(schema).lookupType(
 	"opentelemetry.proto.collector.trace.v1.ExportTraceServiceRequest",
 );
 
+const REPOSITORY_OPEN_PHASES = [
+	"bootstrap",
+	"auth",
+	"access",
+	"replica",
+	"engine",
+	"branch",
+	"session",
+	"atelier",
+	"initial_view",
+	"paint",
+] as const;
+
+const REPOSITORY_OPEN_REPLICA_STATES = [
+	"fresh",
+	"cached",
+	"unknown",
+	"remote",
+	"reused_session",
+	"joined_open",
+] as const;
+
+const REPOSITORY_OPEN_PROFILE_PREFIX = "lixray.repository.open.profile.";
+const REPOSITORY_OPEN_HOST_PREFIX = "lixray.repository.open.host.";
+const REPOSITORY_OPEN_PROFILE_RESOURCE_CATEGORIES = [
+	"wasm",
+	"first_party_js",
+	"api",
+	"lix",
+	"other",
+] as const;
+const REPOSITORY_OPEN_PROFILE_DURATION_MAX_MS = 3_600_000;
+const REPOSITORY_OPEN_PROFILE_BYTES_MAX = 1_000_000_000_000;
+const REPOSITORY_OPEN_PROFILE_COUNT_MAX = 1_000;
+const REPOSITORY_OPEN_METRIC_MAX = 86_400_000;
+
+function boundedNumber(
+	value: unknown,
+	max: number,
+	integer = false,
+): number | undefined {
+	if (
+		typeof value !== "number" ||
+		!Number.isFinite(value) ||
+		value < 0 ||
+		value > max ||
+		(integer && !Number.isInteger(value))
+	)
+		return undefined;
+	return value;
+}
+
+function copyOpenNumber(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+	property = field,
+	max = REPOSITORY_OPEN_METRIC_MAX,
+	integer = false,
+): void {
+	const value = boundedNumber(
+		fields[`lixray.repository.open.${field}`],
+		max,
+		integer,
+	);
+	if (value !== undefined) properties[property] = value;
+}
+
+function copyOpenEnum(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+	allowed: readonly string[],
+	property = field,
+): void {
+	const value = fields[`lixray.repository.open.${field}`];
+	if (typeof value === "string" && allowed.includes(value))
+		properties[property] = value;
+}
+
+function copyOpenBoolean(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+): void {
+	const value = fields[`lixray.repository.open.${field}`];
+	if (typeof value === "boolean") properties[field] = value;
+}
+
+function copyProfileBoolean(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+): void {
+	const value = fields[`${REPOSITORY_OPEN_PROFILE_PREFIX}${field}`];
+	if (typeof value === "boolean")
+		properties[`profile_${field.replaceAll(".", "_")}`] = value;
+}
+
+function copyProfileEnum(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+	allowed: readonly string[],
+): void {
+	const value = fields[`${REPOSITORY_OPEN_PROFILE_PREFIX}${field}`];
+	if (typeof value === "string" && allowed.includes(value))
+		properties[`profile_${field.replaceAll(".", "_")}`] = value;
+}
+
+function copyProfileNumber(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+	field: string,
+	max: number,
+	integer = false,
+): void {
+	const value = boundedNumber(
+		fields[`${REPOSITORY_OPEN_PROFILE_PREFIX}${field}`],
+		max,
+		integer,
+	);
+	if (value !== undefined)
+		properties[`profile_${field.replaceAll(".", "_")}`] = value;
+}
+
+function projectRepositoryOpenProfile(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+): void {
+	for (const field of [
+		"navigation_timing_supported",
+		"resource_timing_supported",
+		"longtask_supported",
+		"interval_valid",
+		"page_persisted",
+		"resources.truncated",
+		"longtask.truncated",
+	])
+		copyProfileBoolean(properties, fields, field);
+
+	copyProfileEnum(properties, fields, "navigation_type", [
+		"navigate",
+		"reload",
+		"back_forward",
+		"prerender",
+	]);
+	copyProfileEnum(properties, fields, "hardware_concurrency_bucket", [
+		"1",
+		"2",
+		"4",
+		"8",
+		"16_plus",
+	]);
+	copyProfileEnum(properties, fields, "device_memory_gb_bucket", [
+		"0.5_or_less",
+		"1",
+		"2",
+		"4",
+		"8_plus",
+	]);
+	copyProfileEnum(properties, fields, "network_effective_type", [
+		"slow-2g",
+		"2g",
+		"3g",
+		"4g",
+	]);
+	copyProfileEnum(properties, fields, "browser_family", [
+		"chrome",
+		"edge",
+		"firefox",
+		"safari",
+		"other",
+	]);
+	const browserMajor = boundedNumber(
+		fields[`${REPOSITORY_OPEN_PROFILE_PREFIX}browser_major`],
+		1_000,
+		true,
+	);
+	if (browserMajor !== undefined && browserMajor >= 1)
+		properties.profile_browser_major = browserMajor;
+
+	for (const field of ["dns_ms", "connect_ms", "tls_ms", "ttfb_ms"])
+		copyProfileNumber(
+			properties,
+			fields,
+			field,
+			REPOSITORY_OPEN_PROFILE_DURATION_MAX_MS,
+		);
+	for (const field of [
+		"response_transfer_bytes",
+		"response_encoded_bytes",
+		"response_decoded_bytes",
+	])
+		copyProfileNumber(
+			properties,
+			fields,
+			field,
+			REPOSITORY_OPEN_PROFILE_BYTES_MAX,
+			true,
+		);
+
+	for (const field of [
+		"longtask.count",
+		"longtask.total_ms",
+		"longtask.max_ms",
+	])
+		copyProfileNumber(
+			properties,
+			fields,
+			field,
+			field.endsWith(".count")
+				? REPOSITORY_OPEN_PROFILE_COUNT_MAX
+				: REPOSITORY_OPEN_PROFILE_DURATION_MAX_MS,
+			field.endsWith(".count"),
+		);
+
+	for (const category of REPOSITORY_OPEN_PROFILE_RESOURCE_CATEGORIES) {
+		for (const [measure, max, integer] of [
+			["count", REPOSITORY_OPEN_PROFILE_COUNT_MAX, true],
+			["duration_ms", REPOSITORY_OPEN_PROFILE_DURATION_MAX_MS, false],
+			["transfer_bytes", REPOSITORY_OPEN_PROFILE_BYTES_MAX, true],
+		] as const) {
+			copyProfileNumber(
+				properties,
+				fields,
+				`resources.${category}.${measure}`,
+				max,
+				integer,
+			);
+		}
+	}
+}
+
+function projectRepositoryOpenHost(
+	properties: Record<string, unknown>,
+	fields: Record<string, unknown>,
+): void {
+	if (fields[`${REPOSITORY_OPEN_HOST_PREFIX}version`] === 1)
+		properties.host_version = 1;
+
+	const realmReused = fields[`${REPOSITORY_OPEN_HOST_PREFIX}wasm.realm_reused`];
+	if (typeof realmReused === "boolean")
+		properties.host_wasm_realm_reused = realmReused;
+
+	const enums: readonly (readonly [string, readonly string[]])[] = [
+		["wasm.source", ["bundled", "cache", "network", "realm"]],
+		[
+			"wasm.cache_status",
+			["hit", "miss", "corrupt", "unavailable", "not_consulted"],
+		],
+	] as const;
+	for (const [field, allowed] of enums) {
+		const value = fields[`${REPOSITORY_OPEN_HOST_PREFIX}${field}`];
+		if (typeof value === "string" && allowed.includes(value))
+			properties[`host_${field.replaceAll(".", "_")}`] = value;
+	}
+
+	for (const field of [
+		"wasm.wait_ms",
+		"wasm.fetch_ms",
+		"wasm.compile_ms",
+		"wasm.initialize_ms",
+		"component_compiler.import_ms",
+		"component_compiler.initialize_ms",
+		"provider.module_import_ms",
+		"provider.create_ms",
+		"provider.open_ms",
+		"provider.opfs.lock_wait_ms",
+		"provider.opfs.sqlite_init_ms",
+		"provider.opfs.pool_open_ms",
+		"provider.opfs.schema_init_ms",
+		"native_binding_open_ms",
+	]) {
+		const value = boundedNumber(
+			fields[`${REPOSITORY_OPEN_HOST_PREFIX}${field}`],
+			REPOSITORY_OPEN_PROFILE_DURATION_MAX_MS,
+		);
+		if (value !== undefined)
+			properties[`host_${field.replaceAll(".", "_")}`] = value;
+	}
+}
+
 export const MAX_OTLP_BYTES = 4 * 1024 * 1024;
 const DELIVERY_TIMEOUT_MS = 4_000;
 
@@ -169,7 +452,9 @@ async function repositoryPerformanceEvent(
 									? value.doubleValue
 									: Object.hasOwn(value, "intValue")
 										? Number(value.intValue?.toString())
-										: undefined,
+										: Object.hasOwn(value, "boolValue")
+											? value.boolValue
+											: undefined,
 						],
 					]
 				: [],
@@ -231,18 +516,78 @@ async function repositoryPerformanceEvent(
 	const entry = fields["lixray.repository.open.entry"];
 	if (["navigation", "client_navigation", "retry"].includes(String(entry)))
 		properties.entry = entry;
-	for (const phase of [
-		"bootstrap",
-		"auth",
-		"access",
-		"replica",
-		"engine",
-		"branch",
-		"session",
-		"atelier",
-		"initial_view",
-		"paint",
-	]) {
+	if (fields["lixray.repository.open.profile_version"] === 1)
+		properties.profile_version = 1;
+	copyOpenEnum(
+		properties,
+		fields,
+		"replica_state",
+		REPOSITORY_OPEN_REPLICA_STATES,
+	);
+	copyOpenEnum(properties, fields, "replica_mode", [
+		"partial_replica",
+		"remote",
+	]);
+	copyOpenEnum(properties, fields, "session_acquisition", [
+		"created",
+		"joined",
+		"reused",
+	]);
+	copyOpenBoolean(properties, fields, "initialized_this_open");
+	copyOpenNumber(
+		properties,
+		fields,
+		"storage_format",
+		"storage_format",
+		1_000_000,
+		true,
+	);
+	for (const field of [
+		"local_migration_count",
+		"authority_migration_count",
+		"engine_attempts",
+		"retry_count",
+		"replacement_count",
+		"rpc_count",
+		"rpc_response_headers_pending",
+		"rpc_failed",
+	])
+		copyOpenNumber(
+			properties,
+			fields,
+			field,
+			field,
+			REPOSITORY_OPEN_PROFILE_COUNT_MAX,
+			true,
+		);
+	for (const field of [
+		"retry_backoff_scheduled_ms",
+		"rpc_response_headers_total_ms",
+		"rpc_response_headers_max_ms",
+		"longest_phase_ms",
+	])
+		copyOpenNumber(properties, fields, field);
+	copyOpenEnum(properties, fields, "terminal_phase", REPOSITORY_OPEN_PHASES);
+	copyOpenEnum(properties, fields, "longest_phase", REPOSITORY_OPEN_PHASES);
+	for (const scope of ["local", "authority"] as const) {
+		for (const phase of [
+			"inspecting",
+			"migrating",
+			"validating",
+			"opening",
+		] as const) {
+			copyOpenNumber(
+				properties,
+				fields,
+				`native.${scope}.${phase}_ms`,
+				`native_${scope}_${phase}_ms`,
+				duration,
+			);
+		}
+	}
+	projectRepositoryOpenProfile(properties, fields);
+	projectRepositoryOpenHost(properties, fields);
+	for (const phase of REPOSITORY_OPEN_PHASES) {
 		const value = fields[`lixray.repository.open.${phase}_ms`];
 		if (
 			typeof value === "number" &&

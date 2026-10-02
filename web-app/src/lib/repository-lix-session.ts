@@ -30,6 +30,8 @@ import {
 import {
 	markRepositoryOpenPerformance,
 	REPOSITORY_OPEN_MARKS,
+	repositoryOpenTrace,
+	type RepositoryOpeningRecorder,
 } from "./repository-open-performance.ts";
 
 const GLOBAL_BRANCH_ID = "ffffffff-ffff-7fff-bfff-ffffffffffff";
@@ -152,6 +154,7 @@ type ResolvedOpenRepositoryLixSessionOptions =
 		replicaId: string;
 		storageName?: string;
 		openingTelemetryParent?: ReturnType<typeof lixTelemetryParentContext>;
+		openingRecorder?: RepositoryOpeningRecorder;
 	};
 
 const OPEN_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000, 3_000];
@@ -187,6 +190,7 @@ export async function openRepositoryLixSession(
 	// Native async/await and Web Locks can resume outside the browser's active
 	// OpenTelemetry context. Carry the initiating parent through startup itself.
 	const openingTelemetryParent = lixTelemetryParentContext();
+	const openingRecorder = repositoryOpenTrace.recorder(options.repositoryId);
 	const sessionKey = repositorySessionKey(options);
 	const unsubscribe = options.onMigration
 		? subscribeToMigrationProgress(sessionKey, options.onMigration)
@@ -207,6 +211,7 @@ export async function openRepositoryLixSession(
 						...options,
 						replicaId,
 						openingTelemetryParent,
+						openingRecorder,
 						signal,
 					});
 				} finally {
@@ -215,6 +220,11 @@ export async function openRepositoryLixSession(
 			},
 			{ signal: options.signal },
 		);
+		if (lease.acquisition !== "created")
+			openingRecorder?.reused(
+				lease.acquisition,
+				options.publicPath ? "remote" : "partial_replica",
+			);
 		return new RepositoryLixSessionLease(lease.resource, () => lease.release());
 	} catch (error) {
 		// Context may be lost after a rejected worker/Web Lock promise. Carry
@@ -283,6 +293,7 @@ async function openRepositoryLixSessionWithRetry(
 		const attemptedName =
 			source === undefined ? undefined : activeReplicaStorage(source);
 		try {
+			options.openingRecorder?.engineAttempt();
 			const session = await openRepositoryLixSessionOnce({
 				...options,
 				storageName: attemptedName,
@@ -301,6 +312,7 @@ async function openRepositoryLixSessionWithRetry(
 					!options.publicPath &&
 					isReplicaOwnershipError(error)
 				) {
+					options.openingRecorder?.replacement();
 					await replaceRepositoryReplica({
 						source: source!,
 						failedName: attemptedName!,
@@ -312,6 +324,7 @@ async function openRepositoryLixSessionWithRetry(
 							signal: options.signal,
 							shouldCaptureRequestFailures: () => true,
 							openingParent: () => options.openingTelemetryParent,
+							openingRecorder: options.openingRecorder,
 						}),
 						signal: options.signal,
 					});
@@ -320,6 +333,7 @@ async function openRepositoryLixSessionWithRetry(
 				}
 				throw error;
 			}
+			options.openingRecorder?.retry(retryDelay);
 			await delay(retryDelay, options.signal);
 		}
 	}
@@ -347,6 +361,10 @@ async function openRepositoryLixSessionOnce(
 		openingParent = undefined;
 		throw error;
 	});
+	options.openingRecorder?.opened(
+		options.publicPath ? undefined : lix.openReport,
+		options.publicPath ? "remote" : "partial_replica",
+	);
 	markRepositoryOpenPerformance(
 		REPOSITORY_OPEN_MARKS.lixOpened,
 		options.repositoryId,
@@ -443,14 +461,17 @@ async function openOpfsSyncSession(
 		signal: options.signal,
 		shouldCaptureRequestFailures: () => requestFailureReporting.enabled,
 		openingParent,
+		openingRecorder: options.openingRecorder,
 	});
 	const commonServer = {
 		url: repositoryUrl(options),
 		headers: async () => repositoryRequestHeaders(options),
 		fetch: fetcher,
 	};
-	const onProgress = (progress: LixOpenProgress) =>
+	const onProgress = (progress: LixOpenProgress) => {
+		options.openingRecorder?.progress(progress);
 		publishLocalOpenProgress(repositorySessionKey(options), progress);
+	};
 	// Native chunks may contain data outside a published path. Keep path-scoped
 	// public access on the worker's SQL-authorized remote transport.
 	if (options.publicPath)
@@ -530,6 +551,7 @@ export function createTelemetryFetch(
 		signal?: AbortSignal;
 		shouldCaptureRequestFailures?: () => boolean;
 		openingParent?: () => ResolvedOpenRepositoryLixSessionOptions["openingTelemetryParent"];
+		openingRecorder?: RepositoryOpeningRecorder;
 	},
 	dependencies: {
 		captureException?: typeof captureExceptionTelemetry;
@@ -542,6 +564,22 @@ export function createTelemetryFetch(
 	const captureException =
 		dependencies.captureException ?? captureExceptionTelemetry;
 	const reportedFailures = new Map<string, string>();
+	const tracedFetch = async (request: Request) => {
+		const finished = context.openingRecorder?.request();
+		let status: number | undefined;
+		try {
+			const response = await fetchLixWithTrace(
+				context.repositoryId,
+				request,
+				(_repositoryId, tracedRequest) => fetcher(tracedRequest),
+				context.openingParent?.(),
+			);
+			status = response.status;
+			return response;
+		} finally {
+			finished?.(status);
+		}
+	};
 
 	return async (input, init) => {
 		const requestSignal = input instanceof Request ? input.signal : undefined;
@@ -553,12 +591,7 @@ export function createTelemetryFetch(
 		let response: Response;
 		try {
 			const request = new Request(input, requestInit);
-			response = await fetchLixWithTrace(
-				context.repositoryId,
-				request,
-				(_repositoryId, tracedRequest) => fetcher(tracedRequest),
-				context.openingParent?.(),
-			);
+			response = await tracedFetch(request);
 		} catch (error) {
 			if (
 				context.shouldCaptureRequestFailures?.() !== false &&
@@ -594,12 +627,7 @@ export function createTelemetryFetch(
 						...requestInit,
 						headers,
 					});
-					response = await fetchLixWithTrace(
-						context.repositoryId,
-						retryRequest,
-						(_repositoryId, tracedRequest) => fetcher(tracedRequest),
-						context.openingParent?.(),
-					);
+					response = await tracedFetch(retryRequest);
 				}
 			} catch {
 				// Preserve the original auth response when the refresh itself fails.

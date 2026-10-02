@@ -1,7 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Copy } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { SiteHeader } from "~/components/site-header";
+import { SiteFooter, SiteHeader } from "~/components/site-header";
 import {
 	type DocsEntry,
 	docsEntries,
@@ -24,36 +24,28 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 			<SiteHeader sticky />
 
 			<div className="docs-layout">
+				<details
+					key={entry.slug}
+					className="docs-navigation-mobile mb-6 rounded-[10px] border border-border bg-panel"
+				>
+					<summary className="flex cursor-pointer items-center justify-between px-4 py-3 text-sm font-semibold">
+						{entry.label}
+						<span className="text-fg-subtle" aria-hidden="true">
+							Contents ▾
+						</span>
+					</summary>
+					<div className="border-t border-border-subtle px-4 pt-4">
+						<DocsNavLinks activeSlug={entry.slug} />
+					</div>
+				</details>
 				<nav className="docs-navigation" aria-label="Docs navigation">
-					{Object.entries(docsToc).map(([group, items]) => (
-						<div className="mb-[26px] flex flex-col gap-1.5" key={group}>
-							<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-fg-faint uppercase">
-								{group}
-							</span>
-							{items.map((item) => {
-								const slug = item.path.replace(/\.md$/, "");
-								const active = slug === entry.slug;
-								return (
-									<Link
-										className={cn(
-											"block py-[3px] text-sm text-fg-muted no-underline hover:text-fg",
-											active && "font-semibold text-accent",
-										)}
-										key={item.path}
-										to="/docs/$slug"
-										params={{ slug }}
-									>
-										{item.label}
-									</Link>
-								);
-							})}
-						</div>
-					))}
+					<DocsNavLinks activeSlug={entry.slug} />
 				</nav>
 
 				<main className="docs-main">
-					<div className="docs-content">
-						<div className="mb-4 flex justify-end">
+					<div className="docs-content relative">
+						{/* Beside the h1 from 768px, so it costs no vertical space. */}
+						<div className="mb-4 flex justify-end md:absolute md:top-2 md:right-0 md:mb-0">
 							<CopyMarkdownButton markdown={markdown} />
 						</div>
 						<DocsArticle html={html} />
@@ -69,41 +61,35 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 				</main>
 			</div>
 
-			<footer className="flex flex-wrap items-center justify-between gap-4 border-t border-fg/7 px-5 py-6 text-sm text-fg-subtle sm:px-14">
-				<span className="inline-flex items-center gap-2">
-					<img className="size-4" src="/lixray-mark.svg" alt="" />
-					<span className="font-semibold text-fg-muted">LixRay</span>
-				</span>
-				<a
-					className="no-underline hover:text-fg-muted"
-					href="https://opral.com"
-					target="_blank"
-					rel="noreferrer"
-				>
-					© 2026 Opral
-				</a>
-				<nav className="flex flex-wrap items-center gap-4">
-					<Link className="no-underline hover:text-fg-muted" to="/privacy">
-						Privacy
-					</Link>
-					<Link className="no-underline hover:text-fg-muted" to="/terms">
-						Terms
-					</Link>
-					<Link className="no-underline hover:text-fg-muted" to="/support">
-						Support
-					</Link>
-					<a
-						className="font-semibold text-fg-muted no-underline"
-						href="https://github.com/opral"
-						target="_blank"
-						rel="noreferrer"
-					>
-						GitHub ↗
-					</a>
-				</nav>
-			</footer>
+			<SiteFooter />
 		</div>
 	);
+}
+
+function DocsNavLinks({ activeSlug }: { activeSlug: string }) {
+	return Object.entries(docsToc).map(([group, items]) => (
+		<div className="mb-5 flex flex-col gap-0.5" key={group}>
+			<span className="pb-1 font-mono text-[11.5px] font-semibold tracking-[.07em] text-fg-faint uppercase">
+				{group}
+			</span>
+			{items.map((item) => {
+				const slug = item.path.replace(/\.md$/, "");
+				return (
+					<Link
+						className={cn(
+							"block py-1.5 text-sm text-fg-muted no-underline hover:text-fg",
+							slug === activeSlug && "font-semibold text-accent",
+						)}
+						key={item.path}
+						to="/docs/$slug"
+						params={{ slug }}
+					>
+						{item.label}
+					</Link>
+				);
+			})}
+		</div>
+	));
 }
 
 function DocsArticle({ html }: { html: string }) {
@@ -128,10 +114,15 @@ function DocsArticle({ html }: { html: string }) {
 				}, 1500);
 			};
 			button.addEventListener("click", onClick);
-			pre.appendChild(button);
+			// Wrap the scrolling <pre> so the button stays in its corner.
+			const wrapper = document.createElement("div");
+			wrapper.className = "docs-code";
+			pre.before(wrapper);
+			wrapper.append(pre, button);
 			cleanups.push(() => {
 				button.removeEventListener("click", onClick);
-				button.remove();
+				wrapper.before(pre);
+				wrapper.remove();
 			});
 		}
 		return () => {

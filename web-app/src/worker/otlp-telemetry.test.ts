@@ -312,8 +312,7 @@ void test("server parser failures project only the allowlisted cause and receipt
 	assert.deepEqual(properties.$exception_list, [
 		{
 			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
-			value:
-				"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_receipt_shape_invalid at $.descriptor.descriptorVersion",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID",
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
@@ -389,7 +388,7 @@ void test("JSON receipt parser positions and missing fields stay bounded in Post
 	assert.deepEqual(properties.$exception_list, [
 		{
 			type: "LIX_PARTIAL_REPLICA_STATE_INVALID",
-			value: "LIX_PARTIAL_REPLICA_STATE_INVALID: receipt_json_data at $",
+			value: "LIX_PARTIAL_REPLICA_STATE_INVALID",
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
@@ -399,7 +398,7 @@ void test("JSON receipt parser positions and missing fields stay bounded in Post
 	);
 });
 
-void test("standard OTel exceptions preserve the cause without inventing a stack trace", async () => {
+void test("standard OTel exceptions do not invent a stack trace when none was recorded", async () => {
 	const body = encode([
 		{
 			...span("lix.protocol.request"),
@@ -435,6 +434,273 @@ void test("standard OTel exceptions preserve the cause without inventing a stack
 			mechanism: { type: "generic", handled: true },
 		},
 	]);
+});
+
+void test("OTel exceptions preserve safe application frames and a bounded cause chain", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			attributes: [
+				...span("lix.repository.open").attributes,
+				{ key: "rust_origin.kind", value: { stringValue: "source_location" } },
+				{
+					key: "code.filepath",
+					value: { stringValue: "packages/lix/src/storage.rs" },
+				},
+				{ key: "code.lineno", value: { intValue: 77 } },
+				{ key: "code.column", value: { intValue: 9 } },
+				{
+					key: "rust_stacktrace_status",
+					value: { stringValue: "not_captured" },
+				},
+			],
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "StorageError" } },
+						{
+							key: "exception.message",
+							value: {
+								stringValue:
+									"Storage failed: SELECT private FROM notes\n    at fakeFromMessage (/assets/injected.js:999:1)",
+							},
+						},
+						{
+							key: "exception.stacktrace",
+							value: {
+								stringValue:
+									"StorageError: Storage failed: SELECT private FROM notes\n    at fakeFromMessage (/assets/injected.js:999:1)\n    at openRepository (https://lixray.com/assets/repository-A1.js?token=private:21:9)\n    at vendor (https://cdn.example/vendor.js:1:2)",
+							},
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "NetworkError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: {
+								stringValue: 'Response body: {"secret":"private document"}',
+							},
+						},
+						{
+							key: "exception.cause.0.stacktrace",
+							value: {
+								stringValue:
+									"NetworkError: private\n    at downloadSnapshot (https://lixray.com/assets/snapshot-B2.js:8:3)",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const exceptions = captured!.batch[0]!.properties.$exception_list as Array<{
+		type: string;
+		value: string;
+		stacktrace?: { type: string; frames: Array<Record<string, unknown>> };
+	}>;
+	assert.equal(exceptions.length, 2);
+	assert.equal(exceptions[0]!.value, "Storage failed: [SQL statement omitted]");
+	assert.deepEqual(exceptions[0]!.stacktrace, {
+		type: "raw",
+		frames: [
+			{
+				platform: "web:javascript",
+				filename: "/assets/repository-A1.js",
+				function: "openRepository",
+				lineno: 21,
+				colno: 9,
+				in_app: true,
+			},
+		],
+	});
+	assert.equal(exceptions[1]!.type, "NetworkError");
+	assert.equal(exceptions[1]!.value, "[response body omitted]");
+	assert.equal(
+		exceptions[1]!.stacktrace?.frames[0]?.filename,
+		"/assets/snapshot-B2.js",
+	);
+	assert.deepEqual(captured!.batch[0]!.properties.rust_origin, {
+		kind: "source_location",
+		file: "packages/lix/src/storage.rs",
+		line: 77,
+		column: 9,
+	});
+	assert.equal(
+		captured!.batch[0]!.properties.rust_stacktrace_status,
+		"not_captured",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(captured!.batch[0]!.properties),
+		/private query|private FROM notes|token=private|cdn\\.example|private document|Response body:|injected\\.js|999:1/,
+	);
+});
+
+void test("native LixError messages project only a validated code and safe frames", async () => {
+	const body = encode([
+		{
+			...span("lix.engine.query"),
+			attributes: [
+				...span("lix.engine.query").attributes,
+				{
+					key: "lix.error.code",
+					value: { stringValue: "LIX_SQL_QUERY_FAILED" },
+				},
+			],
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "LixError" } },
+						{
+							key: "exception.message",
+							value: {
+								stringValue:
+									"DataFusion failed for /home/private/repository; SELECT secret FROM private_table",
+							},
+						},
+						{
+							key: "exception.stacktrace",
+							value: {
+								stringValue:
+									"LixError: private query\n    at executeQuery (https://lixray.com/assets/query-A1.js:23:17)",
+							},
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "StorageError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: {
+								stringValue: "Could not open /private/customer/repository",
+							},
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = captured!.batch[0]!.properties;
+	const exceptions = properties.$exception_list as Array<{
+		type: string;
+		value: string;
+		stacktrace?: { frames: Array<Record<string, unknown>> };
+	}>;
+	assert.equal(exceptions[0]!.value, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[0]!.type, "LIX_SQL_QUERY_FAILED");
+	assert.equal(exceptions[1]!.value, "Caused by StorageError");
+	assert.equal(
+		exceptions[0]!.stacktrace?.frames[0]?.filename,
+		"/assets/query-A1.js",
+	);
+	assert.doesNotMatch(
+		JSON.stringify(properties),
+		/private_table|secret FROM|private\/repository|customer\/repository|DataFusion failed/,
+	);
+});
+
+void test("OTel projection preserves Rust origin from a bounded native cause", async () => {
+	const body = encode([
+		{
+			...span("lix.repository.open"),
+			events: [
+				{
+					name: "exception",
+					attributes: [
+						{ key: "exception.type", value: { stringValue: "Error" } },
+						{
+							key: "exception.message",
+							value: { stringValue: "repository operation failed" },
+						},
+						{
+							key: "exception.cause.count",
+							value: { stringValue: "1" },
+						},
+						{
+							key: "exception.cause.0.type",
+							value: { stringValue: "LixError" },
+						},
+						{
+							key: "exception.cause.0.message",
+							value: { stringValue: "LIX_SQL_QUERY_FAILED" },
+						},
+						{
+							key: "exception.rust_origin.kind",
+							value: { stringValue: "source_location" },
+						},
+						{
+							key: "exception.rust_origin.file",
+							value: { stringValue: "packages/lix/src/storage.rs" },
+						},
+						{
+							key: "exception.rust_origin.line",
+							value: { intValue: 77 },
+						},
+						{
+							key: "exception.rust_origin.column",
+							value: { intValue: 9 },
+						},
+						{
+							key: "exception.rust_origin.cause_index",
+							value: { intValue: 0 },
+						},
+					],
+				},
+			],
+		},
+	]);
+	let captured: CaptureBatch | undefined;
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			captured = (await sent.json()) as CaptureBatch;
+		return new Response();
+	};
+	assert.equal(
+		(await handleOtlpTelemetry(request(body), env, { fetch: fetcher })).status,
+		200,
+	);
+	const properties = captured!.batch[0]!.properties;
+	assert.deepEqual(properties.rust_origin, {
+		kind: "source_location",
+		file: "packages/lix/src/storage.rs",
+		line: 77,
+		column: 9,
+	});
+	assert.equal(properties.rust_origin_cause_index, 0);
+	assert.equal(properties.rust_stacktrace_status, undefined);
 });
 
 void test("authenticated browser exception identity overrides untrusted span identity while server identity is preserved", async () => {
@@ -1162,7 +1428,7 @@ void test("read fulfillment validation details reach PostHog without request con
 	assert.equal(properties.nativeReadRecipeMask, 129);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_READ_FULFILLMENT_INVALID: selected_change_payload_recipe_mismatch",
+		"LIX_READ_FULFILLMENT_INVALID",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /private/);
 });
@@ -1412,7 +1678,7 @@ void test("browser status-only engine failures use browser source and preserve r
 	assert.equal(props.failurePath, "$.descriptor.selectedBranch.createdAt");
 	assert.equal(
 		(props.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_PARTIAL_REPLICA_STATE_INVALID: v2_branch_incarnation_mismatch at $.descriptor.selectedBranch.createdAt",
+		"LIX_PARTIAL_REPLICA_STATE_INVALID",
 	);
 	assert.equal(props.retryable, false);
 	assert.equal(props.admissionRetryExhausted, true);
@@ -1473,7 +1739,7 @@ void test("owner point-read budget errors project only their bounded reason and 
 	assert.equal(properties.budget, 65_536);
 	assert.equal(
 		(properties.$exception_list as Array<{ value: string }>)[0]!.value,
-		"LIX_INTERNAL_ERROR: exact_owner_point_read_budget_exhausted",
+		"LIX_INTERNAL_ERROR",
 	);
 	assert.doesNotMatch(JSON.stringify(properties), /secret bytes/);
 
@@ -1567,13 +1833,319 @@ void test("browser route attempts become replay-stable performance samples with 
 				key: "lixray.repository.open.duration_ms",
 				value: { doubleValue: 123.5 },
 			},
+			{ key: "lixray.repository.open.profile_version", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.replica_state",
+				value: { stringValue: "cached" },
+			},
+			{
+				key: "lixray.repository.open.replica_mode",
+				value: { stringValue: "partial_replica" },
+			},
+			{
+				key: "lixray.repository.open.session_acquisition",
+				value: { stringValue: "joined" },
+			},
+			{
+				key: "lixray.repository.open.initialized_this_open",
+				value: { boolValue: false },
+			},
+			{ key: "lixray.repository.open.storage_format", value: { intValue: 87 } },
+			{
+				key: "lixray.repository.open.local_migration_count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.authority_migration_count",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.engine_attempts", value: { intValue: 1 } },
+			{ key: "lixray.repository.open.retry_count", value: { intValue: 2 } },
+			{
+				key: "lixray.repository.open.retry_backoff_scheduled_ms",
+				value: { doubleValue: 350 },
+			},
+			{
+				key: "lixray.repository.open.replacement_count",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.rpc_count", value: { intValue: 5 } },
+			{
+				key: "lixray.repository.open.rpc_response_headers_pending",
+				value: { intValue: 0 },
+			},
+			{ key: "lixray.repository.open.rpc_failed", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.rpc_response_headers_total_ms",
+				value: { doubleValue: 40.25 },
+			},
+			{
+				key: "lixray.repository.open.rpc_response_headers_max_ms",
+				value: { doubleValue: 20.5 },
+			},
+			{
+				key: "lixray.repository.open.terminal_phase",
+				value: { stringValue: "paint" },
+			},
+			{
+				key: "lixray.repository.open.longest_phase",
+				value: { stringValue: "engine" },
+			},
+			{
+				key: "lixray.repository.open.longest_phase_ms",
+				value: { doubleValue: 80.5 },
+			},
+			{
+				key: "lixray.repository.open.native.local.inspecting_ms",
+				value: { doubleValue: 3.5 },
+			},
+			{
+				key: "lixray.repository.open.native.local.opening_ms",
+				value: { doubleValue: 45 },
+			},
+			{
+				key: "lixray.repository.open.native.authority.migrating_ms",
+				value: { doubleValue: 5 },
+			},
 			{ key: "lixray.repository.open.engine_ms", value: { doubleValue: 80.5 } },
 			{ key: "lixray.repository.open.paint_ms", value: { intValue: 32 } },
+			{
+				key: "lixray.repository.open.profile.navigation_timing_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.resource_timing_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask_supported",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.interval_valid",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.profile.page_persisted",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.truncated",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.truncated",
+				value: { boolValue: false },
+			},
+			{
+				key: "lixray.repository.open.profile.navigation_type",
+				value: { stringValue: "reload" },
+			},
+			{
+				key: "lixray.repository.open.profile.hardware_concurrency_bucket",
+				value: { stringValue: "8" },
+			},
+			{
+				key: "lixray.repository.open.profile.device_memory_gb_bucket",
+				value: { stringValue: "4" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_effective_type",
+				value: { stringValue: "4g" },
+			},
+			{
+				key: "lixray.repository.open.profile.browser_family",
+				value: { stringValue: "chrome" },
+			},
+			{
+				key: "lixray.repository.open.profile.browser_major",
+				value: { intValue: 136 },
+			},
+			{
+				key: "lixray.repository.open.profile.dns_ms",
+				value: { doubleValue: 2.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.connect_ms",
+				value: { doubleValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.profile.tls_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.profile.ttfb_ms",
+				value: { doubleValue: 18 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_transfer_bytes",
+				value: { intValue: 2048 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_encoded_bytes",
+				value: { intValue: 1_000_000_000_001 },
+			},
+			{
+				key: "lixray.repository.open.profile.response_decoded_bytes",
+				value: { intValue: 6021 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.total_ms",
+				value: { doubleValue: 16.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.longtask.max_ms",
+				value: { doubleValue: 16.5 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.count",
+				value: { intValue: 1 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.duration_ms",
+				value: { doubleValue: 20 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.wasm.transfer_bytes",
+				value: { intValue: 512_000 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.count",
+				value: { intValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.duration_ms",
+				value: { doubleValue: 45 },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.lix.transfer_bytes",
+				value: { intValue: 150_000 },
+			},
+			{ key: "lixray.repository.open.host.version", value: { intValue: 1 } },
+			{
+				key: "lixray.repository.open.host.wasm.wait_ms",
+				value: { doubleValue: 2 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.realm_reused",
+				value: { boolValue: true },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.source",
+				value: { stringValue: "cache" },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.cache_status",
+				value: { stringValue: "hit" },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.fetch_ms",
+				value: { doubleValue: 0 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.compile_ms",
+				value: { doubleValue: 4.5 },
+			},
+			{
+				key: "lixray.repository.open.host.wasm.initialize_ms",
+				value: { doubleValue: 1.25 },
+			},
+			{
+				key: "lixray.repository.open.host.component_compiler.import_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.host.component_compiler.initialize_ms",
+				value: { doubleValue: 6 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.module_import_ms",
+				value: { doubleValue: 2 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.create_ms",
+				value: { doubleValue: 10 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.open_ms",
+				value: { doubleValue: 8 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.lock_wait_ms",
+				value: { doubleValue: 0.5 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.sqlite_init_ms",
+				value: { doubleValue: 4 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.pool_open_ms",
+				value: { doubleValue: 3 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.opfs.schema_init_ms",
+				value: { doubleValue: 5 },
+			},
+			{
+				key: "lixray.repository.open.host.native_binding_open_ms",
+				value: { doubleValue: 12 },
+			},
+			{
+				key: "lixray.repository.open.host.provider.debug_path",
+				value: { stringValue: "/private/location" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_cookie",
+				value: { stringValue: "https://private/?secret" },
+			},
+			{
+				key: "lixray.repository.open.profile.network_effective_type_private",
+				value: { stringValue: "secret" },
+			},
+			{
+				key: "lixray.repository.open.profile.resources.secret.count",
+				value: { stringValue: "private" },
+			},
+			{
+				key: "lixray.repository.open.replica_state_private",
+				value: { stringValue: "private" },
+			},
 			{ key: "private-url", value: { stringValue: "https://private/?secret" } },
 		],
 	};
+	const invalidEnumRoot = {
+		...root,
+		spanId: new Uint8Array(8).fill(4),
+		attributes: root.attributes.map((attribute) => {
+			if (attribute.key === "lixray.repository.open.profile.navigation_type")
+				return {
+					...attribute,
+					value: { stringValue: "https://private/?secret" },
+				};
+			if (attribute.key === "lixray.repository.open.profile.browser_family")
+				return { ...attribute, value: { stringValue: "unknown/private" } };
+			if (attribute.key === "lixray.repository.open.profile.browser_major")
+				return { ...attribute, value: { intValue: 1001 } };
+			return attribute;
+		}),
+	};
+	const nonFiniteMajorRoot = {
+		...root,
+		spanId: new Uint8Array(8).fill(6),
+		attributes: root.attributes.map((attribute) =>
+			attribute.key === "lixray.repository.open.profile.browser_major"
+				? { ...attribute, value: { doubleValue: Number.NaN } }
+				: attribute,
+		),
+	};
 	const bytes = encode([
 		root,
+		invalidEnumRoot,
+		nonFiniteMajorRoot,
 		{
 			...root,
 			attributes: [
@@ -1603,8 +2175,10 @@ void test("browser route attempts become replay-stable performance samples with 
 		);
 	assert.equal(batches.length, 2);
 	assert.deepEqual(batches[0]!.batch, batches[1]!.batch);
-	assert.equal(batches[0]!.batch.length, 1);
+	assert.equal(batches[0]!.batch.length, 3);
 	const event = batches[0]!.batch[0]!;
+	const invalidEnumEvent = batches[0]!.batch[1]!;
+	const nonFiniteMajorEvent = batches[0]!.batch[2]!;
 	assert.equal(event.event, "repository_open_performance");
 	assert.equal(event.distinct_id, "trusted-account");
 	assert.equal(event.properties.duration_ms, 123.5);
@@ -1613,6 +2187,159 @@ void test("browser route attempts become replay-stable performance samples with 
 	assert.equal(event.properties.outcome, "usable");
 	assert.equal(event.properties.entry, "navigation");
 	assert.equal(event.properties.visibility, "foreground");
+	assert.equal(event.properties.profile_version, 1);
+	assert.equal(event.properties.replica_state, "cached");
+	assert.equal(event.properties.replica_mode, "partial_replica");
+	assert.equal(event.properties.session_acquisition, "joined");
+	assert.equal(event.properties.initialized_this_open, false);
+	assert.equal(event.properties.storage_format, 87);
+	assert.equal(event.properties.local_migration_count, 1);
+	assert.equal(event.properties.authority_migration_count, 0);
+	assert.equal(event.properties.engine_attempts, 1);
+	assert.equal(event.properties.retry_count, 2);
+	assert.equal(event.properties.retry_backoff_scheduled_ms, 350);
+	assert.equal(event.properties.rpc_count, 5);
+	assert.equal(event.properties.rpc_response_headers_pending, 0);
+	assert.equal(event.properties.rpc_failed, 1);
+	assert.equal(event.properties.rpc_response_headers_total_ms, 40.25);
+	assert.equal(event.properties.rpc_response_headers_max_ms, 20.5);
+	assert.equal(event.properties.terminal_phase, "paint");
+	assert.equal(event.properties.longest_phase, "engine");
+	assert.equal(event.properties.longest_phase_ms, 80.5);
+	assert.equal(event.properties.native_local_inspecting_ms, 3.5);
+	assert.equal(event.properties.native_local_opening_ms, 45);
+	assert.equal(event.properties.native_authority_migrating_ms, 5);
+	assert.equal(event.properties.profile_navigation_timing_supported, true);
+	assert.equal(event.properties.profile_resource_timing_supported, true);
+	assert.equal(event.properties.profile_page_persisted, false);
+	assert.equal(event.properties.profile_navigation_type, "reload");
+	assert.equal(event.properties.profile_hardware_concurrency_bucket, "8");
+	assert.equal(event.properties.profile_device_memory_gb_bucket, "4");
+	assert.equal(event.properties.profile_network_effective_type, "4g");
+	assert.equal(event.properties.profile_browser_family, "chrome");
+	assert.equal(event.properties.profile_browser_major, 136);
+	assert.equal(event.properties.profile_dns_ms, 2.5);
+	assert.equal(event.properties.profile_response_transfer_bytes, 2048);
+	assert.equal("profile_response_encoded_bytes" in event.properties, false);
+	assert.equal(event.properties.profile_longtask_count, 1);
+	assert.equal(event.properties.profile_longtask_total_ms, 16.5);
+	assert.equal(event.properties.profile_resources_wasm_count, 1);
+	assert.equal(event.properties.profile_resources_wasm_duration_ms, 20);
+	assert.equal(event.properties.profile_resources_wasm_transfer_bytes, 512_000);
+	assert.equal(event.properties.profile_resources_lix_count, 4);
+	assert.equal(event.properties.profile_resources_lix_duration_ms, 45);
+	assert.equal(event.properties.profile_resources_lix_transfer_bytes, 150_000);
+	assert.equal(event.properties.host_version, 1);
+	assert.equal(event.properties.host_wasm_wait_ms, 2);
+	assert.equal(event.properties.host_wasm_realm_reused, true);
+	assert.equal(event.properties.host_wasm_source, "cache");
+	assert.equal(event.properties.host_wasm_cache_status, "hit");
+	assert.equal(event.properties.host_wasm_fetch_ms, 0);
+	assert.equal(event.properties.host_wasm_compile_ms, 4.5);
+	assert.equal(event.properties.host_wasm_initialize_ms, 1.25);
+	assert.equal(event.properties.host_component_compiler_import_ms, 3);
+	assert.equal(event.properties.host_component_compiler_initialize_ms, 6);
+	assert.equal(event.properties.host_provider_module_import_ms, 2);
+	assert.equal(event.properties.host_provider_create_ms, 10);
+	assert.equal(event.properties.host_provider_open_ms, 8);
+	assert.equal(event.properties.host_provider_opfs_lock_wait_ms, 0.5);
+	assert.equal(event.properties.host_provider_opfs_sqlite_init_ms, 4);
+	assert.equal(event.properties.host_provider_opfs_pool_open_ms, 3);
+	assert.equal(event.properties.host_provider_opfs_schema_init_ms, 5);
+	assert.equal(event.properties.host_native_binding_open_ms, 12);
+	assert.equal("host_provider_debug_path" in event.properties, false);
+	assert.equal(
+		"profile_network_effective_type_private" in event.properties,
+		false,
+	);
+	assert.equal("profile_resources_secret_count" in event.properties, false);
+	assert.equal("replica_state_private" in event.properties, false);
 	assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+	assert.equal("profile_navigation_type" in invalidEnumEvent.properties, false);
+	assert.equal("profile_browser_family" in invalidEnumEvent.properties, false);
+	assert.equal("profile_browser_major" in invalidEnumEvent.properties, false);
+	assert.doesNotMatch(JSON.stringify(invalidEnumEvent), /private|secret/);
+	assert.equal(
+		"profile_browser_major" in nonFiniteMajorEvent.properties,
+		false,
+	);
 	assert.doesNotMatch(JSON.stringify(event), /private|secret|unrelated/);
+});
+
+void test("nested SQL failures have one boundary exception, independent requests and stable delivery IDs", async () => {
+	const attr = (key: string, value: string) => ({
+		key,
+		value: { stringValue: value },
+	});
+	const failed = (name: string, id: number, owner: string) => ({
+		...span(name),
+		spanId: Array(8).fill(id),
+		status: { code: 2 },
+		attributes: [
+			...span(name).attributes,
+			attr("lix.error.owner", owner),
+			attr("lix.error.code", "LIX_TYPE_MISMATCH"),
+			attr("db.query.text", "private SQL"),
+			attr("parameters", "secret content"),
+		],
+		events: [
+			{
+				name: "exception",
+				attributes: [
+					attr("exception.type", "LIX_TYPE_MISMATCH"),
+					attr("exception.message", "LIX_TYPE_MISMATCH"),
+				],
+			},
+			{
+				name: "duplicate log",
+				attributes: [
+					attr("level", "ERROR"),
+					attr("message", "private repeated detail"),
+				],
+			},
+		],
+	});
+	const batches: CaptureBatch[] = [];
+	const fetcher: typeof fetch = async (input, init) => {
+		const sent = new Request(input, init);
+		if (sent.url.endsWith("/batch/"))
+			batches.push((await sent.json()) as CaptureBatch);
+		return new Response();
+	};
+	// Export child and boundary separately: no reliance on export ordering or batch membership.
+	for (let retry = 0; retry < 2; retry++) {
+		for (const spans of [
+			[failed("INSERT", 2, "diagnostic")],
+			[
+				failed("Lix protocol request", 3, "boundary"),
+				failed("Lix protocol request", 4, "boundary"),
+			],
+		]) {
+			assert.equal(
+				(
+					await handleOtlpTelemetry(request(encode(spans)), env, {
+						fetch: fetcher,
+					})
+				).status,
+				200,
+			);
+		}
+	}
+	const exceptions = batches
+		.flatMap((batch) => batch.batch)
+		.filter((event) => event.event === "$exception");
+	assert.equal(exceptions.length, 4);
+	assert.equal(new Set(exceptions.map((event) => event.uuid)).size, 2);
+	assert.deepEqual(
+		exceptions.slice(0, 2).map((event) => event.uuid),
+		exceptions.slice(2).map((event) => event.uuid),
+	);
+	for (const event of exceptions) {
+		assert.equal(event.distinct_id, "account-123");
+		assert.equal(event.properties.$otel_trace_id, "01".repeat(16));
+		assert.doesNotMatch(
+			JSON.stringify(event),
+			/private SQL|secret content|private repeated detail/,
+		);
+	}
 });

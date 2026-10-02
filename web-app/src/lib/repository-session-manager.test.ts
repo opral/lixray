@@ -22,12 +22,38 @@ void test("reuses a repository resource while Strict Mode remounts", async () =>
 	const second = await acquireManagedRepositoryResource("repository-1", open);
 
 	assert.equal(second.resource, first.resource);
+	assert.equal(first.acquisition, "created");
+	assert.equal(second.acquisition, "reused");
 	assert.equal(openCount, 1);
 	assert.equal(closeCount, 0);
 
 	second.release();
 	await new Promise((resolve) => setTimeout(resolve, 10));
 	assert.equal(closeCount, 1);
+});
+
+void test("a coalesced pending acquisition is distinct from a live session reuse", async () => {
+	let ready!: () => void;
+	const open = async () => {
+		await new Promise<void>((resolve) => {
+			ready = resolve;
+		});
+		return { close: async () => {} };
+	};
+	const first = acquireManagedRepositoryResource("profile-pending", open);
+	const joined = acquireManagedRepositoryResource("profile-pending", open);
+	ready();
+	const [created, coalesced] = await Promise.all([first, joined]);
+	const reused = await acquireManagedRepositoryResource(
+		"profile-pending",
+		open,
+	);
+	assert.equal(created.acquisition, "created");
+	assert.equal(coalesced.acquisition, "joined");
+	assert.equal(reused.acquisition, "reused");
+	created.release();
+	coalesced.release();
+	reused.release();
 });
 
 void test("starts one close lifecycle during a real page unload", async () => {

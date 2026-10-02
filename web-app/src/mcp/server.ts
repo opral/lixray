@@ -1,3 +1,4 @@
+import { isWireValueType, wireValue } from "./wire-value.ts";
 /*
  * The MCP SDK exposes dynamically registered tool arguments as `any`. Keep
  * this exception at the adapter boundary; the individual Zod schemas and
@@ -31,13 +32,11 @@ import {
 import {
 	createLixError,
 	isLixError,
-	mcpLocalAdapterFailureStage,
 	LixService,
 	type CommitSpan,
 	type DiffRef,
 	type ExecuteRequest,
 	type FileChange,
-	type McpLocalAdapterFailureStage,
 } from "./lix-service.ts";
 import {
 	mcpSurfaceVersion,
@@ -46,6 +45,16 @@ import {
 	type McpExecuteInputObservation,
 	type McpExecuteOutputObservation,
 } from "./tool-observation.ts";
+import {
+	mcpExceptionStacktrace,
+	type McpExceptionStacktrace,
+} from "./exception-frames.ts";
+import {
+	safeRustErrorOriginInCauseChain,
+	safeRustStacktraceStatus,
+	type RustStacktraceStatus,
+	type SafeRustErrorOrigin,
+} from "../lib/exception-stack-trace.ts";
 
 import { MCP_RESOURCE } from "./auth.ts";
 import {
@@ -132,6 +141,13 @@ export interface McpToolCallObservation {
 	spanId?: string;
 	surfaceVersion: string;
 	errorCode?: string;
+	exceptionOwner?: "mcp" | "protocol";
+	resultEncodingType?: string;
+	exceptionStacktrace?: McpExceptionStacktrace;
+	exceptionRustOrigin?: SafeRustErrorOrigin;
+	exceptionRustOriginCauseIndex?: number;
+	exceptionRustStacktraceStatus?: RustStacktraceStatus;
+	commitOutcome?: "not_committed" | "committed" | "unknown";
 	lixId?: string;
 	commit?: CommitSpan | null;
 	inventoryCommitId?: string;
@@ -157,15 +173,6 @@ export interface McpServerOptions {
 	posthogHost?: string;
 	posthogDistinctId?: string;
 	posthogClientId?: string;
-	serverRelease?: string;
-	onLocalAdapterFailure?: (failure: {
-		requestId: string;
-		toolName: string;
-		stage: McpLocalAdapterFailureStage;
-		errorCode?: string;
-		traceId?: string;
-		spanId?: string;
-	}) => void;
 	onPosthogFlush?: (flush: () => Promise<void>) => void;
 	/** Internal transport factory installs tracing outside official analytics. */
 	deferToolTracing?: boolean;
@@ -372,15 +379,7 @@ const context = z
 const branchId = z.string().min(1).describe("Lix branch id");
 const commitId = z.string().min(1).describe("Lix commit id");
 const sourceBranchId = z.string().min(1).describe("Source branch id");
-const wireValue = z.union([
-	z.object({ kind: z.literal("null"), value: z.null().optional() }).strict(),
-	z.object({ kind: z.literal("bool"), value: z.boolean() }).strict(),
-	z.object({ kind: z.literal("int"), value: z.number().int() }).strict(),
-	z.object({ kind: z.literal("float"), value: z.number() }).strict(),
-	z.object({ kind: z.literal("text"), value: z.string() }).strict(),
-	z.object({ kind: z.literal("blob"), base64: z.string() }).strict(),
-	z.object({ kind: z.literal("json"), value: z.unknown() }).strict(),
-]);
+
 const executeOptions = z
 	.object({
 		origin_key: z.string().optional(),
@@ -393,7 +392,7 @@ const sqlStatement = z
 // Rows carry the same {kind, value} wire shape as params; the output schema
 // says so once instead of inlining the union again per tool.
 const wireRows = z
-	.array(z.array(z.unknown()))
+	.array(z.array(wireValue))
 	.describe("Rows of wire values in the same {kind, value} shape as params");
 
 const listLixesOutput = withError(
@@ -588,9 +587,6 @@ interface ToolCallState {
 	completed?: Promise<void>;
 	observation?: McpToolCallObservation;
 	commitOutcome?: "not_committed" | "committed" | "unknown";
-	traceId?: string;
-	spanId?: string;
-	onLocalAdapterFailure?: McpServerOptions["onLocalAdapterFailure"];
 }
 const TOOL_CALL_STATE = createContextKey("lixray.mcp.tool-call");
 
@@ -617,7 +613,6 @@ function traceToolDispatch(
 			completed: new Promise<void>((resolve) => {
 				complete = resolve;
 			}),
-			onLocalAdapterFailure: options.onLocalAdapterFailure,
 		};
 		// Only advertise known tool names; unknown names can contain private input.
 		const requestedTool = request.params?.name ?? "";
@@ -639,9 +634,6 @@ function traceToolDispatch(
 		const work = withSpan(
 			"mcp.tool",
 			async (span) => {
-				const spanContext = span.spanContext();
-				state.traceId = spanContext.traceId;
-				state.spanId = spanContext.spanId;
 				return otelContext.with(
 					otelContext.active().setValue(TOOL_CALL_STATE, state),
 					async () => {
@@ -649,6 +641,14 @@ function traceToolDispatch(
 						try {
 							const result = await handler(request, extra);
 							outcome = result?.isError === true ? "error" : "success";
+							if (
+								result?.isError === true &&
+								state.observation?.outcome === "success"
+							)
+								state.observation = {
+									...state.observation,
+									exceptionOwner: "protocol",
+								};
 							return result;
 						} finally {
 							span.setAttribute("mcp.tool.outcome", outcome);
@@ -662,6 +662,9 @@ function traceToolDispatch(
 								surfaceVersion: mcpSurfaceVersion(toolSurfaceDescriptions()),
 								...state.observation,
 								outcome,
+								...(state.commitOutcome
+									? { commitOutcome: state.commitOutcome }
+									: {}),
 								traceId: span.spanContext().traceId,
 								spanId: span.spanContext().spanId,
 							};
@@ -1286,7 +1289,10 @@ export async function handleMcpTransport(
 					"mcp.error.type": "MCP_PROTOCOL_ERROR",
 					"mcp.failure.stage": "transport",
 				});
-				console.error("LixRay MCP protocol error", { requestId, error });
+				console.error("LixRay MCP protocol error", {
+					requestId,
+					error: errorDetails(error),
+				});
 			},
 		);
 		// Never consume SSE: only JSON mode responses are finite.
@@ -1341,7 +1347,10 @@ export async function handleMcpTransport(
 			"mcp.error.type": "MCP_INTERNAL_ERROR",
 			"mcp.failure.stage": "transport",
 		});
-		console.error("LixRay MCP transport error", { requestId, error });
+		console.error("LixRay MCP transport error", {
+			requestId,
+			error: errorDetails(error),
+		});
 		response = Response.json(
 			{
 				jsonrpc: "2.0",
@@ -1398,16 +1407,6 @@ async function handleMcpTransportRequest(
 				deferToolTracing: true,
 				serverName: options.serverName ?? mcpServerNameForUrl(request.url),
 				urlOrigin: options.urlOrigin ?? new URL(request.url).origin,
-				onLocalAdapterFailure:
-					posthog && options.posthogDistinctId
-						? (failure) =>
-								captureMcpLocalAdapterException(
-									posthog,
-									options.posthogDistinctId!,
-									options.serverRelease,
-									failure,
-								)
-						: options.onLocalAdapterFailure,
 			};
 			const server = createLixrayMcpServer(service, serverOptions);
 			if (posthog) {
@@ -1501,63 +1500,6 @@ async function handleMcpTransportRequest(
 		finishAnalytics();
 		throw error;
 	}
-}
-
-function captureMcpLocalAdapterException(
-	posthog: PostHogMCP,
-	distinctId: string,
-	serverRelease: string | undefined,
-	failure: {
-		requestId: string;
-		toolName: string;
-		stage: McpLocalAdapterFailureStage;
-		errorCode?: string;
-		traceId?: string;
-		spanId?: string;
-	},
-): void {
-	const errorId = crypto.randomUUID();
-	const properties: Record<string, string> = {
-		error_id: errorId,
-		service_name: "lixray-mcp",
-		operation: "mcp.tool",
-		http_method: "POST",
-		http_route: MCP_PATH,
-		request_id: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(failure.requestId)
-			? failure.requestId
-			: "unknown",
-		tool_name: /^[a-z][a-z0-9_]{0,63}$/.test(failure.toolName)
-			? failure.toolName
-			: "unknown",
-		failure_stage: failure.stage,
-		server_release:
-			serverRelease && /^[A-Za-z0-9._:-]{1,128}$/.test(serverRelease)
-				? serverRelease
-				: "unknown",
-	};
-	if (
-		failure.errorCode &&
-		/^[A-Za-z][A-Za-z0-9_]{0,63}$/.test(failure.errorCode)
-	)
-		properties.error_code = failure.errorCode;
-	const validTraceId =
-		typeof failure.traceId === "string" &&
-		/^[a-f0-9]{32}$/.test(failure.traceId) &&
-		!/^0+$/.test(failure.traceId);
-	const validSpanId =
-		typeof failure.spanId === "string" &&
-		/^[a-f0-9]{16}$/.test(failure.spanId) &&
-		!/^0+$/.test(failure.spanId);
-	if (validTraceId && validSpanId) {
-		properties.$otel_trace_id = failure.traceId!;
-		properties.$otel_span_id = failure.spanId!;
-		properties.error_correlation = "active_trace";
-	} else {
-		properties.error_correlation = "no_trace_provider";
-	}
-	const safeError = new Error("MCP adapter failure");
-	safeError.name = "McpAdapterError";
-	posthog.captureException(safeError, distinctId, properties, errorId);
 }
 
 interface McpDiscoveryOptions {
@@ -1797,23 +1739,6 @@ function registerTool(
 				const callState = otelContext.active().getValue(TOOL_CALL_STATE) as
 					| ToolCallState
 					| undefined;
-				const adapterStage =
-					mcpLocalAdapterFailureStage(caught) ??
-					(executionCompleted ? "tool_result_serialization" : undefined);
-				if (adapterStage) {
-					try {
-						callState?.onLocalAdapterFailure?.({
-							requestId,
-							toolName: name,
-							stage: adapterStage,
-							errorCode: error.code,
-							...(callState.traceId ? { traceId: callState.traceId } : {}),
-							...(callState.spanId ? { spanId: callState.spanId } : {}),
-						});
-					} catch {
-						/* Error tracking cannot affect the tool result. */
-					}
-				}
 				if (
 					callState &&
 					"outcome" in error &&
@@ -1823,12 +1748,30 @@ function registerTool(
 				)
 					callState.commitOutcome = error.outcome;
 				const lixId = await observationLixId(service, input);
+				const encodingType = resultEncodingType(baseError.details);
+				const exceptionStacktrace = mcpExceptionStacktrace(caught);
+				const locatedRustOrigin = safeRustErrorOriginInCauseChain(caught);
+				const exceptionRustOrigin = locatedRustOrigin?.origin;
+				const exceptionRustOriginCauseIndex = locatedRustOrigin?.causeIndex;
+				const exceptionRustStacktraceStatus =
+					locatedRustOrigin?.rustStacktraceStatus ??
+					safeRustStacktraceStatus(caught);
 				stageToolSummary({
 					requestId,
 					toolName,
 					outcome: "error",
 					surfaceVersion,
 					errorCode: error.code,
+					exceptionOwner: exceptionOwner(baseError.details),
+					...(encodingType ? { resultEncodingType: encodingType } : {}),
+					...(exceptionStacktrace ? { exceptionStacktrace } : {}),
+					...(exceptionRustOrigin ? { exceptionRustOrigin } : {}),
+					...(exceptionRustOriginCauseIndex !== undefined
+						? { exceptionRustOriginCauseIndex }
+						: {}),
+					...(exceptionRustStacktraceStatus
+						? { exceptionRustStacktraceStatus }
+						: {}),
 					...(lixId ? { lixId } : {}),
 					...(executeInput ? { executeInput } : {}),
 					...(rawStatements ? { rawStatements } : {}),
@@ -2490,12 +2433,68 @@ function stageToolSummary(observation: McpToolCallObservation): void {
 	// Dispatch publishes one completed summary after SDK output validation.
 }
 
+function exceptionOwner(details: unknown): "mcp" | "protocol" {
+	return details &&
+		typeof details === "object" &&
+		"exceptionOwner" in details &&
+		details.exceptionOwner === "protocol"
+		? "protocol"
+		: "mcp";
+}
+
+function resultEncodingType(details: unknown): string | undefined {
+	if (
+		!details ||
+		typeof details !== "object" ||
+		!("failureReason" in details) ||
+		details.failureReason !== "invalid_result_value" ||
+		!("valueType" in details) ||
+		!isWireValueType(details.valueType)
+	)
+		return undefined;
+	return details.valueType;
+}
+
 function errorDetails(caught: unknown): Record<string, unknown> {
-	if (caught instanceof Error)
-		return { name: caught.name, message: caught.message };
-	return caught && typeof caught === "object"
-		? { ...(caught as Record<string, unknown>) }
-		: { value: String(caught) };
+	let name: unknown;
+	let code: unknown;
+	if (caught instanceof Error) {
+		try {
+			name = caught.name;
+			code = (caught as Error & { code?: unknown }).code;
+		} catch {
+			// Error properties may be defined by an arbitrary thrown subclass.
+		}
+	}
+	const safeName =
+		typeof name === "string" && /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(name)
+			? name
+			: caught instanceof Error
+				? "Error"
+				: "NonErrorThrow";
+	const safeCode =
+		typeof code === "string" &&
+		/^(?:LIX_[A-Z0-9_]{1,100}|[a-z_]{1,100})$/.test(code)
+			? code
+			: undefined;
+	const exceptionStacktrace = mcpExceptionStacktrace(caught);
+	const locatedRustOrigin = safeRustErrorOriginInCauseChain(caught);
+	const rustStacktraceStatus =
+		locatedRustOrigin?.rustStacktraceStatus ?? safeRustStacktraceStatus(caught);
+	return {
+		name: safeName,
+		...(safeCode ? { code: safeCode } : {}),
+		...(exceptionStacktrace ? { stacktrace: exceptionStacktrace } : {}),
+		...(locatedRustOrigin
+			? {
+					rustOrigin: locatedRustOrigin.origin,
+					...(locatedRustOrigin.causeIndex !== undefined
+						? { rustOriginCauseIndex: locatedRustOrigin.causeIndex }
+						: {}),
+				}
+			: {}),
+		...(rustStacktraceStatus ? { rustStacktraceStatus } : {}),
+	};
 }
 
 /** Defer analytics shutdown until EOF/error/cancel, never await network export. */

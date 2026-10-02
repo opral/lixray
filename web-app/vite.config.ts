@@ -1,5 +1,6 @@
 import posthogRollupPlugin from "@posthog/rollup-plugin";
 import tailwindcss from "@tailwindcss/vite";
+import { privateTailwind } from "../vendor/atelier/scripts/private-tailwind.mjs";
 import { tanstackStart } from "@tanstack/react-start/plugin/vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
@@ -66,6 +67,10 @@ function posthogSourceMapPlugins(command: string) {
 }
 
 export default defineConfig(({ command }) => ({
+	build: {
+		// Preserve Atelier's inherited light-dark() design tokens.
+		cssTarget: ["chrome123", "firefox120", "safari17.5"],
+	},
 	define: {
 		"import.meta.env.VITE_LIXRAY_RELEASE_ID": JSON.stringify(
 			process.env.RAILWAY_GIT_COMMIT_SHA?.trim() || "development",
@@ -78,27 +83,11 @@ export default defineConfig(({ command }) => ({
 		alias:
 			command === "serve"
 				? [
-						// Vite serves Atelier source in development, so each editor's
-						// JavaScript import brings in its own CSS. The production build
-						// instead links the package's complete, built stylesheet.
+						// Keep the library CSS in its own compilation context in development;
+						// the host and library have distinct Tailwind namespaces.
 						{
 							find: /^@opral\/atelier\/style\.css(?:\?url)?$/,
 							replacement: `${path.resolve(atelierSourceDir, "index.css")}?url`,
-						},
-						// The token sheet, the Tailwind adapter and the document sheet
-						// are package exports; in serve mode the bare alias below would
-						// send them to index.ts/<file>. Every CSS export needs a line.
-						{
-							find: "@opral/atelier/theme.css",
-							replacement: path.resolve(atelierSourceDir, "shell/theme.css"),
-						},
-						{
-							find: "@opral/atelier/tailwind.css",
-							replacement: path.resolve(atelierSourceDir, "shell/tailwind.css"),
-						},
-						{
-							find: "@opral/atelier/document.css",
-							replacement: path.resolve(atelierSourceDir, "shell/document.css"),
 						},
 						{
 							find: "@opral/atelier/file-icons",
@@ -248,6 +237,7 @@ export default defineConfig(({ command }) => ({
 	plugins: [
 		devHealthcheckPlugin(),
 		tailwindcss(),
+		privateTailwind(),
 		tanstackStart({
 			server: {
 				entry: "railway-server.ts",

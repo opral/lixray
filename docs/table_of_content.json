@@ -6,6 +6,7 @@
 	"Guides": [
 		{ "path": "getting-started.md", "label": "Get started" },
 		{ "path": "internal-apps.md", "label": "Build an internal app" },
-		{ "path": "access-tokens.md", "label": "Create an access token" }
+		{ "path": "access-tokens.md", "label": "Create an access token" },
+		{ "path": "self-host.md", "label": "Self-host" }
 	]
 }

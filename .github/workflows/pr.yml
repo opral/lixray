@@ -323,12 +323,14 @@ jobs:
           path: vendor/lix/packages
       - run: pnpm --dir web-app ci:prepare:web
       - run: bash .github/scripts/install-playwright-browser.sh
+      - name: Test CSS ownership and packed Atelier styles
+        run: pnpm --filter @opral/atelier test:styles && pnpm --dir web-app test:styles
       - name: Test MCP Apps write preview
         run: pnpm --dir web-app test:mcp-ui
       - name: Test published file rendering
         run: pnpm --dir web-app test:published
       - name: Test device recovery and directory review controls
-        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts
+        run: pnpm --dir web-app exec playwright test --config playwright.file-component.config.ts recovery.spec.ts directory.spec.ts home-history.spec.ts
       - name: Test snapshot download and PostHog reproduction telemetry
         run: pnpm --dir web-app test:snapshot-telemetry
       - uses: actions/upload-artifact@v4

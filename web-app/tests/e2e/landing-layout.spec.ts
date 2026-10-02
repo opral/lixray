@@ -2,14 +2,15 @@ import { expect, test } from "@playwright/test";
 
 for (const width of [1440, 390, 320]) {
 	test(
-		"landing review preview and one rail fit at " + width + "px",
+		"landing hero, preview, and sources fit at " + width + "px",
 		async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });
 			await page.goto("/");
 
 			await expect(
 				page.getByRole("heading", {
-					name: "A shared repository for your company’s data and AI agents.",
+					level: 1,
+					name: /Shared repository for you and your AI\sagents/,
 				}),
 			).toBeVisible();
 			await expect(page.getByRole("banner")).toBeVisible();
@@ -23,24 +24,12 @@ for (const width of [1440, 390, 320]) {
 				}),
 			).toHaveAttribute("href", "/privacy");
 			await expect(
-				page.getByRole("img", {
-					name: /AI agents, apps, and services connect to one repository/,
-				}),
+				page.locator('section[aria-label="Product preview"] figure'),
+			).toBeVisible();
+			await expect(
+				page.getByRole("img", { name: /flow into LixRay/ }),
 			).toHaveCount(1);
 
-			const panes = page.locator(
-				'section[aria-label="Repository preview"] figure > div > div',
-			);
-			await expect(panes).toHaveCount(2);
-			const files = await panes.nth(0).boundingBox();
-			const proposal = await panes.nth(1).boundingBox();
-			expect(files).not.toBeNull();
-			expect(proposal).not.toBeNull();
-			if (width >= 640) {
-				expect(proposal!.x).toBeGreaterThan(files!.x + files!.width - 1);
-			} else {
-				expect(proposal!.y).toBeGreaterThan(files!.y + files!.height - 1);
-			}
 			const hasHorizontalOverflow = await page.evaluate(
 				() => document.documentElement.scrollWidth > window.innerWidth,
 			);
@@ -48,3 +37,17 @@ for (const width of [1440, 390, 320]) {
 		},
 	);
 }
+
+test("pricing page lists self-host and managed tiers", async ({ page }) => {
+	await page.goto("/pricing");
+	await expect(
+		page.getByRole("heading", { level: 1, name: "Pricing" }),
+	).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Self-host" })).toBeVisible();
+	await expect(
+		page.getByRole("heading", { name: "LixRay Managed" }),
+	).toBeVisible();
+	await expect(
+		page.getByRole("link", { name: "Read the self-host docs" }),
+	).toHaveAttribute("href", "/docs/self-host");
+});

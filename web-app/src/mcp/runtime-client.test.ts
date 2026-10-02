@@ -1,11 +1,12 @@
 import { compatibility } from "@lix-js/sdk/compatibility";
+import type { Lix } from "@lix-js/sdk";
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
 	WorkerLixRuntimeClient,
 	type WorkerLixRuntimeEnv,
 } from "./runtime-client.ts";
-import { isLixError, mcpLocalAdapterFailureStage } from "./lix-service.ts";
+import { isLixError } from "./lix-service.ts";
 
 const LIX_ID = "11111111-1111-4111-8111-111111111111";
 
@@ -153,20 +154,13 @@ void test("active branch, switch, and execution use one serialized Lix session",
 	assert.deepEqual(operations, ["active-branch", "switch:main", "execute"]);
 });
 
-void test("unsupported SDK result values carry an internal adapter failure origin", async () => {
+void test("canonical SDK rejects noncanonical wire results with its native error", async () => {
 	const runtime = client(async (_lixId, request) => {
 		if (testProtocolPath(request) === "/lix/v1/")
 			return branchProtocolResponse(request);
 		return Response.json({
 			columns: [{ name: "row_ref", type: "row_ref" }],
-			rows: [
-				[
-					{
-						kind: "row_ref",
-						value: "lix_row_ref:v2:AAAADWxpeF9rZXlfdmFsdWUAAAEDAAAABWhlbGxv",
-					},
-				],
-			],
+			rows: [[{ kind: "row_ref", value: "malformed" }]],
 			rowsAffected: 1,
 			notices: [],
 		});
@@ -178,15 +172,145 @@ void test("unsupported SDK result values carry an internal adapter failure origi
 		}),
 		(error: unknown) => {
 			assert.equal(isLixError(error), true);
-			assert.equal(
-				mcpLocalAdapterFailureStage(error),
-				"sdk_result_encoding",
-				`${(error as Error).name}: ${(error as Error).message}`,
-			);
+			assert.equal((error as { code?: unknown }).code, "LIX_TYPE_MISMATCH");
 			assert.equal(
 				(error as Error).message,
-				"Lix returned an invalid row_ref value.",
+				"value is not a canonical lix_row_ref",
 			);
+			assert.equal((error as { details?: unknown }).details, undefined);
+			return true;
+		},
+	);
+});
+
+void test("valid row references pass through the canonical SDK value codec", async () => {
+	const rowRef = "lix_row_ref:v2:AAAADWxpeF9rZXlfdmFsdWUAAAEDAAAABWhlbGxv";
+	const runtime = client(async (_lixId, request) => {
+		if (testProtocolPath(request) === "/lix/v1/")
+			return branchProtocolResponse(request);
+		return Response.json({
+			columns: [{ name: "row_ref", type: "row_ref" }],
+			rows: [[{ kind: "row_ref", value: rowRef }]],
+			rowsAffected: 1,
+			notices: [],
+		});
+	});
+
+	const result = await runtime.execute(LIX_ID, {
+		sql: "SELECT * FROM lix_history('lix_file')",
+	});
+	assert.deepEqual(result.rows[0]?.[0], { kind: "row_ref", value: rowRef });
+});
+
+void test("executeBatch preserves canonical SDK rejection without inventing a commit outcome", async () => {
+	const runtime = client(async (_lixId, request) => {
+		if (testProtocolPath(request) !== "/lix/v1/execute-batch")
+			return branchProtocolResponse(request);
+		return Response.json({
+			commit: { before: "before", after: "after" },
+			results: [
+				{
+					statementIndex: 0,
+					columns: [{ name: "row_ref", type: "row_ref" }],
+					rows: [[{ kind: "row_ref", value: "malformed" }]],
+					rowsAffected: 1,
+					notices: [],
+				},
+			],
+		});
+	});
+
+	await assert.rejects(
+		runtime.executeBatch(LIX_ID, { statements: [{ sql: "SELECT 1" }] }),
+		(error: unknown) => {
+			assert.equal(isLixError(error), true);
+			assert.equal((error as { code?: unknown }).code, "LIX_TYPE_MISMATCH");
+			assert.equal(
+				(error as Error).message,
+				"value is not a canonical lix_row_ref",
+			);
+			assert.equal((error as { details?: unknown }).details, undefined);
+			assert.equal((error as Error & { cause?: unknown }).cause, undefined);
+			return true;
+		},
+	);
+});
+
+void test("adapter result encoding failures carry bounded MCP ownership", async () => {
+	const runtime = new WorkerLixRuntimeClient(
+		env(),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			openLix: async () =>
+				({
+					activeBranchId: async () => "main",
+					switchBranch: async () => ({ branchId: "main" }),
+					close: async () => {},
+					execute: async () => ({
+						columns: [{ name: "row_ref", type: "row_ref" }],
+						rows: [["malformed"]],
+						rowsAffected: 1,
+						notices: [],
+					}),
+				}) as unknown as Lix,
+		},
+	);
+
+	await assert.rejects(
+		runtime.execute(LIX_ID, { sql: "SELECT 1" }),
+		(error: unknown) => {
+			assert.equal(isLixError(error), true);
+			assert.deepEqual((error as { details?: unknown }).details, {
+				exceptionOwner: "mcp",
+				failureReason: "invalid_result_value",
+				valueType: "row_ref",
+			});
+			return true;
+		},
+	);
+});
+
+void test("executeBatch keeps the adapter result encoding cause and known commit outcome", async () => {
+	const runtime = new WorkerLixRuntimeClient(
+		env(),
+		{ userId: "user-1", token: "secret-oauth-token" },
+		async () => null,
+		{
+			openLix: async () =>
+				({
+					activeBranchId: async () => "main",
+					switchBranch: async () => ({ branchId: "main" }),
+					close: async () => {},
+					executeBatch: async () => ({
+						commit: { before: "before", after: "after" },
+						results: [
+							{
+								statementIndex: 0,
+								columns: [{ name: "row_ref", type: "row_ref" }],
+								rows: [["malformed"]],
+								rowsAffected: 1,
+								notices: [],
+							},
+						],
+					}),
+				}) as unknown as Lix,
+		},
+	);
+
+	await assert.rejects(
+		runtime.executeBatch(LIX_ID, { statements: [{ sql: "SELECT 1" }] }),
+		(error: unknown) => {
+			assert.equal(isLixError(error), true);
+			assert.deepEqual((error as { details?: unknown }).details, {
+				exceptionOwner: "mcp",
+				failureReason: "invalid_result_value",
+				valueType: "row_ref",
+				outcome: "committed",
+			});
+			const cause = (error as Error & { cause?: unknown }).cause;
+			assert.ok(cause instanceof Error);
+			assert.match(cause.stack ?? "", /encodeLixValue/);
 			return true;
 		},
 	);

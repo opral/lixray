@@ -16,7 +16,6 @@ void test("extracts safe Lix protocol fields for exception telemetry", () => {
 		error_kind: "LixError",
 		lix_error_code: "LIX_COLUMN_NOT_FOUND",
 		lix_error_status: 404,
-		lix_error_hint: "Use the canonical file column.",
 	});
 	assert.doesNotMatch(
 		JSON.stringify(lixErrorTelemetryProperties(error)),

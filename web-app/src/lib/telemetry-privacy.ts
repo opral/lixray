@@ -63,6 +63,7 @@ const SENSITIVE_EVENT_PROPERTY_KEYS = new Set([
 	"httpresponsebody",
 	"http_response_body",
 	"invite_token",
+	"lix_error_hint",
 	"organization_name",
 	"refresh_token",
 	"response_body",
@@ -93,9 +94,13 @@ export function scrubPostHogEvent(
 ): CaptureResult | null {
 	if (!event) return event;
 	const scrubbableEvent = event as ScrubbableCaptureResult;
-	const classifiedProperties = classifyExceptionContext(
+	const safeExceptionProperties = scrubNativeExceptionValues(
 		scrubbableEvent.event,
 		scrubbableEvent.properties,
+	);
+	const classifiedProperties = classifyExceptionContext(
+		scrubbableEvent.event,
+		safeExceptionProperties,
 	);
 	const properties =
 		scrubbableEvent.event === "$autocapture"
@@ -105,6 +110,59 @@ export function scrubPostHogEvent(
 		...scrubbableEvent,
 		properties: scrubPostHogValue(properties),
 	} as CaptureResult;
+}
+
+/** Native error messages can contain arbitrary SQL or repository identifiers. */
+function scrubNativeExceptionValues(
+	event: string | undefined,
+	value: unknown,
+): unknown {
+	if (event !== "$exception" || !isRecord(value)) return value;
+	const code = safeLixErrorCode(value.lix_error_code);
+	const exceptionList = value.$exception_list;
+	if (!isUnknownArray(exceptionList)) {
+		const properties = { ...value };
+		if (code) properties.lix_error_code = code;
+		else delete properties.lix_error_code;
+		delete properties.lix_error_hint;
+		return properties;
+	}
+	const first = exceptionList[0];
+	const primaryType = safeExceptionType(
+		isRecord(first) ? first.type : undefined,
+	);
+	const hasNativeError = code !== undefined || primaryType === "LixError";
+	const properties = { ...value };
+	if (code) properties.lix_error_code = code;
+	else delete properties.lix_error_code;
+	delete properties.lix_error_hint;
+	if (!hasNativeError) return properties;
+	properties.$exception_list = exceptionList.map((exception, index) => {
+		if (!isRecord(exception)) return exception;
+		const type = safeExceptionType(exception.type) ?? "Error";
+		return {
+			...exception,
+			type: index === 0 && code ? code : type,
+			value: index === 0 ? (code ?? type) : `Caused by ${type}`,
+		};
+	});
+	return properties;
+}
+
+function safeLixErrorCode(value: unknown): string | undefined {
+	return typeof value === "string" && /^LIX_[A-Z0-9_]{1,100}$/.test(value)
+		? value
+		: undefined;
+}
+
+function safeExceptionType(value: unknown): string | undefined {
+	return typeof value === "string" && /^[A-Z][A-Za-z0-9_]{0,63}$/.test(value)
+		? value
+		: undefined;
+}
+
+function isUnknownArray(value: unknown): value is unknown[] {
+	return Array.isArray(value);
 }
 
 function classifyExceptionContext(
@@ -260,6 +318,10 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 	const scrubbed = input
 		.replaceAll(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, "Bearer [redacted]")
 		.replaceAll(/Basic\s+[A-Za-z0-9+/]+=*/gi, "Basic [redacted]")
+		.replaceAll(
+			/\b((?:authorization|api[_ -]?key|access[_ -]?token|refresh[_ -]?token|client[_ -]?secret|password|secret)\s*[:=]\s*)[^\s,;"']+/gi,
+			"$1[redacted]",
+		)
 		.replaceAll(/\blixray_pat_[A-Za-z0-9_-]+\b/g, "[redacted_token]")
 		.replaceAll(
 			/\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g,
@@ -267,7 +329,7 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 		)
 		.replaceAll(/file:\/\/\/[^\s)"'<>[\]{}]+/g, "[redacted_path]")
 		.replaceAll(
-			/\/(?:Users|Volumes|private|tmp|var)\/[^\s)"'<>[\]{}]+/g,
+			/\/(?:Users|Volumes|private|tmp|var|home|root)\/[^\s)"'<>[\]{}]+/g,
 			"[redacted_path]",
 		)
 		.replaceAll(/[A-Za-z]:\\[^\s)"'<>[\]{}]+/g, "[redacted_path]")
@@ -276,6 +338,11 @@ function scrubPostHogString(value: string, propertyKey?: string): string {
 			"/repository/:repository/file/:file",
 		);
 	return scrubDiagnosticContent(scrubbed).slice(0, MAX_TELEMETRY_STRING_LENGTH);
+}
+
+/** Sanitize untrusted exception text before it is serialized into an OTel span. */
+export function sanitizeTelemetryDiagnostic(value: string): string {
+	return scrubPostHogString(value);
 }
 
 function sanitizeStackFrameFilename(value: string): string {

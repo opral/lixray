@@ -11,7 +11,7 @@ const buttonVariants = cva(
 			variant: {
 				default: "bg-accent text-accent-on hover:bg-accent-hover",
 				featured:
-					"bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] text-accent-on shadow-shadow-accent hover:brightness-105 active:translate-y-px",
+					"bg-[linear-gradient(180deg,var(--atelier-link)_0%,var(--atelier-link)_100%)] text-accent-on shadow-accent hover:brightness-105 active:translate-y-px",
 				destructive:
 					"bg-danger-border text-accent-on hover:bg-diff-removed focus-visible:ring-danger-border/20 dark:focus-visible:ring-danger-border/40",
 				outline:

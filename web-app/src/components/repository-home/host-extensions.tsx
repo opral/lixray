@@ -15,6 +15,7 @@ import {
 	canonicalDirectoryPath,
 	createRepositoryFile,
 	dirNameFromPath,
+	type RepositoryHistorySource,
 } from "./lix-data";
 import { PeopleView, type RepositoryTeamApi } from "./people-view";
 import { SettingsView, type RepositorySettingsApi } from "./settings-view";
@@ -174,6 +175,7 @@ function RepositoryDirectoryExtension({
 	teamApi,
 	hasAgentConnected,
 	visibility,
+	historySource,
 }: {
 	atelier: AtelierExtensionRuntime;
 	view: AtelierExtensionView;
@@ -183,6 +185,7 @@ function RepositoryDirectoryExtension({
 	teamApi: RepositoryTeamApi | null;
 	hasAgentConnected: AgentConnectionProbe | null;
 	visibility: "private" | "public";
+	historySource?: RepositoryHistorySource | null;
 }) {
 	// The folder a new file of each type goes in is the repository's answer,
 	// not a surface's: home reads and writes the one the Files view keeps.
@@ -191,6 +194,7 @@ function RepositoryDirectoryExtension({
 		<StrictMode>
 			<DirectoryView
 				lix={atelier.lix}
+				historySource={historySource ?? null}
 				diffSession={atelier.diff?.session ?? null}
 				onOpenHistory={() => openHistoryFromView(atelier)}
 				{...(atelier.diff
@@ -254,6 +258,7 @@ const createLixrayHomeExtension = (
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
 	visibility: "private" | "public",
+	historySource: RepositoryHistorySource | null,
 ): AtelierExtensionRegistration => ({
 	id: LIXRAY_HOME_EXTENSION_ID,
 	name: "Home",
@@ -271,6 +276,7 @@ const createLixrayHomeExtension = (
 			teamApi={teamApi}
 			hasAgentConnected={hasAgentConnected}
 			visibility={visibility}
+			historySource={historySource}
 		/>
 	),
 });
@@ -328,8 +334,15 @@ export const createLixrayRepositoryExtensions = (
 	teamApi: RepositoryTeamApi | null,
 	settingsApi: RepositorySettingsApi | null,
 	visibility: "private" | "public",
+	historySource: RepositoryHistorySource | null,
 ): readonly AtelierExtensionRegistration[] => [
-	createLixrayHomeExtension(connection, hasAgentConnected, teamApi, visibility),
+	createLixrayHomeExtension(
+		connection,
+		hasAgentConnected,
+		teamApi,
+		visibility,
+		historySource,
+	),
 	createLixrayDirExtension(connection),
 	createLixrayPeopleExtension(teamApi),
 	createLixraySettingsExtension(settingsApi),
@@ -365,6 +378,7 @@ function LibraryHome({
 	hasAgentConnected,
 	teamApi,
 	visibility,
+	historySource,
 }: {
 	atelier: AtelierExtensionRuntime;
 	recent: ReactNode;
@@ -372,12 +386,14 @@ function LibraryHome({
 	hasAgentConnected: AgentConnectionProbe;
 	teamApi: RepositoryTeamApi | null;
 	visibility: "private" | "public";
+	historySource?: RepositoryHistorySource | null;
 }) {
 	const { folders: defaultFolders, setFolder } = useDefaultFolders(atelier);
 	return (
 		<StrictMode>
 			<DirectoryView
 				lix={atelier.lix}
+				historySource={historySource ?? null}
 				diffSession={atelier.diff?.session ?? null}
 				onOpenHistory={() => openHistoryFromView(atelier)}
 				{...(atelier.diff
@@ -434,6 +450,7 @@ export const createLixrayLibraryOptions = (
 	hasAgentConnected: AgentConnectionProbe,
 	teamApi: RepositoryTeamApi | null,
 	visibility: "private" | "public",
+	historySource: RepositoryHistorySource | null,
 ): AtelierLibraryOptions => ({
 	Home: ({ atelier, recent }) => (
 		<LibraryHome
@@ -443,6 +460,7 @@ export const createLixrayLibraryOptions = (
 			hasAgentConnected={hasAgentConnected}
 			teamApi={teamApi}
 			visibility={visibility}
+			historySource={historySource}
 		/>
 	),
 	EmptyWorkspace: ({ atelier }) => (

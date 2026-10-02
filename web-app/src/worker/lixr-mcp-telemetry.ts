@@ -1,3 +1,4 @@
+import type { McpToolCallObservation } from "../mcp/server.ts";
 import { PostHog, type EventMessage } from "posthog-node";
 import type { McpExecuteInputObservation } from "../mcp/tool-observation.ts";
 import { PRODUCT_EVENTS } from "../lib/telemetry-events.ts";
@@ -29,6 +30,7 @@ interface LixrMcpTelemetryIdentity {
 }
 
 export interface LixrMcpTelemetrySession {
+	captureToolFailure(observation: McpToolCallObservation): void;
 	captureFileWritten(properties: {
 		file_extension: string;
 		char_count: number;
@@ -110,6 +112,7 @@ export function createLixrMcpTelemetrySession(
 		event: string,
 		properties: Record<string, unknown>,
 		lixId?: string,
+		uuid?: string,
 	): void => {
 		const baseProperties = {
 			...properties,
@@ -124,6 +127,7 @@ export function createLixrMcpTelemetrySession(
 				.captureImmediate({
 					distinctId: identity.userId,
 					event,
+					...(uuid ? { uuid } : {}),
 					properties: baseProperties,
 					...(lixId ? { groups: { lix: lixId } } : {}),
 				})
@@ -137,6 +141,86 @@ export function createLixrMcpTelemetrySession(
 	};
 
 	return {
+		captureToolFailure(observation) {
+			if (
+				observation.outcome !== "error" ||
+				observation.exceptionOwner === "protocol"
+			)
+				return;
+			const { traceId, spanId, toolName, requestId } = observation;
+			if (!traceId || !spanId) return;
+			const code =
+				observation.errorCode &&
+				/^(?:LIX_[A-Z0-9_]{1,100}|[a-z_]{1,100})$/.test(observation.errorCode)
+					? observation.errorCode
+					: "mcp_tool_failed";
+			const rustOriginCauseIndex = observation.exceptionRustOriginCauseIndex;
+			const safeRustOriginCauseIndex =
+				typeof rustOriginCauseIndex === "number" &&
+				Number.isSafeInteger(rustOriginCauseIndex) &&
+				rustOriginCauseIndex >= 0 &&
+				rustOriginCauseIndex <= 3
+					? rustOriginCauseIndex
+					: undefined;
+			// Never capture thrown messages or raw stacks: engine errors can contain SQL or values.
+			const digest = createHash("sha256")
+				.update(`mcp-error:${traceId}:${spanId}`)
+				.digest();
+			digest[6] = (digest[6]! & 0x0f) | 0x80;
+			digest[8] = (digest[8]! & 0x3f) | 0x80;
+			const id = digest.subarray(0, 16).toString("hex");
+			const uuid = `${id.slice(0, 8)}-${id.slice(8, 12)}-${id.slice(12, 16)}-${id.slice(16, 20)}-${id.slice(20)}`;
+			captureEvent(
+				"$exception",
+				{
+					$exception_list: [
+						{
+							type: observation.resultEncodingType
+								? "McpResultEncodingError"
+								: code,
+							value: observation.resultEncodingType
+								? `MCP ${toolName} result encoding failed (${observation.resultEncodingType})`
+								: `MCP ${toolName} failed (${code})`,
+							...(observation.exceptionStacktrace
+								? { stacktrace: observation.exceptionStacktrace }
+								: {}),
+							mechanism: { type: "generic", handled: true },
+						},
+					],
+					$exception_level: "error",
+					$exception_source: "mcp",
+					$process_person_profile: false,
+					$geoip_disable: true,
+					...(observation.exceptionRustOrigin
+						? { rust_origin: observation.exceptionRustOrigin }
+						: {}),
+					...(safeRustOriginCauseIndex !== undefined
+						? { rust_origin_cause_index: safeRustOriginCauseIndex }
+						: {}),
+					...(observation.exceptionRustStacktraceStatus
+						? {
+								rust_stacktrace_status:
+									observation.exceptionRustStacktraceStatus,
+							}
+						: {}),
+					$otel_trace_id: traceId,
+					$otel_span_id: spanId,
+					$ai_trace_id: traceId,
+					$ai_span_id: spanId,
+					request_id: requestId,
+					operation: toolName,
+					error_code: code,
+					...(observation.commitOutcome
+						? { commit_outcome: observation.commitOutcome }
+						: {}),
+					...(observation.lixId
+						? { lix_id: observation.lixId, repository_id: observation.lixId }
+						: {}),
+				},
+				observation.lixId,
+				uuid,
+			);
+		},
 		captureFileWritten(properties) {
 			captureEvent(PRODUCT_EVENTS.fileWritten, properties, properties.lix_id);
 		},

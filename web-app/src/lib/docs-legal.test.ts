@@ -72,6 +72,7 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 			"getting-started.md",
 			"internal-apps.md",
 			"access-tokens.md",
+			"self-host.md",
 		],
 	);
 
@@ -109,9 +110,9 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 	assert.match(docsRoute, /slug === "support".*to="\/support"/s);
 
 	for (const file of [
-		"landing-page.tsx",
+		// SiteFooter, used by the landing and pricing pages.
+		"site-header.tsx",
 		"legal-page.tsx",
-		"docs-page.tsx",
 		"vs-github-page.tsx",
 	] as const) {
 		const source = readFileSync(join(webAppSrc, "components", file), "utf8");
@@ -119,4 +120,10 @@ void test("public legal pages live at root URLs and appear in site footers", () 
 		assert.match(source, /to="\/terms"/, file);
 		assert.match(source, /to="\/support"/, file);
 	}
+
+	const docsPage = readFileSync(
+		join(webAppSrc, "components", "docs-page.tsx"),
+		"utf8",
+	);
+	assert.match(docsPage, /<SiteFooter \/>/);
 });

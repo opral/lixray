@@ -14,51 +14,86 @@ import {
 
 const encoder = new TextEncoder();
 
-test("installs an exact-revision artifact from a successful Lix CI run", async () => {
-	const revision = "a".repeat(40);
-	const archive = zipSync({
-		"ci-artifact/browser.json": encoder.encode(
-			JSON.stringify({ sourceRevision: revision }),
-		),
-		"packages/js-sdk/dist/index.js": encoder.encode("export const sdk = 1;"),
-		"packages/js-sdk/dist/migration.js": encoder.encode("export const migrate = 1;"),
-		"packages/storage-opfs/dist/migration.worker.js": encoder.encode("self.onmessage = () => {};"),
-		"packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm": new Uint8Array([
-			0, 97, 115, 109,
-		]),
-		"packages/storage-opfs/dist/index.js": encoder.encode(
-			"export const opfs = 1;",
-		),
-	});
-	const fixture = await artifactApiFixture({
-		archive,
-		revision,
-		successful: true,
-		producerRun: { event: "push" },
-	});
-	const destination = await mkdtemp(join(tmpdir(), "lix-artifact-test-"));
-	const logs = [];
-	try {
-		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
-		const artifact = await installBrowserArtifact({
-			log: (message) => logs.push(message),
-			opfsStorageRoot: join(destination, "storage-opfs"),
-			revision,
-			sdkRoot: join(destination, "js-sdk"),
-		});
+for (const complete of [true, false])
+	test(
+		complete
+			? "installs an exact-revision artifact with its direct OPFS provider"
+			: "rejects a browser artifact missing its direct OPFS provider before replacing installed files",
+		async () => {
+			const revision = "a".repeat(40);
+			const archive = zipSync({
+				"ci-artifact/browser.json": encoder.encode(
+					JSON.stringify({ sourceRevision: revision }),
+				),
+				...(complete
+					? {
+							"packages/storage-opfs/dist/direct.js": encoder.encode(
+								"export const provider = 1;",
+							),
+						}
+					: {}),
+				"packages/js-sdk/dist/index.js": encoder.encode(
+					"export const sdk = 1;",
+				),
+				"packages/js-sdk/dist/migration.js": encoder.encode(
+					"export const migrate = 1;",
+				),
+				"packages/storage-opfs/dist/migration.worker.js": encoder.encode(
+					"self.onmessage = () => {};",
+				),
+				"packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm": new Uint8Array([
+					0, 97, 115, 109,
+				]),
+				"packages/storage-opfs/dist/index.js": encoder.encode(
+					"export const opfs = 1;",
+				),
+			});
+			const fixture = await artifactApiFixture({
+				archive,
+				revision,
+				successful: true,
+				producerRun: { event: "push" },
+			});
+			const destination = await mkdtemp(join(tmpdir(), "lix-artifact-test-"));
+			const logs = [];
+			try {
+				process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
+				const installation = installBrowserArtifact({
+					log: (message) => logs.push(message),
+					opfsStorageRoot: join(destination, "storage-opfs"),
+					revision,
+					sdkRoot: join(destination, "js-sdk"),
+				});
+				if (!complete) {
+					await assert.rejects(installation, /direct\.js/);
+					await assert.rejects(
+						readFile(join(destination, "js-sdk/dist/index.js")),
+						{ code: "ENOENT" },
+					);
+					return;
+				}
+				const artifact = await installation;
 
-		assert.equal(artifact.runId, 42);
-		assert.equal(
-			await readFile(join(destination, "js-sdk/dist/index.js"), "utf8"),
-			"export const sdk = 1;",
-		);
-		assert.match(logs.join("\n"), /HIT lix-browser-sdk-/);
-	} finally {
-		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
-		await fixture.close();
-		await rm(destination, { recursive: true, force: true });
-	}
-});
+				assert.equal(artifact.runId, 42);
+				assert.equal(
+					await readFile(join(destination, "js-sdk/dist/index.js"), "utf8"),
+					"export const sdk = 1;",
+				);
+				assert.equal(
+					await readFile(
+						join(destination, "storage-opfs/dist/direct.js"),
+						"utf8",
+					),
+					"export const provider = 1;",
+				);
+				assert.match(logs.join("\n"), /HIT lix-browser-sdk-/);
+			} finally {
+				delete process.env.LIX_CI_ARTIFACT_API_ROOT;
+				await fixture.close();
+				await rm(destination, { recursive: true, force: true });
+			}
+		},
+	);
 
 test("server image manifests carry the expected artifact identity", () => {
 	const revision = "f".repeat(40);

@@ -16,15 +16,8 @@ const QUALIFIED_LIX_REF_PATTERN =
 const DEFAULT_CONTEXT_TTL_MS = 24 * 60 * 60 * 1000;
 const DEVELOPMENT_CONTEXT_SIGNING_KEY = "lixray-development-context-key";
 
-export type WireValue =
-	| { kind: "null"; value?: null }
-	| { kind: "bool"; value: boolean }
-	| { kind: "int"; value: number }
-	| { kind: "float"; value: number }
-	| { kind: "text"; value: string }
-	| { kind: "timestamp"; value: string }
-	| { kind: "blob"; base64: string }
-	| { kind: "json"; value: unknown };
+import type { WireValue } from "./wire-value.ts";
+export type { WireValue } from "./wire-value.ts";
 
 export interface ExecuteOptions {
 	originKey?: string;
@@ -131,42 +124,17 @@ export type LixError = Error & {
 	status?: number;
 };
 
-export type McpLocalAdapterFailureStage =
-	| "sdk_result_encoding"
-	| "tool_result_serialization";
-
-const mcpLocalAdapterFailures = new WeakMap<
-	object,
-	McpLocalAdapterFailureStage
->();
-
-/** Mark an adapter-owned failure without putting internal metadata on the wire. */
-export function markMcpLocalAdapterFailure<T extends Error>(
-	error: T,
-	stage: McpLocalAdapterFailureStage,
-): T {
-	mcpLocalAdapterFailures.set(error, stage);
-	return error;
-}
-
-export function mcpLocalAdapterFailureStage(
-	error: unknown,
-): McpLocalAdapterFailureStage | undefined {
-	return error && typeof error === "object"
-		? mcpLocalAdapterFailures.get(error)
-		: undefined;
-}
-
 export function createLixError(
 	code: string,
 	message: string,
 	options: {
+		cause?: unknown;
 		details?: unknown;
 		hint?: string;
 		status?: number;
 	} = {},
 ): LixError {
-	const error = new Error(message) as LixError;
+	const error = new Error(message, { cause: options.cause }) as LixError;
 	error.name = "LixError";
 	error.code = code;
 	error.hint = options.hint;

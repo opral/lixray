@@ -12,6 +12,7 @@ import {
 } from "@opentelemetry/api";
 
 import { repositoryOpenDiagnostics } from "./lib/repository-open-telemetry.ts";
+import { applicationExceptionAttributes } from "./lib/exception-stack-trace.ts";
 
 export const tracer = trace.getTracer("lixray");
 
@@ -39,6 +40,9 @@ export function withSpan<T>(
 		try {
 			return await operation(span);
 		} catch (error) {
+			const exception = applicationExceptionAttributes(error);
+			if (Object.keys(exception).length > 0)
+				span.addEvent("exception", exception);
 			const diagnostic = repositoryOpenDiagnostics(error);
 			failSpan(
 				span,

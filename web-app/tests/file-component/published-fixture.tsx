@@ -1,6 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { PublishedResourceView } from "../../src/components/published-resource-view";
 import { parseEntityUrlSplat } from "../../src/lib/entity-url";
+import "@opral/atelier/style.css";
 import "./fixture.css";
 const linked =
 	parseEntityUrlSplat(location.pathname.split("/file/")[1])?.id ===

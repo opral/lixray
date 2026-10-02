@@ -5,7 +5,7 @@ const host = "127.0.0.1";
 
 export default defineConfig({
 	testDir: ".",
-	testMatch: "snapshot-download.spec.ts",
+	testMatch: ["snapshot-download.spec.ts", "repository-opening.spec.ts"],
 	timeout: 60_000,
 	fullyParallel: false,
 	workers: 1,

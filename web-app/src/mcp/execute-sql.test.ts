@@ -12,6 +12,12 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { openLix, type Lix } from "@lix-js/sdk";
+import { trace, SpanStatusCode } from "@opentelemetry/api";
+import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
+import {
+	InMemorySpanExporter,
+	SimpleSpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
 import {
 	Client,
 	StreamableHTTPClientTransport,
@@ -24,6 +30,7 @@ import {
 	type WireValue,
 } from "./lix-service.ts";
 import { WorkerLixRuntimeClient } from "./runtime-client.ts";
+import { withSpan } from "../telemetry.ts";
 import { handleMcpTransport, MCP_PROTOCOL_VERSION } from "./server.ts";
 import { BINARY_CONTENT_HINT, NAMESPACE_CONFLICT_HINT } from "./sql-errors.ts";
 
@@ -36,6 +43,46 @@ const MCP_DOCS = readFileSync(
 	join(dirname(fileURLToPath(import.meta.url)), "../../../docs/mcp.md"),
 	"utf8",
 );
+
+void test("a real Lix/WASM SQL rejection reaches the first-party span boundary", async () => {
+	const exporter = new InMemorySpanExporter();
+	const provider = new NodeTracerProvider({
+		spanProcessors: [new SimpleSpanProcessor(exporter)],
+	});
+	provider.register();
+	let lix: Lix | undefined;
+	try {
+		lix = await openLix({});
+		await assert.rejects(
+			withSpan("lix.engine.query", () =>
+				lix!.execute("SELECT * FROM telemetry_missing_table"),
+			),
+		);
+		const span = exporter.getFinishedSpans()[0]!;
+		const exceptionEvent = span.events[0];
+		assert.equal(span.name, "lix.engine.query");
+		assert.equal(span.status.code, SpanStatusCode.ERROR);
+		assert.equal(exceptionEvent?.name, "exception");
+		assert.equal(
+			exceptionEvent?.attributes?.["exception.type"],
+			"LIX_TABLE_NOT_FOUND",
+		);
+		const safeMessage = exceptionEvent?.attributes?.["exception.message"];
+		assert.ok(
+			safeMessage === undefined ||
+				(typeof safeMessage === "string" &&
+					/^LIX_[A-Z0-9_]{1,100}$/.test(safeMessage)),
+		);
+		assert.doesNotMatch(
+			JSON.stringify(exceptionEvent?.attributes),
+			/telemetry_missing_table/,
+		);
+	} finally {
+		await lix?.close();
+		await provider.shutdown();
+		trace.disable();
+	}
+});
 
 const text = (value: string): WireValue => ({ kind: "text", value });
 const upsert = (path: string, content: string) => ({

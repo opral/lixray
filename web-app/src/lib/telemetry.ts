@@ -14,6 +14,11 @@ import {
 	exceptionTraceability,
 	preparePostHogEvent,
 } from "./exception-traceability.ts";
+import {
+	safeLixErrorCode,
+	safeRustErrorOriginInCauseChain,
+	safeRustStacktraceStatus,
+} from "./exception-stack-trace.ts";
 import { BROWSER_EXCEPTION_CAPTURE_CONFIG } from "./telemetry-exceptions.ts";
 import type { ProductEvent } from "./telemetry-events.ts";
 
@@ -21,8 +26,6 @@ const DEFAULT_POSTHOG_HOST = "https://us.i.posthog.com";
 
 let client: PostHog | null = null;
 let initializationPromise: Promise<PostHog | null> | null = null;
-
-const MAX_LIX_TELEMETRY_STRING_LENGTH = 200;
 
 /** Extracts the stable, non-content fields exposed by the Lix remote SDK. */
 export function lixErrorTelemetryProperties(error: unknown): Properties {
@@ -32,10 +35,22 @@ export function lixErrorTelemetryProperties(error: unknown): Properties {
 		code?: unknown;
 		status?: unknown;
 		hint?: unknown;
+		rustOrigin?: unknown;
+		rustStacktraceStatus?: unknown;
 		details?: { httpStatus?: unknown };
 	};
-	const code = typeof candidate.code === "string" ? candidate.code : undefined;
-	if (candidate.name !== "LixError" && !code?.startsWith("LIX_")) return {};
+	const code = safeLixErrorCode(candidate.code);
+	const locatedRustOrigin = safeRustErrorOriginInCauseChain(error);
+	const rustOrigin = locatedRustOrigin?.origin;
+	const rustStacktraceStatus =
+		locatedRustOrigin?.rustStacktraceStatus ?? safeRustStacktraceStatus(error);
+	if (
+		candidate.name !== "LixError" &&
+		!code?.startsWith("LIX_") &&
+		!rustOrigin &&
+		!rustStacktraceStatus
+	)
+		return {};
 	const status =
 		typeof candidate.status === "number"
 			? candidate.status
@@ -45,18 +60,15 @@ export function lixErrorTelemetryProperties(error: unknown): Properties {
 
 	return {
 		...repositoryOpenDiagnostics(error),
-		...(code
-			? { lix_error_code: code.slice(0, MAX_LIX_TELEMETRY_STRING_LENGTH) }
+		...(rustOrigin ? { rust_origin: rustOrigin } : {}),
+		...(locatedRustOrigin?.causeIndex !== undefined
+			? { rust_origin_cause_index: locatedRustOrigin.causeIndex }
 			: {}),
+		...(rustStacktraceStatus
+			? { rust_stacktrace_status: rustStacktraceStatus }
+			: {}),
+		...(code ? { lix_error_code: code } : {}),
 		...(status !== undefined ? { lix_error_status: status } : {}),
-		...(typeof candidate.hint === "string"
-			? {
-					lix_error_hint: candidate.hint.slice(
-						0,
-						MAX_LIX_TELEMETRY_STRING_LENGTH,
-					),
-				}
-			: {}),
 	};
 }
 

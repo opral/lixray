@@ -812,6 +812,7 @@ export async function handleRequest(
 			const pendingTelemetryCaptures: Array<Promise<void>> = [];
 
 			const onToolCall = (observation: McpToolCallObservation): void => {
+				lixrTelemetry?.captureToolFailure(observation);
 				if (
 					observation.outcome === "success" &&
 					observation.lixId &&
@@ -1024,7 +1025,6 @@ export async function handleRequest(
 						posthogHost: env.POSTHOG_HOST,
 						posthogDistinctId: authResult.auth.userId,
 						posthogClientId: authResult.auth.clientId,
-						serverRelease: env.LIXRAY_RELEASE_ID,
 						onPosthogFlush,
 					}),
 					requestId,

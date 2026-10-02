@@ -28,12 +28,6 @@
   },
   "packageManager": "pnpm@10.13.1",
   "pnpm": {
-    "ignoredOptionalDependencies": [
-      "@lix-js/sdk-darwin-arm64",
-      "@lix-js/sdk-linux-arm64",
-      "@lix-js/sdk-linux-x64",
-      "@lix-js/sdk-win32-x64"
-    ],
     "overrides": {
       "@lix-js/sdk": "link:vendor/lix/packages/js-sdk"
     }

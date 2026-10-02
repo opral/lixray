@@ -105,7 +105,9 @@ export function sqlToolError(
 		statementCount: number;
 	},
 ) {
-	const details = error.details as { statementIndex?: unknown } | undefined;
+	const details = error.details as
+		| { statementIndex?: unknown; outcome?: unknown; capability?: unknown }
+		| undefined;
 	const index =
 		details && typeof details === "object" ? details.statementIndex : undefined;
 	const statementIndex =
@@ -119,15 +121,20 @@ export function sqlToolError(
 				: undefined;
 	const outcome = options.completed
 		? "committed"
-		: !options.started || REJECTED_CODES.has(error.code)
-			? "not_committed"
-			: "unknown";
+		: details?.outcome === "committed" ||
+			  details?.outcome === "not_committed" ||
+			  details?.outcome === "unknown"
+			? details.outcome
+			: !options.started || REJECTED_CODES.has(error.code)
+				? "not_committed"
+				: "unknown";
 	const binaryContent = BINARY_CONTENT_PATTERN.test(error.message);
 	// Lix's own hint for this one says $1 whatever the statement bound.
 	const hints = [binaryContent ? BINARY_CONTENT_HINT : error.hint];
 	if (
 		options.write &&
 		!binaryContent &&
+		details?.capability !== "file_content_query_insert" &&
 		[
 			"LIX_INVALID_PARAM",
 			"LIX_PARSE_ERROR",
