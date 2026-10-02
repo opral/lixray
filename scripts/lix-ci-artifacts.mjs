@@ -35,8 +35,15 @@ export async function installBrowserArtifact({
 
 	try {
 		await requireFile(join(downloaded.root, "packages/js-sdk/dist/index.js"));
-		await requireFile(join(downloaded.root, "packages/js-sdk/dist/migration.js"));
-		await requireFile(join(downloaded.root, "packages/storage-opfs/dist/migration.worker.js"));
+		await requireFile(
+			join(downloaded.root, "packages/js-sdk/dist/migration.js"),
+		);
+		await requireFile(
+			join(downloaded.root, "packages/storage-opfs/dist/migration.worker.js"),
+		);
+		await requireFile(
+			join(downloaded.root, "packages/storage-opfs/dist/direct.js"),
+		);
 		await requireFile(
 			join(downloaded.root, "packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm"),
 		);
@@ -109,42 +116,71 @@ async function downloadArtifact({
 	retryIntervalMs,
 }) {
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "off") {
-		log(`[lix-artifact] Lookup disabled for ${revision}; no artifact installed.`);
+		log(
+			`[lix-artifact] Lookup disabled for ${revision}; no artifact installed.`,
+		);
 		return undefined;
 	}
-	const repository = process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
+	const repository =
+		process.env.LIX_CI_ARTIFACT_REPOSITORY ?? defaultRepository;
 	const apiRoot = process.env.LIX_CI_ARTIFACT_API_ROOT ?? defaultApiRoot;
 	const producer = `https://github.com/${repository}/commit/${revision}/checks`;
 	log(`[lix-artifact] Looking for ${repository}/${artifactName}.`);
-	const deadline = Date.now() + (Number.isFinite(waitForArtifactMs) ? Math.max(0, waitForArtifactMs) : 0);
+	const deadline =
+		Date.now() +
+		(Number.isFinite(waitForArtifactMs) ? Math.max(0, waitForArtifactMs) : 0);
 	for (;;) {
 		let candidate;
 		try {
-			candidate = await findReusableArtifact({ apiRoot, artifactName, log, repository, revision });
+			candidate = await findReusableArtifact({
+				apiRoot,
+				artifactName,
+				log,
+				repository,
+				revision,
+			});
 		} catch (error) {
 			if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
-				throw new Error(`Required Lix CI artifact ${artifactName} could not be checked (${errorMessage(error)}). Check its producer: ${producer}`);
+				throw new Error(
+					`Required Lix CI artifact ${artifactName} could not be checked (${errorMessage(error)}). Check its producer: ${producer}`,
+				);
 			}
-			log(`[lix-artifact] Lookup unavailable (${errorMessage(error)}); no artifact installed. Producer: ${producer}`);
+			log(
+				`[lix-artifact] Lookup unavailable (${errorMessage(error)}); no artifact installed. Producer: ${producer}`,
+			);
 			return undefined;
 		}
 		if (candidate) {
 			const downloaded = await verifiedArtifact({
-				artifact: candidate.artifact, artifactName, manifestPath,
-				validateManifest, revision,
-				run: candidate.run, runId: candidate.runId, log,
+				artifact: candidate.artifact,
+				artifactName,
+				manifestPath,
+				validateManifest,
+				revision,
+				run: candidate.run,
+				runId: candidate.runId,
+				log,
 			});
 			if (downloaded) return downloaded;
 		}
 		const remaining = deadline - Date.now();
 		if (remaining <= 0) break;
-		const delay = Math.min(Number.isFinite(retryIntervalMs) ? Math.max(1, retryIntervalMs) : 20_000, remaining);
-		log(`[lix-artifact] ${artifactName} is not published yet; retrying in ${Math.ceil(delay / 1000)}s. Producer: ${producer}`);
+		const delay = Math.min(
+			Number.isFinite(retryIntervalMs) ? Math.max(1, retryIntervalMs) : 20_000,
+			remaining,
+		);
+		log(
+			`[lix-artifact] ${artifactName} is not published yet; retrying in ${Math.ceil(delay / 1000)}s. Producer: ${producer}`,
+		);
 		await new Promise((resolve) => setTimeout(resolve, delay));
 	}
-	log(`[lix-artifact] MISS ${artifactName}; artifact unavailable. Build it at https://github.com/${repository}/actions/workflows/ci.yml using the artifact-only action, then retry. Producer: ${producer}`);
+	log(
+		`[lix-artifact] MISS ${artifactName}; artifact unavailable. Build it at https://github.com/${repository}/actions/workflows/ci.yml using the artifact-only action, then retry. Producer: ${producer}`,
+	);
 	if (process.env.LIXRAY_LIX_ARTIFACTS === "only") {
-		throw new Error(`Required Lix CI artifact ${artifactName} is unavailable. Check its producer: ${producer}`);
+		throw new Error(
+			`Required Lix CI artifact ${artifactName} is unavailable. Check its producer: ${producer}`,
+		);
 	}
 	return undefined;
 }

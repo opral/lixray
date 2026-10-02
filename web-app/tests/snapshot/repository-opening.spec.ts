@@ -154,9 +154,9 @@ test("an actual fresh SDK open reaches OTLP with a safe browser profile", async 
 	expect(attributes["lixray.repository.open.profile.browser_family"]).toMatch(
 		/^(chrome|edge|firefox|safari|other)$/u,
 	);
-	expect(typeof attributes["lixray.repository.open.profile.browser_major"]).toBe(
-		"number",
-	);
+	expect(
+		typeof attributes["lixray.repository.open.profile.browser_major"],
+	).toBe("number");
 	expect(
 		attributes["lixray.repository.open.profile.browser_major"],
 	).toBeGreaterThanOrEqual(1);

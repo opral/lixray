@@ -14,51 +14,86 @@ import {
 
 const encoder = new TextEncoder();
 
-test("installs an exact-revision artifact from a successful Lix CI run", async () => {
-	const revision = "a".repeat(40);
-	const archive = zipSync({
-		"ci-artifact/browser.json": encoder.encode(
-			JSON.stringify({ sourceRevision: revision }),
-		),
-		"packages/js-sdk/dist/index.js": encoder.encode("export const sdk = 1;"),
-		"packages/js-sdk/dist/migration.js": encoder.encode("export const migrate = 1;"),
-		"packages/storage-opfs/dist/migration.worker.js": encoder.encode("self.onmessage = () => {};"),
-		"packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm": new Uint8Array([
-			0, 97, 115, 109,
-		]),
-		"packages/storage-opfs/dist/index.js": encoder.encode(
-			"export const opfs = 1;",
-		),
-	});
-	const fixture = await artifactApiFixture({
-		archive,
-		revision,
-		successful: true,
-		producerRun: { event: "push" },
-	});
-	const destination = await mkdtemp(join(tmpdir(), "lix-artifact-test-"));
-	const logs = [];
-	try {
-		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
-		const artifact = await installBrowserArtifact({
-			log: (message) => logs.push(message),
-			opfsStorageRoot: join(destination, "storage-opfs"),
-			revision,
-			sdkRoot: join(destination, "js-sdk"),
-		});
+for (const complete of [true, false])
+	test(
+		complete
+			? "installs an exact-revision artifact with its direct OPFS provider"
+			: "rejects a browser artifact missing its direct OPFS provider before replacing installed files",
+		async () => {
+			const revision = "a".repeat(40);
+			const archive = zipSync({
+				"ci-artifact/browser.json": encoder.encode(
+					JSON.stringify({ sourceRevision: revision }),
+				),
+				...(complete
+					? {
+							"packages/storage-opfs/dist/direct.js": encoder.encode(
+								"export const provider = 1;",
+							),
+						}
+					: {}),
+				"packages/js-sdk/dist/index.js": encoder.encode(
+					"export const sdk = 1;",
+				),
+				"packages/js-sdk/dist/migration.js": encoder.encode(
+					"export const migrate = 1;",
+				),
+				"packages/storage-opfs/dist/migration.worker.js": encoder.encode(
+					"self.onmessage = () => {};",
+				),
+				"packages/js-sdk/dist/wasm/lix_js_sdk_bg.wasm": new Uint8Array([
+					0, 97, 115, 109,
+				]),
+				"packages/storage-opfs/dist/index.js": encoder.encode(
+					"export const opfs = 1;",
+				),
+			});
+			const fixture = await artifactApiFixture({
+				archive,
+				revision,
+				successful: true,
+				producerRun: { event: "push" },
+			});
+			const destination = await mkdtemp(join(tmpdir(), "lix-artifact-test-"));
+			const logs = [];
+			try {
+				process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
+				const installation = installBrowserArtifact({
+					log: (message) => logs.push(message),
+					opfsStorageRoot: join(destination, "storage-opfs"),
+					revision,
+					sdkRoot: join(destination, "js-sdk"),
+				});
+				if (!complete) {
+					await assert.rejects(installation, /direct\.js/);
+					await assert.rejects(
+						readFile(join(destination, "js-sdk/dist/index.js")),
+						{ code: "ENOENT" },
+					);
+					return;
+				}
+				const artifact = await installation;
 
-		assert.equal(artifact.runId, 42);
-		assert.equal(
-			await readFile(join(destination, "js-sdk/dist/index.js"), "utf8"),
-			"export const sdk = 1;",
-		);
-		assert.match(logs.join("\n"), /HIT lix-browser-sdk-/);
-	} finally {
-		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
-		await fixture.close();
-		await rm(destination, { recursive: true, force: true });
-	}
-});
+				assert.equal(artifact.runId, 42);
+				assert.equal(
+					await readFile(join(destination, "js-sdk/dist/index.js"), "utf8"),
+					"export const sdk = 1;",
+				);
+				assert.equal(
+					await readFile(
+						join(destination, "storage-opfs/dist/direct.js"),
+						"utf8",
+					),
+					"export const provider = 1;",
+				);
+				assert.match(logs.join("\n"), /HIT lix-browser-sdk-/);
+			} finally {
+				delete process.env.LIX_CI_ARTIFACT_API_ROOT;
+				await fixture.close();
+				await rm(destination, { recursive: true, force: true });
+			}
+		},
+	);
 
 test("server image manifests carry the expected artifact identity", () => {
 	const revision = "f".repeat(40);
@@ -129,26 +164,44 @@ test("uses an artifact after its producer job uploads while the workflow continu
 test("waits for the exact artifact when the producer publishes after the first lookup", async () => {
 	const revision = "9".repeat(40);
 	const archive = zipSync({
-		"server-linux-x64.json": encoder.encode(JSON.stringify({
-			schemaVersion: 1,
-			kind: "lix-server-image",
-			sourceRevision: revision,
-			target: "linux-x64",
-			image: `lix-server-ci:${revision}`,
-		})),
+		"server-linux-x64.json": encoder.encode(
+			JSON.stringify({
+				schemaVersion: 1,
+				kind: "lix-server-image",
+				sourceRevision: revision,
+				target: "linux-x64",
+				image: `lix-server-ci:${revision}`,
+			}),
+		),
 		"lix-server-image.tar": encoder.encode("image"),
 	});
-	const fixture = await artifactApiFixture({ archive, revision, availableAfterLookups: 1 });
-	const destination = join(await mkdtemp(join(tmpdir(), "lix-artifact-test-")), "server.tar");
+	const fixture = await artifactApiFixture({
+		archive,
+		revision,
+		availableAfterLookups: 1,
+	});
+	const destination = join(
+		await mkdtemp(join(tmpdir(), "lix-artifact-test-")),
+		"server.tar",
+	);
 	try {
 		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
 		process.env.LIXRAY_LIX_ARTIFACTS = "only";
 		const artifact = await installServerImageArtifact({
-			revision, destination, log() {}, waitForArtifactMs: 5_000, retryIntervalMs: 1,
+			revision,
+			destination,
+			log() {},
+			waitForArtifactMs: 5_000,
+			retryIntervalMs: 1,
 		});
 		assert.equal(artifact.runId, 42);
 		assert.equal(await readFile(destination, "utf8"), "image");
-		assert.equal(fixture.requests.filter((request) => request.startsWith("/repos/opral/lix/actions/artifacts")).length, 2);
+		assert.equal(
+			fixture.requests.filter((request) =>
+				request.startsWith("/repos/opral/lix/actions/artifacts"),
+			).length,
+			2,
+		);
 	} finally {
 		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
 		delete process.env.LIXRAY_LIX_ARTIFACTS;
@@ -160,13 +213,15 @@ test("waits for the exact artifact when the producer publishes after the first l
 test("ignores server artifacts from an unexpected workflow producer", async () => {
 	const revision = "1".repeat(40);
 	const archive = zipSync({
-		"server-linux-x64.json": encoder.encode(JSON.stringify({
-			schemaVersion: 1,
-			kind: "lix-server-image",
-			sourceRevision: revision,
-			target: "linux-x64",
-			image: `lix-server-ci:${revision}`,
-		})),
+		"server-linux-x64.json": encoder.encode(
+			JSON.stringify({
+				schemaVersion: 1,
+				kind: "lix-server-image",
+				sourceRevision: revision,
+				target: "linux-x64",
+				image: `lix-server-ci:${revision}`,
+			}),
+		),
 		"lix-server-image.tar": encoder.encode("image"),
 	});
 	for (const producerRun of [
@@ -183,10 +238,18 @@ test("ignores server artifacts from an unexpected workflow producer", async () =
 		try {
 			process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
 			assert.equal(
-				await installServerImageArtifact({ revision, destination: "unused", log() {} }),
+				await installServerImageArtifact({
+					revision,
+					destination: "unused",
+					log() {},
+				}),
 				undefined,
 			);
-			assert.equal(fixture.requests.filter((request) => request === "/artifact.zip").length, 0);
+			assert.equal(
+				fixture.requests.filter((request) => request === "/artifact.zip")
+					.length,
+				0,
+			);
 		} finally {
 			delete process.env.LIX_CI_ARTIFACT_API_ROOT;
 			await fixture.close();
@@ -196,15 +259,29 @@ test("ignores server artifacts from an unexpected workflow producer", async () =
 
 test("a missing required artifact fails after one lookup with its producer link", async () => {
 	const revision = "c".repeat(40);
-	const fixture = await artifactApiFixture({ archive: new Uint8Array(), revision, missing: true });
+	const fixture = await artifactApiFixture({
+		archive: new Uint8Array(),
+		revision,
+		missing: true,
+	});
 	try {
 		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
 		process.env.LIXRAY_LIX_ARTIFACTS = "only";
-		await assert.rejects(installServerImageArtifact({ revision, destination: "unused", log() {} }), (error) => {
-			assert.match(error.message, /Required Lix CI artifact .* is unavailable/);
-			assert.ok(error.message.includes(`https://github.com/opral/lix/commit/${revision}/checks`));
-			return true;
-		});
+		await assert.rejects(
+			installServerImageArtifact({ revision, destination: "unused", log() {} }),
+			(error) => {
+				assert.match(
+					error.message,
+					/Required Lix CI artifact .* is unavailable/,
+				);
+				assert.ok(
+					error.message.includes(
+						`https://github.com/opral/lix/commit/${revision}/checks`,
+					),
+				);
+				return true;
+			},
+		);
 		assert.equal(fixture.requests.length, 1);
 		assert.match(fixture.requests[0], /actions\/artifacts\?/);
 	} finally {
@@ -214,31 +291,60 @@ test("a missing required artifact fails after one lookup with its producer link"
 	}
 });
 
-test("a required artifact wait ends after its bounded deadline", { timeout: 5_000 }, async () => {
-	const revision = "8".repeat(40);
-	const fixture = await artifactApiFixture({ archive: new Uint8Array(), revision, missing: true });
-	try {
-		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
-		process.env.LIXRAY_LIX_ARTIFACTS = "only";
-		await assert.rejects(
-			installServerImageArtifact({ revision, destination: "unused", log() {}, waitForArtifactMs: 100, retryIntervalMs: 10 }),
-			/Required Lix CI artifact .* is unavailable/,
-		);
-		// One lookup may consume the entire deadline on a loaded host.
-		assert.ok(fixture.requests.filter((request) => request.startsWith("/repos/opral/lix/actions/artifacts")).length >= 1);
-	} finally {
-		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
-		delete process.env.LIXRAY_LIX_ARTIFACTS;
-		await fixture.close();
-	}
-});
+test(
+	"a required artifact wait ends after its bounded deadline",
+	{ timeout: 5_000 },
+	async () => {
+		const revision = "8".repeat(40);
+		const fixture = await artifactApiFixture({
+			archive: new Uint8Array(),
+			revision,
+			missing: true,
+		});
+		try {
+			process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
+			process.env.LIXRAY_LIX_ARTIFACTS = "only";
+			await assert.rejects(
+				installServerImageArtifact({
+					revision,
+					destination: "unused",
+					log() {},
+					waitForArtifactMs: 100,
+					retryIntervalMs: 10,
+				}),
+				/Required Lix CI artifact .* is unavailable/,
+			);
+			// One lookup may consume the entire deadline on a loaded host.
+			assert.ok(
+				fixture.requests.filter((request) =>
+					request.startsWith("/repos/opral/lix/actions/artifacts"),
+				).length >= 1,
+			);
+		} finally {
+			delete process.env.LIX_CI_ARTIFACT_API_ROOT;
+			delete process.env.LIXRAY_LIX_ARTIFACTS;
+			await fixture.close();
+		}
+	},
+);
 
 test("optional artifact misses return immediately for an explicit source fallback", async () => {
 	const revision = "d".repeat(40);
-	const fixture = await artifactApiFixture({ archive: new Uint8Array(), revision, missing: true });
+	const fixture = await artifactApiFixture({
+		archive: new Uint8Array(),
+		revision,
+		missing: true,
+	});
 	try {
 		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
-		assert.equal(await installServerImageArtifact({ revision, destination: "unused", log() {} }), undefined);
+		assert.equal(
+			await installServerImageArtifact({
+				revision,
+				destination: "unused",
+				log() {},
+			}),
+			undefined,
+		);
 		assert.equal(fixture.requests.length, 1);
 	} finally {
 		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
@@ -248,11 +354,18 @@ test("optional artifact misses return immediately for an explicit source fallbac
 
 test("required artifact lookup errors do not silently fall back to a source build", async () => {
 	const revision = "e".repeat(40);
-	const fixture = await artifactApiFixture({ archive: new Uint8Array(), revision, lookupStatus: 503 });
+	const fixture = await artifactApiFixture({
+		archive: new Uint8Array(),
+		revision,
+		lookupStatus: 503,
+	});
 	try {
 		process.env.LIX_CI_ARTIFACT_API_ROOT = fixture.url;
 		process.env.LIXRAY_LIX_ARTIFACTS = "only";
-		await assert.rejects(installServerImageArtifact({ revision, destination: "unused", log() {} }), /could not be checked.*503.*Check its producer/);
+		await assert.rejects(
+			installServerImageArtifact({ revision, destination: "unused", log() {} }),
+			/could not be checked.*503.*Check its producer/,
+		);
 		assert.equal(fixture.requests.length, 1);
 	} finally {
 		delete process.env.LIX_CI_ARTIFACT_API_ROOT;
@@ -267,9 +380,14 @@ test("artifact fixtures bind fetch-safe dynamic ports", async (t) => {
 		assert.ok(port >= 49152 && port <= 65535, `unsafe fixture port: ${port}`);
 		return listen.call(this, port, ...args);
 	});
-	const fixture = await artifactApiFixture({ archive: new Uint8Array(), lookupStatus: 503 });
+	const fixture = await artifactApiFixture({
+		archive: new Uint8Array(),
+		lookupStatus: 503,
+	});
 	try {
-		const response = await fetch(`${fixture.url}/repos/opral/lix/actions/artifacts`);
+		const response = await fetch(
+			`${fixture.url}/repos/opral/lix/actions/artifacts`,
+		);
 		assert.equal(response.status, 503);
 		await response.arrayBuffer();
 		assert.equal(fixture.requests.length, 1);
@@ -279,7 +397,10 @@ test("artifact fixtures bind fetch-safe dynamic ports", async (t) => {
 });
 
 test("artifact fixtures can bind while another fixture occupies their first port", async () => {
-	const first = await artifactApiFixture({ archive: new Uint8Array(), lookupStatus: 503 });
+	const first = await artifactApiFixture({
+		archive: new Uint8Array(),
+		lookupStatus: 503,
+	});
 	try {
 		const second = await artifactApiFixture({
 			archive: new Uint8Array(),
@@ -289,7 +410,9 @@ test("artifact fixtures can bind while another fixture occupies their first port
 		try {
 			assert.notEqual(second.url, first.url);
 			for (const fixture of [first, second]) {
-				const response = await fetch(`${fixture.url}/repos/opral/lix/actions/artifacts`);
+				const response = await fetch(
+					`${fixture.url}/repos/opral/lix/actions/artifacts`,
+				);
 				assert.equal(response.status, 503);
 				await response.arrayBuffer();
 				assert.equal(fixture.requests.length, 1);
@@ -317,18 +440,26 @@ async function artifactApiFixture({
 	const server = createServer((request, response) => {
 		requests.push(request.url);
 		if (request.url?.startsWith("/repos/opral/lix/actions/artifacts")) {
-			if (lookupStatus !== 200) { response.writeHead(lookupStatus).end(); return; }
-			const lookupCount = requests.filter((entry) => entry.startsWith("/repos/opral/lix/actions/artifacts")).length;
+			if (lookupStatus !== 200) {
+				response.writeHead(lookupStatus).end();
+				return;
+			}
+			const lookupCount = requests.filter((entry) =>
+				entry.startsWith("/repos/opral/lix/actions/artifacts"),
+			).length;
 			json(response, {
-				artifacts: missing || lookupCount <= availableAfterLookups ? [] : [
-					{
-						archive_download_url: `${fixtureUrl(server)}/artifact.zip`,
-						digest,
-						expired: false,
-						id: 7,
-						workflow_run: { head_sha: revision, id: 42 },
-					},
-				],
+				artifacts:
+					missing || lookupCount <= availableAfterLookups
+						? []
+						: [
+								{
+									archive_download_url: `${fixtureUrl(server)}/artifact.zip`,
+									digest,
+									expired: false,
+									id: 7,
+									workflow_run: { head_sha: revision, id: 42 },
+								},
+							],
 			});
 			return;
 		}

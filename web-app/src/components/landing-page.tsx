@@ -339,6 +339,8 @@ function ChipStack({
 	);
 }
 
+const sourceMarkGlow = "size-14 drop-shadow-[0_8px_14px_rgba(232,89,12,.28)]"; // token-literal: fixed LixRay brand-mark glow.
+
 function SourcesDiagram() {
 	return (
 		<div
@@ -349,11 +351,7 @@ function SourcesDiagram() {
 			<ChipStack items={sources} rowsClassName="sm:grid-rows-5" />
 			<Wires count={sources.length} />
 			<div className="flex flex-col items-center justify-center gap-2 py-2 text-[15px] font-bold">
-				<img
-					className="size-14 drop-shadow-[0_8px_14px_rgba(232,89,12,.28)]"
-					src="/lixray-mark.svg"
-					alt=""
-				/>
+				<img className={sourceMarkGlow} src="/lixray-mark.svg" alt="" />
 				LixRay
 			</div>
 			<Wires count={agents.length} flip />

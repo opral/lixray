@@ -276,7 +276,9 @@
    wide code block scrolls sideways. */
 .docs-code {
 	position: relative;
-	margin-block: var(--atelier-doc-gap);
+	margin-block: var(
+		--atelier-doc-gap
+	); /* token-literal: component-scoped spacing declared by Atelier document.css. */
 }
 .docs-code > pre {
 	margin-block: 0;

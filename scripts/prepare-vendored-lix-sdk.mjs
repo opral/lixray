@@ -101,12 +101,9 @@ if (buildSource) {
 		toolchainEnv,
 		sdkRoot,
 	);
-	run(
-		process.execPath,
-		[tsc, "-p", join(opfsStorageRoot, "tsconfig.json")],
-		toolchainEnv,
-		opfsStorageRoot,
-	);
+	// OpfsStorage imports the bundled direct.js, not the unbundled tsc provider.
+	// Run the package build so a previous revision's ignored bundle cannot survive.
+	run("npm", ["run", "build"], toolchainEnv, opfsStorageRoot);
 	await writeBuildMarker(browserMarker, {
 		source: "source-build",
 		sourceRevision,
@@ -233,7 +230,8 @@ async function browserFilesExist() {
 		(await isFile(join(sdkDist, "wasm", "lix_js_sdk_bg.wasm"))) &&
 		(await isFile(join(sdkDist, "migration.js"))) &&
 		(await isFile(join(opfsStorageRoot, "dist", "migration.worker.js"))) &&
-		(await isFile(join(opfsStorageRoot, "dist", "index.js")))
+		(await isFile(join(opfsStorageRoot, "dist", "index.js"))) &&
+		(await isFile(join(opfsStorageRoot, "dist", "direct.js")))
 	);
 }
 

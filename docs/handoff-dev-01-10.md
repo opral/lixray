@@ -1,10 +1,10 @@
-# October 1 exception and partial-replica corrections
+# dev-01-10 native corrections and repository opening profiles
 
 ## Delivery
 
 The native browser architecture remains the goal: local working data and edits stay on the partial replica; whole-history inventory uses an explicitly authorized server reader in the background. Local working data renders independently of that reader. There is no compatibility shim, new mutation outbox, storage activation prompt or broad retry/reset suppression.
 
-- Lix engine/SDK: `92d9969e6668b351c7ec5cb5b718345da3f10adf`, `dev-01-10`, [PR #1933](https://github.com/opral/lix/pull/1933).
+- Lix engine/SDK: `4701676683cf68e4606d80ad2044c84f5106fd61`, `dev-01-10`, [PR #1933](https://github.com/opral/lix/pull/1933).
 - Atelier: `b5fe9925973f302b2d0e6cb4dba374f4cd49b0df`, `dev-01-10`, [PR #203](https://github.com/opral/atelier/pull/203). Includes Markdown capability correction `b4981c93` and concurrent Library layout work.
 - Application: `dev-01-10`, [PR #549](https://github.com/opral/lixray/pull/549), including main `76cc65ce0495cdbd98b27ff87d0515335c12d105` and concurrent development update `3669ef8`.
 
@@ -74,3 +74,27 @@ cargo test -p lix --doc
 cargo clippy --profile test -p lix -p lix-server --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 ```
+
+## Repository opening profile follow-up
+
+The browser now emits `profile_version=1` with actual SDK initialization facts (`fresh`/`cached`), managed-session acquisition (`joined_open`/`reused_session`), remote-only/unknown states, migrations, retry/replacement overhead and actual HTTP-request header waits. A same-route Strict Mode join cannot overwrite the creator’s initialization result. Completed native progress produces scoped phase spans/totals; ended/stale recorders cannot alter later attempts.
+
+The browser SDK adds an immutable host profile with actual WASM source/cache/wait/compile/init, parallel compiler import/init, provider startup, OPFS lock/SQLite/pool/schema and native binding waits. Shared attachments omit historical profiles; reused realms report only the current wait. Passive document resource/long-task timing adds bounded browser/device/network context, capability/truncation flags and document startup timing only for initial opens. Telemetry uploads are excluded. Fixed gateway projection makes these facts queryable for authenticated and public anonymous opens. No additional hot-path requests or storage probes are introduced.
+
+The [profile contract and HogQL queries](./repository-opening-profile.md) explain lifecycle definitions, measurement overlap, missing data and limitations. [Issue #554](https://github.com/opral/lixray/issues/554) tracks the gap. Remote repository size and proof of size-independent loading remain deferred.
+
+Qualification on SDK `470167668`:
+
+| Check | Result |
+| --- | --- |
+| Browser/native source SDK preparation | Passed; initial WASM compile 3m56s, native 2.98s; corrected preparation also rebuilds the direct OPFS bundle |
+| Full targeted SDK unit files and SDK typecheck | 50/50 tests passed; typecheck passed |
+| Actual OPFS automatic-open browser tests | 2/2 passed against corrected source preparation; fresh initialization and persisted reopen expose physical-provider timings |
+| Actual browser opening OTLP + existing PostHog/WASM exception wire tests | 2/2 passed; genuine native phases/host fields, resource timing, privacy and two-paint completion verified |
+| Application CI check | TypeScript, tokens, 56 analytics, 230 repository + 30 partial-replica integration, 52 Railway and 443 worker/MCP tests passed |
+| App lint, format, auth/profile/docs checks and web build | Passed |
+| SDK browser artifact admission | 12 tests passed, including rejection of an artifact missing the direct provider before replacing installed files |
+
+The source preparation gate exposed a related [issue #514](https://github.com/opral/lixray/issues/514#issuecomment-5943017942): it emitted unbundled OPFS TypeScript without rebuilding the `direct.js` imported by `OpfsStorage`. It now runs the normal provider package build; both prepared-file readiness and downloaded-artifact admission require that bundle. The actual physical-store browser tests pass on this driver-built output. [Issue #555](https://github.com/opral/lixray/issues/555) records two token-gate findings in concurrent docs/landing work; explicit supported annotations identify the brand artwork color and Atelier document-local spacing source.
+
+The native Rust implementation is unchanged by this profiling follow-up; the earlier native engine qualification above remains the evidence for those corrections. These development branches and draft PRs are not a production deployment. New production samples become available after this candidate is deployed; old samples cannot be retroactively classified.
