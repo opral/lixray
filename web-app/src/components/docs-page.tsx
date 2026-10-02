@@ -21,7 +21,7 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 
 	return (
 		<div className="flex min-h-screen flex-col bg-bg font-sans text-fg antialiased">
-			<SiteHeader sticky contained />
+			<SiteHeader sticky />
 
 			<div className="docs-layout">
 				<details
@@ -43,8 +43,9 @@ export function DocsPage({ entry }: { entry: DocsEntry }) {
 				</nav>
 
 				<main className="docs-main">
-					<div className="docs-content">
-						<div className="mb-4 flex justify-end">
+					<div className="docs-content relative">
+						{/* Beside the h1 from 768px, so it costs no vertical space. */}
+						<div className="mb-4 flex justify-end md:absolute md:top-2 md:right-0 md:mb-0">
 							<CopyMarkdownButton markdown={markdown} />
 						</div>
 						<DocsArticle html={html} />

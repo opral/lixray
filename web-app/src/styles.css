@@ -212,14 +212,14 @@
 	.docs-layout {
 		grid-template-columns: 176px minmax(0, 1fr);
 		gap: 40px;
-		padding-top: 40px;
+		padding-top: 32px;
 	}
 	.docs-navigation {
 		display: block;
 		position: sticky;
-		top: 110px;
+		top: 102px; /* 70px header + 32px layout padding */
 		align-self: start;
-		max-height: calc(100vh - 130px);
+		max-height: calc(100vh - 134px);
 		overflow-y: auto;
 	}
 	.docs-navigation-mobile {

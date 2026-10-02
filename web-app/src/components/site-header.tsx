@@ -16,32 +16,28 @@ export function useRepositoryCta() {
 /**
  * The marketing-surface navbar shared by the landing, pricing, and docs pages:
  * "LixRay | Docs Pricing Self-host" on the left, auth / CTA on the right.
- * `contained` aligns the bar with a centred page column (the docs layout)
- * instead of the full-bleed marketing gutter.
+ * Every page uses the same bar (same height and 1024px column, matching the
+ * docs layout), so moving between the landing page and the docs doesn't
+ * shift it; `sticky` only adds the border and background.
  */
 export function SiteHeader({
 	sticky = false,
-	contained = false,
 	children,
 }: {
 	sticky?: boolean;
-	contained?: boolean;
 	children?: ReactNode;
 }) {
 	const { signOut, user, repositoryTo } = useRepositoryCta();
 	return (
 		<header
 			className={cn(
-				"z-20",
-				sticky ? "sticky top-0 border-b border-fg/8 bg-bg" : "relative",
+				"z-20 border-b",
+				sticky
+					? "sticky top-0 border-fg/8 bg-bg"
+					: "relative border-transparent",
 			)}
 		>
-			<div
-				className={cn(
-					"flex items-center justify-between gap-4 py-6",
-					contained ? "mx-auto w-full max-w-[1024px] px-6" : "px-5 sm:px-14",
-				)}
-			>
+			<div className="mx-auto flex w-full max-w-[1024px] items-center justify-between gap-4 px-6 py-3">
 				<div className="flex items-center gap-3.5 sm:gap-[18px]">
 					<Link
 						className="inline-flex items-center gap-[9px] text-lg font-bold tracking-[-.01em] text-fg no-underline"
