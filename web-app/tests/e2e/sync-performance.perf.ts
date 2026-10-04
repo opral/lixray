@@ -11,11 +11,15 @@ test("warm OPFS reopen latency and query budgets", async ({
 		baseURL,
 		scenario: "performance",
 	});
+	let primaryFailure: unknown;
 	try {
 		const state = await fixture.editing();
 		const reopened = await fixture.reopen(state);
 		await fixture.history(reopened);
+	} catch (error) {
+		primaryFailure = error;
+		throw error;
 	} finally {
-		await fixture.close();
+		await fixture.close(primaryFailure);
 	}
 });

@@ -54,7 +54,8 @@ export async function createSyncFixture({
 		if (
 			scenario === "editing" ||
 			scenario === "history" ||
-			scenario === "conflicts"
+			scenario === "conflicts" ||
+			scenario === "performance"
 		)
 			await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
