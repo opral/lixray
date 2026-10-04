@@ -32,8 +32,11 @@ import {
 } from "../lib/demo-identity.ts";
 import { isClearlyReadOnlySql } from "../lib/lix-sql-access.ts";
 import {
-	aggregatePublicProfileActivity,
-	type ProfileRepositoryFiles,
+	aggregatePublicProfileActivityFromCounts,
+	publicProfileActivityAggregateSql,
+	PUBLIC_PROFILE_ACTIVITY_CATEGORY_COUNT,
+	type PublicProfileActivity,
+	type ProfileRepositoryFileCounts,
 	type ProfileRepositorySource,
 } from "../lib/profile-activity-aggregate.ts";
 import { WorkerLixRuntimeClient } from "../mcp/runtime-client.ts";
@@ -635,7 +638,7 @@ export async function handleRequest(
 				? resolveDemoPublicProfileRepositories(namespaceId)
 				: resolvePublicProfileRepositoriesWithSupabase(namespaceId, env));
 		if (!resolution.ok) return withProfileCors(resolution.response);
-		const loadActivity = async () => ({
+		const loadActivity = async (): Promise<PublicProfileActivity> => ({
 			...(await loadPublicProfileActivity(
 				resolution.repositories,
 				env,
@@ -2387,10 +2390,14 @@ async function loadPublicProfileActivity(
 	env: WorkerEnv,
 	lixFetch: HandleRequestOptions["lixFetch"],
 	signal: AbortSignal,
-) {
+): Promise<PublicProfileActivity> {
 	if (!lixFetch) {
-		return aggregatePublicProfileActivity(
-			repositories.map((repository) => ({ repository, paths: null })),
+		return aggregatePublicProfileActivityFromCounts(
+			repositories.map((repository) => ({
+				repository,
+				totalFiles: null,
+				categoryCounts: null,
+			})),
 		);
 	}
 	const client = new WorkerLixRuntimeClient(
@@ -2400,33 +2407,54 @@ async function loadPublicProfileActivity(
 		{ lixFetch, signal },
 	);
 	try {
-		const files = await mapWithConcurrency(
+		const counts = await mapWithConcurrency(
 			repositories,
 			4,
-			async (repository): Promise<ProfileRepositoryFiles> => {
+			async (repository): Promise<ProfileRepositoryFileCounts> => {
 				try {
 					const result = await client.execute(repository.id, {
-						sql: "SELECT path FROM lix_file ORDER BY path",
+						sql: publicProfileActivityAggregateSql(),
 					});
-					const pathColumn = result.columns.indexOf("path");
-					if (pathColumn === -1) return { repository, paths: null };
+					const totalColumn = result.columns.indexOf("total_files");
+					const categoryColumns = Array.from(
+						{ length: PUBLIC_PROFILE_ACTIVITY_CATEGORY_COUNT },
+						(_, index) => result.columns.indexOf(`category_${index}`),
+					);
+					const row = result.rows.length === 1 ? result.rows[0] : undefined;
+					const readCount = (index: number) => {
+						const value = row?.[index];
+						return value?.kind === "int" &&
+							Number.isSafeInteger(value.value) &&
+							value.value >= 0
+							? value.value
+							: null;
+					};
+					const totalFiles = readCount(totalColumn);
+					const categoryCounts = categoryColumns.map(readCount);
+					if (
+						totalFiles === null ||
+						categoryCounts.some((count) => count === null)
+					) {
+						return { repository, totalFiles: null, categoryCounts: null };
+					}
+					const resolvedCategoryCounts = categoryCounts.filter(
+						(count): count is number => count !== null,
+					);
 					return {
 						repository,
-						paths: result.rows.flatMap((row) => {
-							const value = row[pathColumn];
-							return value?.kind === "text" ? [value.value] : [];
-						}),
+						totalFiles,
+						categoryCounts: resolvedCategoryCounts,
 					};
 				} catch (error) {
 					console.error(
-						`[profile-activity] file listing failed for ${repository.slug}:`,
+						`[profile-activity] file aggregate failed for ${repository.slug}:`,
 						error,
 					);
-					return { repository, paths: null };
+					return { repository, totalFiles: null, categoryCounts: null };
 				}
 			},
 		);
-		return aggregatePublicProfileActivity(files);
+		return aggregatePublicProfileActivityFromCounts(counts);
 	} finally {
 		await client.close();
 	}
@@ -3061,7 +3089,7 @@ function resolvedProfileResponse(
 
 function profileActivityResponse(
 	request: Request,
-	activity: ReturnType<typeof aggregatePublicProfileActivity>,
+	activity: PublicProfileActivity,
 ): Response {
 	return profileResponse(
 		request.method === "HEAD" ? null : JSON.stringify(activity),

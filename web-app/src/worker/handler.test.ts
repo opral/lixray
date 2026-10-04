@@ -13,6 +13,7 @@ import {
 	DEMO_SECONDARY_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
+import { publicProfileActivityAggregateSql } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
 import { SIGNUP_TELEMETRY_PATH } from "../lib/signup-telemetry.ts";
 import {
@@ -423,7 +424,7 @@ void test("GET /profile/{namespace_id}/activity lists real public repositories",
 	]);
 });
 
-void test("profile activity queries file paths from every public Lix", async () => {
+void test("profile activity receives a fixed-size exact aggregate from every public Lix", async () => {
 	const response = await handleRequest(
 		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
 		env({}),
@@ -459,13 +460,25 @@ void test("profile activity queries file paths from every public Lix", async () 
 				}
 				assert.equal(pathname, `/lix/v1/${LIX_A}/execute`);
 				const body = (await request.json()) as { sql?: unknown };
-				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
+				assert.equal(body.sql, publicProfileActivityAggregateSql());
 				return Response.json({
-					columns: [{ name: "path", type: "text" }],
+					columns: [
+						{ name: "total_files", type: "integer" },
+						{ name: "category_0", type: "integer" },
+						{ name: "category_1", type: "integer" },
+						{ name: "category_2", type: "integer" },
+						{ name: "category_3", type: "integer" },
+						{ name: "category_4", type: "integer" },
+					],
 					rows: [
-						[{ kind: "text", value: "/README.md" }],
-						[{ kind: "text", value: "/src/index.ts" }],
-						[{ kind: "text", value: "/assets/logo.png" }],
+						[
+							{ kind: "int", value: 3 },
+							{ kind: "int", value: 1 },
+							{ kind: "int", value: 1 },
+							{ kind: "int", value: 0 },
+							{ kind: "int", value: 0 },
+							{ kind: "int", value: 1 },
+						],
 					],
 					rowsAffected: 0,
 					notices: [],
@@ -519,8 +532,24 @@ void test("profile activity shares one repository scan across visitors", async (
 			}
 			executeRequests += 1;
 			return Response.json({
-				columns: [{ name: "path", type: "text" }],
-				rows: [[{ kind: "text", value: "/README.md" }]],
+				columns: [
+					{ name: "total_files", type: "integer" },
+					{ name: "category_0", type: "integer" },
+					{ name: "category_1", type: "integer" },
+					{ name: "category_2", type: "integer" },
+					{ name: "category_3", type: "integer" },
+					{ name: "category_4", type: "integer" },
+				],
+				rows: [
+					[
+						{ kind: "int", value: 1 },
+						{ kind: "int", value: 1 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+					],
+				],
 				rowsAffected: 0,
 				notices: [],
 			});
