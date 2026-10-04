@@ -75,10 +75,88 @@ export function sqlLooksLikeWrite(sql: string): boolean {
 
 export function isClearlyReadOnlySql(sql: string): boolean {
 	if (sqlLooksLikeWrite(sql)) return false;
-	const first = sqlTokens(sql)[0];
-	return (
-		first !== undefined &&
-		!first.quoted &&
-		/^(?:SELECT|VALUES)$/i.test(first.value)
-	);
+	let tokens = sqlTokens(sql);
+	// This gate must not treat a second statement as part of a read query.
+	// String contents and quoted identifiers are separate tokens, so semicolons
+	// inside either are not mistaken for statement separators.
+	const semicolons = tokens
+		.map((token, index) => ({ token, index }))
+		.filter(({ token }) => !token.quoted && token.value === ";");
+	if (semicolons.length > 1) return false;
+	if (semicolons.length === 1) {
+		if (semicolons[0]!.index !== tokens.length - 1) return false;
+		tokens = tokens.slice(0, -1);
+	}
+	if (tokens.length === 0) return false;
+	const isPunctuation = (index: number, punctuation: string) =>
+		tokens[index] !== undefined &&
+		tokens[index]!.quoted === false &&
+		tokens[index]!.value === punctuation;
+	const isKeyword = (index: number, keyword: string) =>
+		tokens[index] !== undefined &&
+		!tokens[index]!.quoted &&
+		tokens[index]!.value.toUpperCase() === keyword;
+	const skipParenthesized = (
+		start: number,
+		end: number,
+	): { after: number; innerStart: number; innerEnd: number } | null => {
+		if (!isPunctuation(start, "(")) return null;
+		let depth = 0;
+		for (let index = start; index < end; index++) {
+			if (isPunctuation(index, "(")) depth++;
+			else if (isPunctuation(index, ")")) {
+				depth--;
+				if (depth === 0)
+					return { after: index + 1, innerStart: start + 1, innerEnd: index };
+			}
+		}
+		return null;
+	};
+	const isReadQuery = (start: number, end: number): boolean => {
+		const readStatement = (index: number) =>
+			isKeyword(index, "SELECT") || isKeyword(index, "VALUES");
+		if (readStatement(start)) return true;
+		if (!isKeyword(start, "WITH")) return false;
+
+		// Parse only the CTE envelope. Every CTE body must itself begin with a
+		// read query; the full-token write scan above rejects DML anywhere inside
+		// those bodies or in the outer statement.
+		let index = isKeyword(start + 1, "RECURSIVE") ? start + 2 : start + 1;
+		while (index < end) {
+			// A CTE name is one identifier token, quoted or unquoted.
+			if (
+				tokens[index] === undefined ||
+				isPunctuation(index, "(") ||
+				isPunctuation(index, ",")
+			)
+				return false;
+			index++;
+			if (isPunctuation(index, "(")) {
+				const columns = skipParenthesized(index, end);
+				if (columns === null) return false;
+				index = columns.after;
+			}
+			if (!isKeyword(index, "AS")) return false;
+			index++;
+			if (isKeyword(index, "NOT")) {
+				index++;
+				if (!isKeyword(index, "MATERIALIZED")) return false;
+				index++;
+			} else if (isKeyword(index, "MATERIALIZED")) {
+				index++;
+			}
+			const body = skipParenthesized(index, end);
+			if (body === null || !isReadQuery(body.innerStart, body.innerEnd))
+				return false;
+			index = body.after;
+			if (isPunctuation(index, ",")) {
+				index++;
+				continue;
+			}
+			return readStatement(index);
+		}
+		return false;
+	};
+
+	return isReadQuery(0, tokens.length);
 }

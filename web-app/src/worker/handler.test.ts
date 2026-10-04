@@ -2359,6 +2359,74 @@ void test("public reads classify writes without a SQL parser", async () => {
 	assert.equal(proxied, true);
 });
 
+void test("public multiplex observations accept read-only CTE subscriptions", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/observe/multiplex", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				subscriptions: [
+					{
+						id: "checkpoint-count",
+						sql: "SELECT created_at, count(*) over () AS total_count FROM lix_log() WHERE is_checkpoint ORDER BY position LIMIT 10",
+					},
+					{
+						id: "daily-count",
+						sql: "WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10",
+					},
+				],
+			}),
+		}),
+		env({}),
+		{
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("event: next\\ndata: {}\\n\\n", {
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(proxied, true);
+});
+
+void test("public multiplex observations reject data-modifying CTE subscriptions", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/observe/multiplex", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				subscriptions: [
+					{ id: "safe", sql: "SELECT 1" },
+					{
+						id: "write",
+						sql: "WITH changed AS (DELETE FROM lix_file RETURNING id) SELECT * FROM changed",
+					},
+				],
+			}),
+		}),
+		env({}),
+		{
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), {
+		error: { code: "LIX_READ_ONLY", message: "lix is read-only" },
+	});
+	assert.equal(proxied, false);
+});
+
 void test("authenticated non-members are downgraded to the public read transport", async () => {
 	let proxiedRequest: Request | undefined;
 	let publicLixLookups = 0;

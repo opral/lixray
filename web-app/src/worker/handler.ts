@@ -2745,10 +2745,10 @@ function isPublicSyncReadRequest(request: Request, endpoint: string): boolean {
 /**
  * The canonical Lix protocol has no read-only mode, so the service
  * is the authorization boundary for public readers: every SQL string in a
- * public request must classify as a read. Classification is a SELECT/VALUES
- * prefix check plus a write-verb regex (INSERT/UPDATE/DELETE). A mutation
- * cannot hide behind a multi-statement script because those verbs are matched
- * anywhere in the string. Empty or unreadable bodies fail closed.
+ * public request must classify as a read. The conservative token classifier
+ * recognizes SELECT, VALUES, and read-only WITH queries, while rejecting
+ * writes across the complete SQL string. Empty or unreadable bodies fail
+ * closed.
  */
 async function rejectPublicMutation(
 	request: Request,
