@@ -16,6 +16,7 @@ test("existing OPFS replica opens through the app, preserves edits, and survives
 	const path = [
 		"synthetic-sparse-v77-full-sync",
 		"synthetic-v82-v2-partial-replica",
+		"synthetic-current-v3-partial-replica",
 	].includes(seeded.fixtureKind)
 		? "/?slowLegacy=1"
 		: "/";
@@ -70,7 +71,7 @@ async function assertValues(page) {
 				untracked: true,
 			});
 		}
-	} else if (result.kind === "v2-partial") {
+	} else if (["v2-partial", "v3-partial"].includes(result.kind)) {
 		expect(result.rows).toEqual([result.pendingRow]);
 	} else {
 		expect(result.main).toEqual([
@@ -101,6 +102,7 @@ for (const scenario of [
 			![
 				"synthetic-sparse-v77-full-sync",
 				"synthetic-v82-v2-partial-replica",
+				"synthetic-current-v3-partial-replica",
 			].includes(seeded.fixtureKind),
 			"Requires a migration receipt pause",
 		);

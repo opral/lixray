@@ -91,13 +91,26 @@ async function open() {
 	};
 }
 async function values() {
-	if (fixture.fixtureKind === "synthetic-v82-v2-partial-replica") {
+	if (
+		[
+			"synthetic-v82-v2-partial-replica",
+			"synthetic-current-v3-partial-replica",
+		].includes(fixture.fixtureKind)
+	) {
 		const rows = (
 			await session.lix.execute(
-				"SELECT key,value FROM lix_key_value WHERE key='v2-browser-pending'",
+				"SELECT key,value FROM lix_key_value WHERE key=$1",
+				[fixture.pendingRow.key],
 			)
 		).rows;
-		return { kind: "v2-partial", rows, pendingRow: fixture.pendingRow };
+		return {
+			kind:
+				fixture.fixtureKind === "synthetic-current-v3-partial-replica"
+					? "v3-partial"
+					: "v2-partial",
+			rows,
+			pendingRow: fixture.pendingRow,
+		};
 	}
 	if (fixture.fixtureKind === "synthetic-sparse-v77-full-sync") {
 		const rows = (
