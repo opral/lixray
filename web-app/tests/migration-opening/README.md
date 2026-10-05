@@ -15,7 +15,7 @@ checked after opening, in a second tab, and after reload. Its concurrent HTTP
 fixture handles update polling alongside immutable-object hydration.
 No production repository or credential is used.
 
-Three fixture families must remain distinct:
+Four fixture families must remain distinct:
 
 - `legacy_browser_app_fixture_authority` exports the engine's supported synthetic
   sparse v77 full-sync shape. Historical commit bodies are intentionally absent.
@@ -25,6 +25,11 @@ Three fixture families must remain distinct:
   replica with a v2 read-interest journal and a pending local row. It is seeded
   by the historical OPFS writer but is **not** a historical codec export. The
   actual app opener must convert the v2 journal and preserve the pending row.
+- `v3_history_partial_browser_app_fixture_authority` exports a current-format
+  partial replica with a prerelease v3 read-interest journal and a pending local
+  row. It tests journal migration without downgrading the storage format. The
+  app must convert the journal to v4, remove its obsolete History anchor, and
+  preserve the pending row.
 - `pending_browser_conversion_fixture_authority` exports a complete current-format
   full replica at a real acknowledged baseline, with independent local/remote
   edits on two branches, files and a custom schema. Its authority deliberately
@@ -36,11 +41,12 @@ Start the ignored fixture immediately before the browser tests: native baseline
 leases last five minutes. An intentionally aged cache is a separate lifecycle
 case; leave its app session open to reconcile the baseline.
 
-Start either ignored fixture from `vendor/lix` (or a matching engine worktree):
+Start the ignored fixture from `vendor/lix` (or a matching engine worktree):
 
 ```sh
 LIX_BROWSER_LEGACY_MANIFEST=/tmp/lix-legacy-qa.json \
 LIX_BROWSER_LEGACY_STOP=/tmp/lix-legacy-qa-stop \
+RUST_MIN_STACK=16777216 \
 cargo test -p lix --features all-simulations,server-protocol,server-protocol-client \
   legacy_browser_app_fixture_authority -- --ignored --nocapture
 ```
@@ -50,8 +56,19 @@ For the v2 partial-replica fixture, use fresh paths and run:
 ```sh
 LIX_BROWSER_V2_PARTIAL_MANIFEST=/tmp/lix-v2-partial-qa.json \
 LIX_BROWSER_V2_PARTIAL_STOP=/tmp/lix-v2-partial-qa-stop \
+RUST_MIN_STACK=16777216 \
 cargo test -p lix --features all-simulations,server-protocol,server-protocol-client \
   v2_partial_browser_app_fixture_authority -- --ignored --nocapture
+```
+
+For the current-format partial replica with a v3 journal, use fresh paths and run:
+
+```sh
+LIX_BROWSER_V3_PARTIAL_MANIFEST=/tmp/lix-v3-partial-qa.json \
+LIX_BROWSER_V3_PARTIAL_STOP=/tmp/lix-v3-partial-qa-stop \
+RUST_MIN_STACK=16777216 \
+cargo test -p lix --features all-simulations,server-protocol,server-protocol-client \
+  v3_history_partial_browser_app_fixture_authority -- --ignored --nocapture
 ```
 
 For the pending current-format fixture, use `LIX_BROWSER_CONVERSION_MANIFEST`,
@@ -63,11 +80,12 @@ contexts and does not independently qualify fresh migration for later cases.
 Select one case per invocation with `--grep`, stop its authority afterward, then
 start a new authority before the next case.
 
-The complete matrix has twelve isolated cases:
+The complete matrix has fifteen isolated cases:
 
 - Clean v77 full replica: opening/reload, second tab, and tab closed during migration.
 - Pending v77 full replica: the same three cases plus recovery download.
 - v82 partial replica with a v2 journal: opening/reload, second tab, and tab closed during migration.
+- Current-format partial replica with a v3 journal and pending row: the same three cases.
 - Current-format pending full replica: opening/reload with lost merge acknowledgements.
 - Clean v77 full replica: durable-admission offline reopen after owner teardown.
 
