@@ -501,6 +501,21 @@ export async function createSyncFixture({
 				throw new Error("authority returned an invalid checkpoint count");
 			return count;
 		};
+		const authorityLatestCheckpointTitle = async (): Promise<string | null> => {
+			const title = await authorityScalar(
+				`SELECT c.title
+				 FROM lix_log() AS l
+				 LEFT JOIN lix_conversation AS c ON c.id = l.conversation_id
+				 WHERE l.is_checkpoint
+				 ORDER BY l.position ASC
+				 LIMIT 1`,
+			);
+			if (title !== null && typeof title !== "string")
+				throw new Error(
+					"authority returned an invalid latest checkpoint title",
+				);
+			return title;
+		};
 		const authorityHead = async (): Promise<string> => {
 			const head = await authorityScalar(
 				"SELECT lix_active_branch_commit_id() AS commit_id",
@@ -1465,14 +1480,29 @@ export async function createSyncFixture({
 						initialCheckpointCount,
 						repositoryOperationTimeout,
 					);
-					{
-						await expect(freshHistory).toContainText(
-							describedCheckpoint?.title ?? "Latest checkpoint",
+					const checkpointRows = freshHistory
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li");
+					if (describedCheckpoint) {
+						await expect(checkpointRows.first()).toContainText(
+							describedCheckpoint.title,
 						);
+					} else {
+						const latestTitle = await authorityLatestCheckpointTitle();
+						if (latestTitle !== null)
+							await expect(checkpointRows.first()).toContainText(latestTitle);
+						else
+							await expect(
+								checkpointRows
+									.first()
+									.locator('[data-attr="history-view-checkpoint"]'),
+							).toBeVisible();
 					}
-					{
-						await expect(freshHistory).toContainText("Initial checkpoint");
-					}
+					await expect(
+						checkpointRows
+							.last()
+							.locator('[data-attr="history-view-checkpoint"]'),
+					).toBeVisible();
 					await expect(
 						fresh.locator("[data-atelier-extension-suspended]"),
 					).toHaveCount(0);
@@ -2238,8 +2268,20 @@ export async function createSyncFixture({
 					repositoryOperationTimeout,
 				);
 				await expect(history).toContainText("Working changes");
-				await expect(history).toContainText("Latest checkpoint");
-				await expect(history).toContainText("Initial checkpoint");
+				await expect(
+					history
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li")
+						.first()
+						.locator('[data-attr="history-view-checkpoint"]'),
+				).toBeVisible();
+				await expect(
+					history
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li")
+						.last()
+						.locator('[data-attr="history-view-checkpoint"]'),
+				).toBeVisible();
 			}
 			// Bounded, not zero: the relation-scoped working diff reads commit
 			// trees (see the fresh-bootstrap budget above).
@@ -2256,9 +2298,15 @@ export async function createSyncFixture({
 			// replica and report its request count without imposing a zero-read budget.
 			const freshReadsBeforeCheckpoint = coldReadCount([fresh]);
 			const freshHistory = await openHistoryPanel(fresh);
-			await freshHistory
-				.getByRole("button", { name: /Latest checkpoint/ })
-				.click();
+			// Select an older checkpoint so an already-viewed latest row cannot
+			// toggle review mode off.
+			const olderCheckpoint = freshHistory
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li")
+				.nth(1)
+				.locator('[data-attr="history-view-checkpoint"]');
+			await expect(olderCheckpoint).toBeVisible({ timeout: 30_000 });
+			await olderCheckpoint.click();
 			await expect(fresh.getByRole("button", { name: "Exit" })).toBeVisible({
 				timeout: 30_000,
 			});

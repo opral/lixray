@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "lixCommit": "1a7c6b3ca3fa496a9fd489735e7d81f2ce88072b",
+  "lixTree": "675fd87a2c43dbd7f493a6a723a4d1458dc92da8",
+  "test": "sync::partial_sql_tests::runtime_http::read_fulfillment_integration::cold_sparse_checkpoint_conversations_hydrate_through_target_in_scan",
+  "environment": {
+    "backend": "Memory",
+    "transport": "real HTTP protocol dispatcher in process",
+    "cargoIncremental": true,
+    "features": [
+      "all-simulations",
+      "server-protocol",
+      "server-protocol-client"
+    ],
+    "rustMinStack": 16777216
+  },
+  "binarySha256": "164ec9bf2bd2da9119fab91c0e0c95e7a722764b6be8ef23535e5a24099374c4",
+  "profiles": [
+    {
+      "case": "target_in",
+      "rpcs": [
+        {
+          "inputs": 45,
+          "response_bytes": 33108,
+          "discovery": {
+            "storageCalls": 395,
+            "storageBytes": 127169,
+            "payloadBytes": 16783
+          },
+          "server_ms": 20.48506
+        }
+      ],
+      "scan_limits": []
+    },
+    {
+      "case": "limited",
+      "rpcs": [
+        {
+          "inputs": 45,
+          "response_bytes": 33108,
+          "discovery": {
+            "storageCalls": 395,
+            "storageBytes": 127169,
+            "payloadBytes": 16783
+          },
+          "server_ms": 22.463078
+        }
+      ],
+      "scan_limits": []
+    },
+    {
+      "case": "range",
+      "rpcs": [
+        {
+          "inputs": 32,
+          "response_bytes": 22187,
+          "discovery": {
+            "storageCalls": 277,
+            "storageBytes": 83565,
+            "payloadBytes": 10890
+          },
+          "server_ms": 17.732826
+        }
+      ],
+      "scan_limits": []
+    }
+  ],
+  "limitations": [
+    "One observation per fresh-replica case; collected during the full native suite, so server timings are not an isolated latency benchmark.",
+    "LIMIT remains a SQL residual: no positive scan limit was pushed in these integration cases. Native positive-limit candidate admission is covered separately by the validator unit test.",
+    "The negative baseline failed HTTP400 before completing the read; no paired latency speedup is claimed."
+  ]
+}

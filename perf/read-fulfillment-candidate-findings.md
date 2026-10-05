@@ -1,0 +1,9 @@
+# Read-fulfillment candidate scope qualification
+
+Lix `1a7c6b3ca3fa496a9fd489735e7d81f2ce88072b` corrects a hosted-preview failure in cold checkpoint-title queries. The authority may need canonical payloads for physical candidates before SQL equality, range, visibility, tombstone and limit predicates can determine result membership. Rejecting such candidates in the payload validator made the actual four-target query fail with HTTP 400 (`selected_change_payload_recipe_mismatch`).
+
+The regression fails on the old validator after its authority result has been verified. With the fix, three independent empty replicas return exactly the authority results: four global checkpoint conversations selected by target IN, the same query with SQL LIMIT 4, and three rows selected by a declared integer range. Nonmatching conversation and range rows remain excluded from results. The validator still rejects identities outside branch, schema, file and explicit primary-key scope, including exclusive endpoints and rows=None. Descriptor scope, payload integrity/lifetime, source locator and closure count/byte checks are unchanged.
+
+Measured native HTTP fulfillment is one RPC per case. The target-IN and logical-limit cases each install 45 inputs in a 33,108-byte response; the integer range installs 32 inputs in a 22,187-byte response. The machine-readable profile records storage-call, storage-byte and payload-byte counts alongside raw server durations and exact source/binary provenance.
+
+These are correctness and cost observations, not a speedup claim. There is one observation per case, collected while the native suite was running. The failing baseline has no successful latency to compare. SQL LIMIT stayed residual in this trace; a separate validator unit case covers a positive native scan limit. Hosted preview qualification remains pending deployment of this fix.
