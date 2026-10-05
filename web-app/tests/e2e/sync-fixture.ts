@@ -161,6 +161,9 @@ export async function createSyncFixture({
 	// browser contexts and explicit seeds on a disposable stack. CI gives each
 	// scenario its own stack and storage prefix.
 	const repositoryId = DEMO_REPOSITORY_ID;
+	let describedCheckpoint:
+		| { commitId: string; conversationId: string; title: string }
+		| undefined;
 	let repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 	const realtimeTimeout = 30_000;
 	const repositoryOperationTimeout = 90_000;
@@ -265,6 +268,50 @@ export async function createSyncFixture({
 					},
 				);
 				expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
+			}
+			if (scenario === "history") {
+				const title = `Qualification ${randomUUID()}`;
+				const response = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `described-checkpoint-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT commit_id FROM lix_create_checkpoint($1, NULL)",
+							params: [{ kind: "text", value: title }],
+						},
+					},
+				);
+				expect(response.ok(), await response.text()).toBe(true);
+				const created = (await response.json()) as {
+					rows?: Array<Array<{ value?: unknown }>>;
+				};
+				const commitId = created.rows?.[0]?.[0]?.value;
+				if (typeof commitId !== "string")
+					throw new Error("Missing described checkpoint ID");
+				const pointer = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `checkpoint-conversation-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT conversation_id FROM lix_log() WHERE commit_id = $1",
+							params: [{ kind: "text", value: commitId }],
+						},
+					},
+				);
+				expect(pointer.ok(), await pointer.text()).toBe(true);
+				const result = (await pointer.json()) as {
+					rows?: Array<Array<{ value?: unknown }>>;
+				};
+				const conversationId = result.rows?.[0]?.[0]?.value;
+				if (typeof conversationId !== "string")
+					throw new Error("Missing authority conversation ID");
+				describedCheckpoint = { commitId, conversationId, title };
 			}
 		} finally {
 			const closed = await sharedContext.request.delete(
@@ -392,7 +439,10 @@ export async function createSyncFixture({
 			return selectRepositoryScope();
 		};
 		let authorityReadSequence = 0;
-		const authorityCheckpointCount = async (): Promise<number> => {
+		const authorityScalar = async (
+			sql: string,
+			params: Array<{ kind: "text"; value: string }> = [],
+		): Promise<unknown> => {
 			const repositoryEndpoint = new URL(
 				`/lix/v1/${repositoryId}/`,
 				baseURL,
@@ -418,8 +468,8 @@ export async function createSyncFixture({
 							"Lix-Session-Id": sessionId,
 						},
 						data: {
-							sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
-							params: [],
+							sql,
+							params,
 						},
 					},
 				);
@@ -428,9 +478,7 @@ export async function createSyncFixture({
 					rows?: Array<Array<{ kind?: string; value?: unknown }>>;
 				};
 				const cell = result.rows?.[0]?.[0];
-				if (cell?.kind !== "int" || typeof cell.value !== "number") {
-					throw new Error("authority returned an invalid checkpoint count");
-				}
+				if (!cell) throw new Error("authority returned no scalar value");
 				return cell.value;
 			} finally {
 				const closed = await sharedContext.request.delete(
@@ -445,6 +493,37 @@ export async function createSyncFixture({
 				expect(closed.status()).toBe(204);
 			}
 		};
+		const authorityCheckpointCount = async (): Promise<number> => {
+			const count = await authorityScalar(
+				"SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
+			);
+			if (typeof count !== "number")
+				throw new Error("authority returned an invalid checkpoint count");
+			return count;
+		};
+		const authorityHead = async (): Promise<string> => {
+			const head = await authorityScalar(
+				"SELECT lix_active_branch_commit_id() AS commit_id",
+			);
+			if (typeof head !== "string")
+				throw new Error("authority returned an invalid head");
+			return head;
+		};
+		const replicaHead = async (page: Page): Promise<string> =>
+			page.evaluate(async () => {
+				const result = await (
+					globalThis as typeof globalThis & {
+						__lixSyncHead: () => Promise<{
+							rows?: Array<Array<{ value?: unknown }>>;
+						}>;
+					}
+				).__lixSyncHead();
+				const head = result.rows?.[0]?.[0]?.value;
+				if (typeof head !== "string")
+					throw new Error(`Invalid local head: ${JSON.stringify(result)}`);
+				return head;
+			});
+
 		const renderedCheckpointCount = async (
 			history: Locator,
 			expected: number,
@@ -1183,6 +1262,29 @@ export async function createSyncFixture({
 				});
 			});
 		}
+		async function checkpointConversation() {
+			if (!describedCheckpoint) throw new Error("Requires the history fixture");
+			// Use a separate browser profile: neither OPFS nor native metadata has
+			// been installed by another app view before this SQL query runs.
+			const context = await newContext();
+			contexts.push(context);
+			const page = await newPage(context);
+			await page.goto(`${repositoryUrl}/sql`);
+			const editor = page.getByRole("textbox", { name: "SQL query" });
+			await expect(editor).toBeVisible({ timeout: repositoryOperationTimeout });
+			await editor.fill(
+				`SELECT conversation_id FROM lix_log() WHERE commit_id = '${describedCheckpoint.commitId}'`,
+			);
+			await page.locator('[data-attr="sql-run-query"]').click();
+			await expect(page.locator('[data-attr="sql-run-status"]')).toContainText(
+				"1 row",
+				{ timeout: repositoryOperationTimeout },
+			);
+			expect(await page.getByRole("cell").allTextContents()).toEqual([
+				describedCheckpoint.conversationId,
+			]);
+			await context.close();
+		}
 		async function editing() {
 			await Promise.all([openFiles(left), openFiles(right)]);
 			const lockState = await left.evaluate(async () => {
@@ -1364,7 +1466,9 @@ export async function createSyncFixture({
 						repositoryOperationTimeout,
 					);
 					{
-						await expect(freshHistory).toContainText("Latest checkpoint");
+						await expect(freshHistory).toContainText(
+							describedCheckpoint?.title ?? "Latest checkpoint",
+						);
 					}
 					{
 						await expect(freshHistory).toContainText("Initial checkpoint");
@@ -1620,6 +1724,59 @@ export async function createSyncFixture({
 				});
 			}
 		}
+		async function staleReopen(state: EditingState) {
+			const { freshContext, createdUrl } = state;
+			let fresh = state.fresh;
+			const before = await authorityHead();
+			await expect
+				.poll(() => replicaHead(fresh), { timeout: 30_000 })
+				.toBe(before);
+			await freshContext.setOffline(true);
+			offlineContexts.add(freshContext);
+			try {
+				const marker = ` stale-reopen-${randomUUID()}`;
+				await state.leftEditor.click();
+				await left.keyboard.press("Control+End");
+				await left.keyboard.insertText(marker);
+				await expect
+					.poll(
+						() =>
+							authorityScalar(
+								"SELECT CAST(content AS TEXT) FROM lix_file WHERE id = $1",
+								[{ kind: "text", value: state.createdFileId }],
+							),
+						{ timeout: 30_000 },
+					)
+					.toContain(marker);
+				await expect.poll(authorityHead, { timeout: 30_000 }).not.toBe(before);
+				expect(await replicaHead(fresh)).toBe(before);
+				await fresh.close();
+				await freshContext.setOffline(false);
+				offlineContexts.delete(freshContext);
+				fresh = await newPage(freshContext);
+				observePage(fresh, "stale-reopen");
+				await fresh.goto(createdUrl);
+				await expect(
+					fresh.locator('.ProseMirror[contenteditable="true"]:visible'),
+				).toContainText(marker, { timeout: 30_000 });
+				const after = await authorityHead();
+				await expect
+					.poll(() => replicaHead(fresh), { timeout: 30_000 })
+					.toBe(after);
+				await test.info().attach("stale-reopen.json", {
+					body: JSON.stringify({
+						before,
+						after,
+						coldReads: coldReads.get(fresh) ?? [],
+					}),
+					contentType: "application/json",
+				});
+			} finally {
+				await freshContext.setOffline(false);
+				offlineContexts.delete(freshContext);
+			}
+		}
+
 		async function checkpoint(state: EditingState) {
 			const { fresh, leftEditor, rightEditor } = state;
 
@@ -1748,6 +1905,27 @@ export async function createSyncFixture({
 				),
 			);
 			expect(freshReplicaEntries).toHaveLength(1);
+			// Warm reuse requires a synchronized durable replica. The final edit in
+			// editing() is confirmed by the writers, but fresh can still be behind.
+			// Observe only the hot branch coordinate; do not prefetch any payload.
+			let warmBaselineHead: string | undefined;
+			if (scenario === "performance") {
+				warmBaselineHead = await authorityHead();
+				await expect
+					.poll(() => replicaHead(fresh), { timeout: 30_000 })
+					.toBe(warmBaselineHead);
+				await waitForColdReadQuiescence([fresh]);
+				expect(await authorityHead()).toBe(warmBaselineHead);
+				expect(await replicaHead(fresh)).toBe(warmBaselineHead);
+				await test.info().attach("warm-reopen-baseline.json", {
+					body: JSON.stringify({
+						head: warmBaselineHead,
+						coldReadCount: coldReadCount([fresh]),
+					}),
+					contentType: "application/json",
+				});
+			}
+
 			const warmReopenUsableSamplesMs: number[] = [];
 			const warmReopenColdReads: string[][] = [];
 			const warmReopenProfiles: Array<{
@@ -1778,6 +1956,8 @@ export async function createSyncFixture({
 				const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
 				warmReopenColdReads.push(sampleColdReads);
 				warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
+				if (warmBaselineHead)
+					expect(await replicaHead(fresh)).toBe(warmBaselineHead);
 				// Keep durability verification outside the usable-time sample. This
 				// Playwright RPC validates identity continuity but is not app startup.
 				expect(
@@ -1854,6 +2034,7 @@ export async function createSyncFixture({
 					profilePath,
 					JSON.stringify(
 						{
+							warmBaselineHead,
 							warmReopenUsableSamplesMs,
 							warmReopenColdReads,
 							medianWarmReopenUsableMs,
@@ -2175,11 +2356,13 @@ export async function createSyncFixture({
 		}
 		return {
 			navigation,
+			checkpointConversation,
 			editing,
 			checkpoint,
 			concurrent,
 			independentConflicts,
 			continuousIndependentEdits,
+			staleReopen,
 			reopen,
 			partialCheckpoint,
 			history,

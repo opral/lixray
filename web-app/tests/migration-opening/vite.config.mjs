@@ -6,6 +6,21 @@ const repository = resolve(root, "../../..");
 const manifestPath = process.env.LIXRAY_MIGRATION_FIXTURE;
 const oldProvider = process.env.LIXRAY_MIGRATION_OLD_OPFS;
 const candidateSdk = process.env.LIXRAY_MIGRATION_SDK;
+const candidateAliases = candidateSdk
+	? Object.entries(
+			JSON.parse(readFileSync(resolve(candidateSdk, "package.json"), "utf8"))
+				.exports,
+		).map(([subpath, entry]) => {
+			const specifier =
+				subpath === "." ? "@lix-js/sdk" : `@lix-js/sdk${subpath.slice(1)}`;
+			return {
+				find: new RegExp(
+					`^${specifier.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+				),
+				replacement: resolve(candidateSdk, entry.default),
+			};
+		})
+	: [];
 if (!manifestPath || !oldProvider)
 	throw new Error(
 		"Set LIXRAY_MIGRATION_FIXTURE and LIXRAY_MIGRATION_OLD_OPFS; see README.md",
@@ -22,17 +37,19 @@ export default {
 		),
 	},
 	resolve: {
-		alias: {
-			"@lix-js/storage-opfs": resolve(root, "storage.mjs"),
-			...(candidateSdk
-				? { "@lix-js/sdk": resolve(candidateSdk, "dist/index.js") }
-				: {}),
-		},
+		alias: [
+			{
+				find: /^@lix-js\/storage-opfs$/,
+				replacement: resolve(root, "storage.mjs"),
+			},
+			...candidateAliases,
+		],
 	},
 	worker: { format: "es" },
 	optimizeDeps: {
 		noDiscovery: true,
 		include: [
+			"protobufjs/light.js",
 			"react",
 			"react-dom/client",
 			"react/jsx-runtime",

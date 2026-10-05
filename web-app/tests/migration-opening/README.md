@@ -15,12 +15,16 @@ checked after opening, in a second tab, and after reload. Its concurrent HTTP
 fixture handles update polling alongside immutable-object hydration.
 No production repository or credential is used.
 
-Two fixture families must remain distinct:
+Three fixture families must remain distinct:
 
 - `legacy_browser_app_fixture_authority` exports the engine's supported synthetic
   sparse v77 full-sync shape. Historical commit bodies are intentionally absent.
   This is migration-route evidence, **not** a historical codec export. Set
   `LIX_BROWSER_LEGACY_PENDING=1` to include tracked and untracked local edits.
+- `v2_partial_browser_app_fixture_authority` exports a synthetic v82 partial
+  replica with a v2 read-interest journal and a pending local row. It is seeded
+  by the historical OPFS writer but is **not** a historical codec export. The
+  actual app opener must convert the v2 journal and preserve the pending row.
 - `pending_browser_conversion_fixture_authority` exports a complete current-format
   full replica at a real acknowledged baseline, with independent local/remote
   edits on two branches, files and a custom schema. Its authority deliberately
@@ -41,10 +45,38 @@ cargo test -p lix --features all-simulations,server-protocol,server-protocol-cli
   legacy_browser_app_fixture_authority -- --ignored --nocapture
 ```
 
+For the v2 partial-replica fixture, use fresh paths and run:
+
+```sh
+LIX_BROWSER_V2_PARTIAL_MANIFEST=/tmp/lix-v2-partial-qa.json \
+LIX_BROWSER_V2_PARTIAL_STOP=/tmp/lix-v2-partial-qa-stop \
+cargo test -p lix --features all-simulations,server-protocol,server-protocol-client \
+  v2_partial_browser_app_fixture_authority -- --ignored --nocapture
+```
+
 For the pending current-format fixture, use `LIX_BROWSER_CONVERSION_MANIFEST`,
 `LIX_BROWSER_CONVERSION_STOP` and `pending_browser_conversion_fixture_authority`.
 Wait for its ready message. Use fresh manifest/stop paths and a fresh authority
-for each test run; successful conversion changes the synthetic authority.
+for **each selected test case**; successful conversion changes the synthetic
+authority. A single suite invocation shares that authority across browser
+contexts and does not independently qualify fresh migration for later cases.
+Select one case per invocation with `--grep`, stop its authority afterward, then
+start a new authority before the next case.
+
+The complete matrix has twelve isolated cases:
+
+- Clean v77 full replica: opening/reload, second tab, and tab closed during migration.
+- Pending v77 full replica: the same three cases plus recovery download.
+- v82 partial replica with a v2 journal: opening/reload, second tab, and tab closed during migration.
+- Current-format pending full replica: opening/reload with lost merge acknowledgements.
+- Clean v77 full replica: durable-admission offline reopen after owner teardown.
+
+The migration-pause and legacy-recovery cases do not apply to the current-format
+pending fixture. The offline-reopen case closes the historical writer, opens
+through the current app online, closes that sole current owner, then reopens
+with the repository transport unavailable. Assets still load normally. This
+proves that the persisted current-epoch admission proof survives owner teardown,
+without an in-memory proof or another open tab.
 
 Prepare a historical OPFS writer without copying binary artifacts into Git.
 The reproduced pre-partial writer is Lix commit
@@ -61,7 +93,8 @@ From `web-app`, after preparing the current browser SDK normally:
 ```sh
 LIXRAY_MIGRATION_FIXTURE=/tmp/lix-legacy-qa.json \
 LIXRAY_MIGRATION_OLD_OPFS=/tmp/old-lix/packages/storage-opfs \
-pnpm exec playwright test --config playwright.migration-opening.config.mjs
+pnpm exec playwright test --config playwright.migration-opening.config.mjs \
+  --grep "existing OPFS replica opens through the app"
 ```
 
 The default uses the app's installed SDK. For a local engine candidate, set

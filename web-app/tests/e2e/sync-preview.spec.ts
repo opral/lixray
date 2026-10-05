@@ -37,6 +37,7 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 		const state = await fixture.editing();
 		await fixture.concurrent(state);
 		await fixture.continuousIndependentEdits(state);
+		await fixture.staleReopen(state);
 	} catch (error) {
 		primaryFailure = error;
 		throw error;
@@ -57,6 +58,7 @@ test("@history offline checkpoints survive reopen and preserve exact full and pa
 	});
 	let primaryFailure: unknown;
 	try {
+		await fixture.checkpointConversation();
 		const edited = await fixture.editing();
 		const checkpointed = await fixture.checkpoint(edited);
 		const concurrent = await fixture.concurrent(checkpointed);

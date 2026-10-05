@@ -232,6 +232,15 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				port.postMessage({ id, sessionId: 0, operation });
 			});
 		Object.assign(globalThis, {
+			__lixSyncHead: async () => {
+				const port = ports.at(-1);
+				if (!port) throw new Error("No repository worker session");
+				return request(port, {
+					kind: "execute",
+					sql: "SELECT lix_active_branch_commit_id() AS commit_id",
+					params: [],
+				});
+			},
 			__lixSyncFiles: async () => {
 				const port = ports.at(-1);
 				if (!port) throw new Error("No repository worker session");

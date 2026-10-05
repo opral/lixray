@@ -1,3 +1,4 @@
+import { networkFetch } from "@lix-js/sdk";
 /* global __OLD_OPFS_MODULE__ */
 import { openRepositoryLixSession } from "../../src/lib/repository-lix-session.ts";
 import {
@@ -66,7 +67,7 @@ async function proxyFetch(input, init) {
 	const body = ["GET", "HEAD"].includes(request.method)
 		? undefined
 		: await request.arrayBuffer();
-	return fetch(url.pathname + url.search, {
+	return networkFetch(url.pathname + url.search, {
 		method: request.method,
 		headers: request.headers,
 		body,
@@ -90,6 +91,14 @@ async function open() {
 	};
 }
 async function values() {
+	if (fixture.fixtureKind === "synthetic-v82-v2-partial-replica") {
+		const rows = (
+			await session.lix.execute(
+				"SELECT key,value FROM lix_key_value WHERE key='v2-browser-pending'",
+			)
+		).rows;
+		return { kind: "v2-partial", rows, pendingRow: fixture.pendingRow };
+	}
 	if (fixture.fixtureKind === "synthetic-sparse-v77-full-sync") {
 		const rows = (
 			await session.lix.execute(

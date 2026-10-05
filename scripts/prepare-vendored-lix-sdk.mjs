@@ -88,15 +88,16 @@ if (buildSource) {
 		toolchainEnv,
 		sdkRoot,
 	);
+	// SDK source imports this generated package export during typechecking.
 	run(
 		process.execPath,
-		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
+		[join(sdkRoot, "scripts", "build-compatibility.js")],
 		toolchainEnv,
 		sdkRoot,
 	);
 	run(
 		process.execPath,
-		[join(sdkRoot, "scripts", "build-compatibility.js")],
+		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
 		toolchainEnv,
 		sdkRoot,
 	);

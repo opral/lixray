@@ -1,0 +1,226 @@
+{
+  "warmBaselineHead": "01a10a41-5c47-7dd3-8c46-995d00000000",
+  "warmReopenUsableSamplesMs": [
+    1902,
+    1857,
+    1887,
+    1873,
+    1890
+  ],
+  "warmReopenColdReads": [
+    [],
+    [],
+    [],
+    [],
+    []
+  ],
+  "medianWarmReopenUsableMs": 1887,
+  "warmReopenP90UsableMs": 1902,
+  "warmReopenP90CeilingMs": 10000,
+  "warmReopenProfiles": [
+    {
+      "phases": [
+        {
+          "name": "lixray:repository-open:start",
+          "startTime": 414
+        },
+        {
+          "name": "lixray:repository-open:replica-identified",
+          "startTime": 431
+        },
+        {
+          "name": "lixray:repository-open:lix-opened",
+          "startTime": 1392
+        },
+        {
+          "name": "lixray:repository-open:branch-ready",
+          "startTime": 1480
+        },
+        {
+          "name": "lixray:repository-open:session-ready",
+          "startTime": 1481
+        },
+        {
+          "name": "lixray:repository-open:atelier-ready",
+          "startTime": 1481
+        },
+        {
+          "name": "lixray:repository-open:tree-ready",
+          "startTime": 1629
+        }
+      ],
+      "startupUiHookQueryCensus": {
+        "atelierObserve": 3,
+        "atelierExecute": 0,
+        "lixrayObserve": 2
+      }
+    },
+    {
+      "phases": [
+        {
+          "name": "lixray:repository-open:start",
+          "startTime": 368
+        },
+        {
+          "name": "lixray:repository-open:replica-identified",
+          "startTime": 386
+        },
+        {
+          "name": "lixray:repository-open:lix-opened",
+          "startTime": 1348
+        },
+        {
+          "name": "lixray:repository-open:branch-ready",
+          "startTime": 1435
+        },
+        {
+          "name": "lixray:repository-open:session-ready",
+          "startTime": 1436
+        },
+        {
+          "name": "lixray:repository-open:atelier-ready",
+          "startTime": 1436
+        },
+        {
+          "name": "lixray:repository-open:tree-ready",
+          "startTime": 1586
+        }
+      ],
+      "startupUiHookQueryCensus": {
+        "atelierObserve": 3,
+        "atelierExecute": 0,
+        "lixrayObserve": 2
+      }
+    },
+    {
+      "phases": [
+        {
+          "name": "lixray:repository-open:start",
+          "startTime": 413
+        },
+        {
+          "name": "lixray:repository-open:replica-identified",
+          "startTime": 420
+        },
+        {
+          "name": "lixray:repository-open:lix-opened",
+          "startTime": 1384
+        },
+        {
+          "name": "lixray:repository-open:branch-ready",
+          "startTime": 1473
+        },
+        {
+          "name": "lixray:repository-open:session-ready",
+          "startTime": 1473
+        },
+        {
+          "name": "lixray:repository-open:atelier-ready",
+          "startTime": 1473
+        },
+        {
+          "name": "lixray:repository-open:tree-ready",
+          "startTime": 1621
+        }
+      ],
+      "startupUiHookQueryCensus": {
+        "atelierObserve": 3,
+        "atelierExecute": 0,
+        "lixrayObserve": 2
+      }
+    },
+    {
+      "phases": [
+        {
+          "name": "lixray:repository-open:start",
+          "startTime": 409
+        },
+        {
+          "name": "lixray:repository-open:replica-identified",
+          "startTime": 417
+        },
+        {
+          "name": "lixray:repository-open:lix-opened",
+          "startTime": 1370
+        },
+        {
+          "name": "lixray:repository-open:branch-ready",
+          "startTime": 1460
+        },
+        {
+          "name": "lixray:repository-open:session-ready",
+          "startTime": 1460
+        },
+        {
+          "name": "lixray:repository-open:atelier-ready",
+          "startTime": 1461
+        },
+        {
+          "name": "lixray:repository-open:tree-ready",
+          "startTime": 1610
+        }
+      ],
+      "startupUiHookQueryCensus": {
+        "atelierObserve": 3,
+        "atelierExecute": 0,
+        "lixrayObserve": 2
+      }
+    },
+    {
+      "phases": [
+        {
+          "name": "lixray:repository-open:start",
+          "startTime": 409
+        },
+        {
+          "name": "lixray:repository-open:replica-identified",
+          "startTime": 425
+        },
+        {
+          "name": "lixray:repository-open:lix-opened",
+          "startTime": 1378
+        },
+        {
+          "name": "lixray:repository-open:branch-ready",
+          "startTime": 1469
+        },
+        {
+          "name": "lixray:repository-open:session-ready",
+          "startTime": 1469
+        },
+        {
+          "name": "lixray:repository-open:atelier-ready",
+          "startTime": 1470
+        },
+        {
+          "name": "lixray:repository-open:tree-ready",
+          "startTime": 1619
+        }
+      ],
+      "startupUiHookQueryCensus": {
+        "atelierObserve": 3,
+        "atelierExecute": 0,
+        "lixrayObserve": 2
+      }
+    }
+  ],
+  "phasesFromNavigationStartMs": {
+    "lixray:repository-open:start": 414,
+    "lixray:repository-open:replica-identified": 431,
+    "lixray:repository-open:lix-opened": 1392,
+    "lixray:repository-open:branch-ready": 1480,
+    "lixray:repository-open:session-ready": 1481,
+    "lixray:repository-open:atelier-ready": 1481,
+    "lixray:repository-open:tree-ready": 1629
+  },
+  "startupUiHookQueryCensus": {
+    "atelierObserve": 3,
+    "atelierExecute": 0,
+    "lixrayObserve": 2
+  },
+  "startupUiHookQueryBudget": {
+    "atelierObserve": 3,
+    "atelierExecute": 0,
+    "lixrayObserve": 2
+  }
+}
