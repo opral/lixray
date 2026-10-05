@@ -23,6 +23,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				const channel = new target(...args);
 				if (!args[0].startsWith("lix:repository-rpc:v1:")) return channel;
 				const listeners = new Set<(event: MessageEvent) => void>();
+				const requests = new Map<number, unknown>();
 				let envelope: { client: string; generation: string } | undefined;
 				const sessions = new Set<number>();
 				const post = channel.postMessage.bind(channel);
@@ -31,9 +32,29 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						kind?: string;
 						client: string;
 						generation: string;
-						message?: { sessionId?: number; operation?: { kind?: string } };
+						message?: {
+							id?: number;
+							sessionId?: number;
+							operation?: { kind?: string };
+						};
 					} | null;
 					if (message?.kind === "input") {
+						const request = message.message;
+						recordLifecycle({
+							direction: "send",
+							at: performance.now(),
+							id: request?.id,
+							sessionId: request?.sessionId,
+							kind: request?.operation?.kind,
+						});
+						if (
+							typeof request?.id === "number" &&
+							request.operation?.kind?.startsWith("observe")
+						) {
+							requests.set(request.id, request.operation);
+							if (requests.size > 200)
+								requests.delete(requests.keys().next().value!);
+						}
 						envelope = {
 							client: message.client,
 							generation: message.generation,
@@ -61,6 +82,27 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							event.data.client !== envelope?.client
 						)
 							return;
+						const response = event.data.message as
+							| {
+									id?: number;
+									kind?: string;
+									ok?: boolean;
+									error?: { code?: string };
+							  }
+							| undefined;
+						recordLifecycle({
+							direction: "receive",
+							at: performance.now(),
+							id: response?.id,
+							kind: response?.kind,
+							ok: response?.ok,
+							errorCode: response?.error?.code,
+						});
+						if (typeof response?.id === "number" && requests.has(response.id)) {
+							const operation = requests.get(response.id);
+							requests.delete(response.id);
+							record({ operation, response });
+						}
 						for (const listener of listeners)
 							listener(
 								new MessageEvent("message", { data: event.data.message }),
@@ -253,15 +295,25 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			__lixSyncDiagnostic: async (path: string) => {
 				const port = ports.at(-1);
 				if (!port) return { error: "No repository worker session" };
-				const [health, rows] = await Promise.all([
+				const [health, rows, head, checkpointLog] = await Promise.all([
 					request(port, { kind: "syncHealth" }),
 					request(port, {
 						kind: "execute",
 						sql: "SELECT id, path, content FROM lix_file WHERE path = $1",
 						params: [{ kind: "text", value: path }],
 					}),
+					request(port, {
+						kind: "execute",
+						sql: "SELECT lix_active_branch_commit_id() AS commit_id",
+						params: [],
+					}),
+					request(port, {
+						kind: "execute",
+						sql: "SELECT commit_id, parent_commit_id, is_checkpoint FROM lix_log() ORDER BY position LIMIT 16",
+						params: [],
+					}),
 				]);
-				return { health, rows, observerFrames, lifecycle };
+				return { health, rows, head, checkpointLog, observerFrames, lifecycle };
 			},
 		});
 	});

@@ -38,6 +38,7 @@ import {
 import {
 	useCallback,
 	useEffect,
+	useLayoutEffect,
 	useMemo,
 	useRef,
 	useState,
@@ -542,7 +543,9 @@ export function DirectoryView({
 		[lix],
 	);
 
-	useEffect(() => {
+	// Readiness belongs to the commit that exposes the usable tree. A passive
+	// effect can run after paint, leaving visible UI without its readiness mark.
+	useLayoutEffect(() => {
 		if (!isActive || tree === null || repositoryTreeMarkedRef.current) {
 			return;
 		}

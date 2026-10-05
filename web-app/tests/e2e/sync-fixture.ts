@@ -685,6 +685,28 @@ export async function createSyncFixture({
 						page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
 					).toHaveCount(0);
 				}
+			} catch (error) {
+				// Preserve the failed offline state before reconnecting can hydrate
+				// missing ancestry or publish a previously pending observer frame.
+				try {
+					await test.info().attach("offline-checkpoint-read-diagnostics.json", {
+						body: JSON.stringify(
+							await Promise.allSettled([
+								collectSyncDiagnostics(left),
+								collectSyncDiagnostics(right),
+							]),
+							null,
+							2,
+						),
+						contentType: "application/json",
+					});
+				} catch (diagnosticError) {
+					test.info().annotations.push({
+						type: "offline-checkpoint-diagnostic-error",
+						description: String(diagnosticError),
+					});
+				}
+				throw error;
 			} finally {
 				await sharedContext.setOffline(false);
 				offlineContexts.delete(sharedContext);
@@ -1976,6 +1998,21 @@ export async function createSyncFixture({
 				observePage(fresh, `fresh-reopen-${sample + 1}`);
 				const reopenStartedAt = Date.now();
 				await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
+				// Qualify the initial Home before navigating to Files. Switching
+				// surfaces earlier can unmount Home and cancel its tree subscription,
+				// so a Files-ready snapshot cannot prove Home's startup query budget.
+				await expect
+					.poll(
+						() =>
+							fresh.evaluate(
+								() =>
+									performance.getEntriesByName(
+										"lixray:repository-open:tree-ready",
+									).length,
+							),
+						{ timeout: 10_000 },
+					)
+					.toBe(1);
 				await showLibraryFiles(fresh);
 				await libraryFileIds(fresh);
 				await expect(await libraryFileEntry(fresh, createdFileId!)).toBeVisible(
