@@ -69,5 +69,6 @@
     "One observation per fresh-replica case; collected during the full native suite, so server timings are not an isolated latency benchmark.",
     "LIMIT remains a SQL residual: no positive scan limit was pushed in these integration cases. Native positive-limit candidate admission is covered separately by the validator unit test.",
     "The negative baseline failed HTTP400 before completing the read; no paired latency speedup is claimed."
-  ]
+  ],
+  "qualifiedMainRevision": "8bca5eb36be91040cca11c2a9af6706c9fbb2062"
 }

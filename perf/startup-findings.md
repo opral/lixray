@@ -5,6 +5,9 @@ Lix `1a7c6b3ca3fa496a9fd489735e7d81f2ce88072b` (source tree
 `675fd87a2c43dbd7f493a6a723a4d1458dc92da8`) and Atelier
 `9459394b0ed692295e0b41ec61a5cec18fcfec43`. This is local qualification,
 not deployed-preview latency. Raw measurements are in `startup-profile.json`.
+Lix main `8bca5eb36be91040cca11c2a9af6706c9fbb2062` has the same measured
+source tree. Atelier main `6a0c86b6fc933d4cce8ea034a00c398a56f61ddd` changes
+only its nested Lix pin; its measured product code is unchanged.
 
 The warm baseline checks only the scalar active-branch commit ID against the
 authority and completion of existing reads. It does not request file content,

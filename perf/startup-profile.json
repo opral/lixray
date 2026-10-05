@@ -231,6 +231,9 @@
     "lixrayRuntimeBase": "88d247ca8ad283204c27a1717341c6fccf6698da",
     "serverImage": "sha256:ebda687757f8169a79c26dc2aac7e2b0dede193643d111750ea3c6fddf19c444",
     "webImage": "sha256:0a3e81cecf88bd02921dc8018e9b6450b1f80f0b8dd6349bcafe90a4efb521ab",
-    "artifact": "/tmp/lixray-v019-1a7c6b3ca-performance-1791193435727669205/results/sync-performance.perf.ts-w-2b80f-n-latency-and-query-budgets-chromium/warm-reopen-profile.json"
+    "artifact": "/tmp/lixray-v019-1a7c6b3ca-performance-1791193435727669205/results/sync-performance.perf.ts-w-2b80f-n-latency-and-query-budgets-chromium/warm-reopen-profile.json",
+    "qualifiedLixMain": "8bca5eb36be91040cca11c2a9af6706c9fbb2062",
+    "qualifiedAtelierMain": "6a0c86b6fc933d4cce8ea034a00c398a56f61ddd",
+    "mainEquivalence": "Lix main has the same measured source tree; Atelier main changes only its nested Lix gitlink."
   }
 }
