@@ -139,9 +139,10 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				const requests = new Map<number, unknown>();
 				const post = worker.port.postMessage.bind(worker.port);
 				worker.port.postMessage = function (
-					...args: Parameters<MessagePort["postMessage"]>
+					value: unknown,
+					transferOrOptions?: Transferable[] | StructuredSerializeOptions,
 				) {
-					const message = args[0] as {
+					const message = value as {
 						id?: number;
 						kind?: string;
 						sessionId?: number;
@@ -165,7 +166,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							sessionId: message.sessionId,
 							kind: message.operation?.kind ?? message.kind,
 						});
-					Reflect.apply(post, this, args);
+					Reflect.apply(post, this, [value, transferOrOptions]);
 				};
 				worker.port.addEventListener(
 					"message",
