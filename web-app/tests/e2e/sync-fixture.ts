@@ -1987,11 +1987,31 @@ export async function createSyncFixture({
 			// Observe only the hot branch coordinate; do not prefetch any payload.
 			let warmBaselineHead: string | undefined;
 			if (scenario === "performance") {
-				warmBaselineHead = await authorityHead();
+				let previousHead: string | undefined;
+				let previousColdReadCount = coldReadCount([fresh]);
+				let stableSamples = 0;
 				await expect
-					.poll(() => replicaHead(fresh), { timeout: 30_000 })
-					.toBe(warmBaselineHead);
-				await waitForColdReadQuiescence([fresh]);
+					.poll(
+						async () => {
+							const head = await authorityHead();
+							const replicaHeads = await Promise.all(
+								[left, right, fresh].map(replicaHead),
+							);
+							const currentColdReadCount = coldReadCount([fresh]);
+							const settled =
+								head === previousHead &&
+								replicaHeads.every((replica) => replica === head) &&
+								currentColdReadCount === previousColdReadCount &&
+								(pendingColdReads.get(fresh)?.size ?? 0) === 0;
+							stableSamples = settled ? stableSamples + 1 : 0;
+							previousHead = head;
+							previousColdReadCount = currentColdReadCount;
+							if (stableSamples >= 8) warmBaselineHead = head;
+							return stableSamples;
+						},
+						{ intervals: [500], timeout: 30_000 },
+					)
+					.toBeGreaterThanOrEqual(8);
 				expect(await authorityHead()).toBe(warmBaselineHead);
 				expect(await replicaHead(fresh)).toBe(warmBaselineHead);
 				await test.info().attach("warm-reopen-baseline.json", {
