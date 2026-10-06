@@ -42,10 +42,16 @@ export async function createSyncFixture({
 	browser,
 	baseURL,
 	scenario,
+	syncDelayMs = 0,
+	editRounds = 12,
+	checkBatching = false,
 }: {
 	browser: Browser;
 	baseURL: string | undefined;
 	scenario: SyncScenario;
+	syncDelayMs?: number;
+	editRounds?: number;
+	checkBatching?: boolean;
 }) {
 	const local = process.env.PLAYWRIGHT_SYNC_LOCAL === "1";
 	const analyticsStubFailures: string[] = [];
@@ -74,6 +80,12 @@ export async function createSyncFixture({
 							: JSON.stringify({ featureFlags: {}, featureFlagPayloads: {} }),
 				}),
 			);
+		}
+		if (local && syncDelayMs > 0) {
+			await context.route("**/sync/**", async (route) => {
+				await new Promise((resolve) => setTimeout(resolve, syncDelayMs));
+				await route.continue();
+			});
 		}
 		return context;
 	};
@@ -225,6 +237,7 @@ export async function createSyncFixture({
 		expect(opened.ok()).toBe(true);
 		const { sessionId } = (await opened.json()) as { sessionId: string };
 		const headers = { ...authorization, "Lix-Session-Id": sessionId };
+
 		try {
 			const countResponse = await sharedContext.request.post(
 				new URL("execute", endpoint).toString(),
@@ -1769,15 +1782,84 @@ export async function createSyncFixture({
 					timeout: realtimeTimeout,
 				})
 				.toBe(await editors[0]!.innerText());
+			const startedAt = Date.now();
+			const contexts = new Set(pages.map((page) => page.context()));
+			const metrics = {
+				proofPages: 0,
+				manifestGroups: 0,
+				scalarManifests: 0,
+				manifestMembers: 0,
+				encodedManifestBytes: 0,
+				decodedInlineBytes: 0,
+				largestManifestGroup: 0,
+				largestEncodedManifestGroup: 0,
+			};
+			const activeTransfers = new Map<Request, number>();
+			const transferIntervals: Array<[number, number]> = [];
+			let peakConcurrentTransfers = 0;
+			const finishTransfer = (request: Request) => {
+				const start = activeTransfers.get(request);
+				if (start === undefined) return;
+				transferIntervals.push([start, Date.now()]);
+				activeTransfers.delete(request);
+			};
+			const captureBatch = (request: Request) => {
+				if (
+					request.url().includes("/sync/") &&
+					!request.url().includes("/sync/events")
+				) {
+					activeTransfers.set(request, Date.now());
+					peakConcurrentTransfers = Math.max(
+						peakConcurrentTransfers,
+						activeTransfers.size,
+					);
+				}
+				if (request.method() !== "POST") return;
+				if (request.url().endsWith("/sync/native-metadata-walk")) {
+					const body = request.postDataJSON() as { selection?: string };
+					if (body.selection === "incorporation") metrics.proofPages++;
+				} else if (request.url().endsWith("/sync/blobs")) {
+					const manifests = request.postDataJSON() as Array<{
+						inlineBytesBase64?: string | null;
+					}>;
+					const bytes = Buffer.byteLength(request.postData() ?? "");
+					metrics.manifestGroups++;
+					metrics.manifestMembers += manifests.length;
+					metrics.encodedManifestBytes += bytes;
+					metrics.decodedInlineBytes += manifests.reduce(
+						(sum, manifest) =>
+							sum +
+							(manifest.inlineBytesBase64
+								? Buffer.from(manifest.inlineBytesBase64, "base64").length
+								: 0),
+						0,
+					);
+					metrics.largestManifestGroup = Math.max(
+						metrics.largestManifestGroup,
+						manifests.length,
+					);
+					metrics.largestEncodedManifestGroup = Math.max(
+						metrics.largestEncodedManifestGroup,
+						bytes,
+					);
+				} else if (request.url().endsWith("/sync/blob"))
+					metrics.scalarManifests++;
+			};
+			for (const context of contexts) {
+				context.on("request", captureBatch);
+				context.on("requestfinished", finishTransfer);
+				context.on("requestfailed", finishTransfer);
+			}
 			// Keep the authority moving while the other independent replica recovers
 			// from a stale push. Waiting for convergence after each edit hides this race.
-			for (let round = 0; round < 12; round++) {
+			for (let round = 0; round < editRounds; round++) {
 				const index = round % 2;
 				await editors[index]!.click();
 				await pages[index]!.keyboard.press("Control+End");
 				await pages[index]!.keyboard.insertText(` online-${index}-${round}`);
 				await new Promise((resolve) => setTimeout(resolve, 150));
 			}
+			const editsFinishedAt = Date.now();
 			await expect
 				.poll(
 					async () => {
@@ -1789,6 +1871,55 @@ export async function createSyncFixture({
 					{ timeout: 30_000 },
 				)
 				.toBe(true);
+			for (const editor of editors) {
+				const markers = new Set((await editor.innerText()).split(/\s+/));
+				for (let round = 0; round < editRounds; round++) {
+					expect(
+						markers.has(`online-${round % 2}-${round}`),
+						`replica must retain edit marker ${round}`,
+					).toBe(true);
+				}
+			}
+			for (const context of contexts) {
+				context.off("request", captureBatch);
+				context.off("requestfinished", finishTransfer);
+				context.off("requestfailed", finishTransfer);
+			}
+			const finishedAt = Date.now();
+			for (const start of activeTransfers.values())
+				transferIntervals.push([start, finishedAt]);
+			transferIntervals.sort((a, b) => a[0] - b[0]);
+			let transferBusyMs = 0;
+			let intervalEnd = startedAt;
+			let sumRequestLatencyMs = 0;
+			for (const [start, end] of transferIntervals) {
+				sumRequestLatencyMs += end - start;
+				transferBusyMs += Math.max(0, end - Math.max(start, intervalEnd));
+				intervalEnd = Math.max(intervalEnd, end);
+			}
+			const report = {
+				...metrics,
+				peakConcurrentTransfers,
+				transferBusyMs,
+				sumRequestLatencyMs,
+				editRounds,
+				syncDelayMs,
+				burstToEqualityMs: finishedAt - startedAt,
+				postEditToEqualityMs: finishedAt - editsFinishedAt,
+			};
+			await test.info().attach("bounded-transfer-profile.json", {
+				body: JSON.stringify(report, null, 2),
+				contentType: "application/json",
+			});
+			if (checkBatching) {
+				// Live editing can recover from several advancing heads. Total
+				// request count is diagnostic; convergence under latency is the
+				// performance gate. Every individual transfer remains bounded.
+				expect(metrics.largestManifestGroup).toBeLessThanOrEqual(32);
+				expect(metrics.largestEncodedManifestGroup).toBeLessThanOrEqual(
+					1024 * 1024,
+				);
+			}
 			// Equality alone can pass before pending uploads settle. Require a later
 			// unique edit from each writer to reach its peer, with both editors open.
 			for (let index = 0; index < 2; index++) {
