@@ -1531,9 +1531,34 @@ export async function createSyncFixture({
 					// Working changes use the engine's hot authority. Keep a bounded
 					// allowance for historical checkpoint metadata on a fresh replica.
 					if (scenario === "performance") {
-						expect(coldReadCount([fresh])).toBeLessThanOrEqual(
-							coldReadsBeforeFreshHistory + 2,
+						const coldReadCountBefore = coldReadsBeforeFreshHistory;
+						const coldReadCountAfter = coldReadCount([fresh]);
+						const coldReadRequestUrls = (coldReads.get(fresh) ?? []).slice(
+							coldReadsBeforeFreshHistory,
 						);
+						const pendingColdReadRequestUrls = [
+							...(pendingColdReads.get(fresh) ?? []),
+						].map((request) => request.url());
+						const profile = {
+							phase: "fresh-bootstrap-history",
+							coldReadCountBefore,
+							coldReadCountAfter,
+							coldReadCountDelta: coldReadCountAfter - coldReadCountBefore,
+							coldReadBudgetDelta: 2,
+							coldReadRequestUrls,
+							pendingColdReadCount: pendingColdReadRequestUrls.length,
+							pendingColdReadRequestUrls,
+						};
+						try {
+							expect(coldReadCount([fresh])).toBeLessThanOrEqual(
+								coldReadsBeforeFreshHistory + 2,
+							);
+						} finally {
+							await test.info().attach("cold-history-profile.json", {
+								body: JSON.stringify(profile, null, 2),
+								contentType: "application/json",
+							});
+						}
 					}
 
 					return { freshContext, fresh };
