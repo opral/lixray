@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { request as httpRequest } from "node:http";
 import test from "node:test";
 import { createRailwayServer } from "./railway-server.mjs";
+import { listenOnFetchSafePort } from "./test-http-listen.mjs";
 
 async function withServer(appFetch, run, env = {}, prepare = async () => {}) {
 	const clientRoot = await mkdtemp(join(tmpdir(), "railway-server-"));
@@ -14,7 +15,7 @@ async function withServer(appFetch, run, env = {}, prepare = async () => {}) {
 		clientRoot,
 		env,
 	});
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	await listenOnFetchSafePort(server);
 	const { port } = server.address();
 	try {
 		return await run(`http://127.0.0.1:${port}`);
@@ -90,7 +91,7 @@ test("injects preview mode into static HTML at runtime", async () => {
 		clientRoot,
 		env: { RAILWAY_ENVIRONMENT_NAME: "lixray-pr-216" },
 	});
-	await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+	await listenOnFetchSafePort(server);
 	const { port } = server.address();
 	try {
 		const response = await fetch(`http://127.0.0.1:${port}/`);

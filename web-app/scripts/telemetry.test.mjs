@@ -4,6 +4,7 @@ import { createServer } from "node:http";
 import { trace } from "@opentelemetry/api";
 import { initializeTelemetry } from "./telemetry.mjs";
 import { createRailwayServer } from "./railway-server.mjs";
+import { listenOnFetchSafePort } from "./test-http-listen.mjs";
 
 test(
 	"a hanging OTLP exporter is bounded and cannot hold HTTP responses",
@@ -21,7 +22,7 @@ test(
 			if (collectorRequests === 1) received.resolve();
 			else response.end();
 		});
-		await new Promise((resolve) => collector.listen(0, "127.0.0.1", resolve));
+		await listenOnFetchSafePort(collector);
 		const provider = initializeTelemetry({
 			POSTHOG_ENVIRONMENT: "production",
 			POSTHOG_PROJECT_TOKEN: "test-token",
@@ -38,7 +39,7 @@ test(
 			clientRoot: "/nonexistent",
 			env: {},
 		});
-		await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+		await listenOnFetchSafePort(server);
 		try {
 			const url = `http://127.0.0.1:${server.address().port}/mcp`;
 			assert.equal(await (await fetch(url)).text(), "ok");
