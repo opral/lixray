@@ -30,9 +30,28 @@ export interface ProfileRepositorySource {
 	namespaceHandle: string;
 }
 
-export interface ProfileRepositoryFiles {
+export interface ProfileRepositoryFileCounts {
 	repository: ProfileRepositorySource;
-	paths: Array<string> | null;
+	totalFiles: number | null;
+	categoryCounts: Array<number> | null;
+}
+
+/** One-row exact aggregate; SQL categories are derived from FILE_CATEGORIES. */
+export function publicProfileActivityAggregateSql(): string {
+	const namedCategories = FILE_CATEGORIES.slice(0, -1);
+	const inList = (values: Array<string>) =>
+		values.map((value) => `'${value.replaceAll("'", "''")}'`).join(", ");
+	const categories = namedCategories
+		.map(
+			(category, index) =>
+				`    WHEN extension IN (${inList([...(category.extensions ?? [])].sort())}) THEN ${index}`,
+		)
+		.join("\n");
+	const counts = FILE_CATEGORIES.map(
+		(_, index) =>
+			`  count(CASE WHEN category = ${index} THEN 1 END) AS category_${index}`,
+	).join(",\n");
+	return `WITH file_names AS (\n  SELECT split_part(path, '/', -1) AS base FROM lix_file\n),\nfile_extensions AS (\n  SELECT CASE WHEN strpos(base, '.') = 0 THEN '' ELSE lower(split_part(base, '.', -1)) END AS extension\n  FROM file_names\n),\nfile_categories AS (\n  SELECT CASE\n${categories}\n    ELSE ${FILE_CATEGORIES.length - 1}\n  END AS category\n  FROM file_extensions\n)\nSELECT\n  count(*) AS total_files,\n${counts}\nFROM file_categories`;
 }
 
 const FILE_CATEGORIES = [
@@ -117,21 +136,49 @@ const FILE_CATEGORIES = [
 	},
 ] as const;
 
-export function aggregatePublicProfileActivity(
-	inputs: Array<ProfileRepositoryFiles>,
+export const PUBLIC_PROFILE_ACTIVITY_CATEGORY_COUNT = FILE_CATEGORIES.length;
+
+export function aggregatePublicProfileActivityFromCounts(
+	inputs: Array<ProfileRepositoryFileCounts>,
 ): PublicProfileActivity {
 	const counts = FILE_CATEGORIES.map(() => 0);
 	let totalFiles = 0;
 	let failedRepositories = 0;
-
-	const repositories = inputs.map(({ repository, paths }) => {
-		if (paths === null) failedRepositories += 1;
-		else {
-			totalFiles += paths.length;
-			for (const path of paths) counts[fileCategoryIndex(path)] += 1;
-		}
-		return { ...repository, fileCount: paths?.length ?? null };
-	});
+	const repositories = inputs.map(
+		({ repository, totalFiles: fileCount, categoryCounts }) => {
+			if (
+				fileCount === null ||
+				categoryCounts === null ||
+				!Number.isSafeInteger(fileCount) ||
+				fileCount < 0 ||
+				categoryCounts.length !== FILE_CATEGORIES.length ||
+				categoryCounts.some(
+					(count) => !Number.isSafeInteger(count) || count < 0,
+				) ||
+				categoryCounts.reduce((sum, count) => sum + BigInt(count), 0n) !==
+					BigInt(fileCount)
+			) {
+				failedRepositories += 1;
+				return { ...repository, fileCount: null };
+			}
+			const nextTotal = totalFiles + fileCount;
+			const overflows =
+				!Number.isSafeInteger(nextTotal) ||
+				counts.some(
+					(count, index) =>
+						!Number.isSafeInteger(count + categoryCounts[index]!),
+				);
+			if (overflows) {
+				failedRepositories += 1;
+				return { ...repository, fileCount: null };
+			}
+			totalFiles = nextTotal;
+			for (let index = 0; index < counts.length; index++) {
+				counts[index] += categoryCounts[index]!;
+			}
+			return { ...repository, fileCount };
+		},
+	);
 	const percentages = integerPercentages(counts, totalFiles);
 
 	return {
@@ -146,17 +193,6 @@ export function aggregatePublicProfileActivity(
 		})),
 		failedRepositories,
 	};
-}
-
-function fileCategoryIndex(path: string): number {
-	const filename = path.split("/").pop() ?? path;
-	const extension = filename.includes(".")
-		? (filename.split(".").pop()?.toLowerCase() ?? "")
-		: "";
-	const index = FILE_CATEGORIES.findIndex(
-		(category) => category.extensions?.has(extension) === true,
-	);
-	return index === -1 ? FILE_CATEGORIES.length - 1 : index;
 }
 
 function integerPercentages(

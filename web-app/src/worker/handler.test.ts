@@ -13,6 +13,7 @@ import {
 	DEMO_SECONDARY_LIX_NAME,
 } from "../lib/demo-identity.ts";
 import type { PublicProfileActivity } from "../lib/profile-activity-aggregate.ts";
+import { publicProfileActivityAggregateSql } from "../lib/profile-activity-aggregate.ts";
 import { isLixError } from "../mcp/lix-service.ts";
 import { SIGNUP_TELEMETRY_PATH } from "../lib/signup-telemetry.ts";
 import {
@@ -423,7 +424,7 @@ void test("GET /profile/{namespace_id}/activity lists real public repositories",
 	]);
 });
 
-void test("profile activity queries file paths from every public Lix", async () => {
+void test("profile activity receives a fixed-size exact aggregate from every public Lix", async () => {
 	const response = await handleRequest(
 		new Request(`https://example.test/profile/${NAMESPACE_ID}/activity`),
 		env({}),
@@ -459,13 +460,25 @@ void test("profile activity queries file paths from every public Lix", async () 
 				}
 				assert.equal(pathname, `/lix/v1/${LIX_A}/execute`);
 				const body = (await request.json()) as { sql?: unknown };
-				assert.equal(body.sql, "SELECT path FROM lix_file ORDER BY path");
+				assert.equal(body.sql, publicProfileActivityAggregateSql());
 				return Response.json({
-					columns: [{ name: "path", type: "text" }],
+					columns: [
+						{ name: "total_files", type: "integer" },
+						{ name: "category_0", type: "integer" },
+						{ name: "category_1", type: "integer" },
+						{ name: "category_2", type: "integer" },
+						{ name: "category_3", type: "integer" },
+						{ name: "category_4", type: "integer" },
+					],
 					rows: [
-						[{ kind: "text", value: "/README.md" }],
-						[{ kind: "text", value: "/src/index.ts" }],
-						[{ kind: "text", value: "/assets/logo.png" }],
+						[
+							{ kind: "int", value: 3 },
+							{ kind: "int", value: 1 },
+							{ kind: "int", value: 1 },
+							{ kind: "int", value: 0 },
+							{ kind: "int", value: 0 },
+							{ kind: "int", value: 1 },
+						],
 					],
 					rowsAffected: 0,
 					notices: [],
@@ -519,8 +532,24 @@ void test("profile activity shares one repository scan across visitors", async (
 			}
 			executeRequests += 1;
 			return Response.json({
-				columns: [{ name: "path", type: "text" }],
-				rows: [[{ kind: "text", value: "/README.md" }]],
+				columns: [
+					{ name: "total_files", type: "integer" },
+					{ name: "category_0", type: "integer" },
+					{ name: "category_1", type: "integer" },
+					{ name: "category_2", type: "integer" },
+					{ name: "category_3", type: "integer" },
+					{ name: "category_4", type: "integer" },
+				],
+				rows: [
+					[
+						{ kind: "int", value: 1 },
+						{ kind: "int", value: 1 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+						{ kind: "int", value: 0 },
+					],
+				],
 				rowsAffected: 0,
 				notices: [],
 			});
@@ -2357,6 +2386,74 @@ void test("public reads classify writes without a SQL parser", async () => {
 	assert.equal(response.status, 200);
 	assert.equal(await response.text(), "public read");
 	assert.equal(proxied, true);
+});
+
+void test("public multiplex observations accept read-only CTE subscriptions", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/observe/multiplex", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				subscriptions: [
+					{
+						id: "checkpoint-count",
+						sql: "SELECT created_at, count(*) over () AS total_count FROM lix_log() WHERE is_checkpoint ORDER BY position LIMIT 10",
+					},
+					{
+						id: "daily-count",
+						sql: "WITH daily AS (SELECT substr(created_at, 1, 10) AS day, count(*) AS day_count, min(created_at) AS day_created_at FROM lix_change GROUP BY substr(created_at, 1, 10)) SELECT day, day_count AS n, sum(day_count) over () AS total_count, min(day_created_at) over () AS created_at FROM daily ORDER BY day DESC LIMIT 10",
+					},
+				],
+			}),
+		}),
+		env({}),
+		{
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("event: next\\ndata: {}\\n\\n", {
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		},
+	);
+
+	assert.equal(response.status, 200);
+	assert.equal(proxied, true);
+});
+
+void test("public multiplex observations reject data-modifying CTE subscriptions", async () => {
+	let proxied = false;
+	const response = await handleRequest(
+		remoteLixRequest("/observe/multiplex", {
+			method: "POST",
+			headers: { "content-type": "application/json" },
+			body: JSON.stringify({
+				subscriptions: [
+					{ id: "safe", sql: "SELECT 1" },
+					{
+						id: "write",
+						sql: "WITH changed AS (DELETE FROM lix_file RETURNING id) SELECT * FROM changed",
+					},
+				],
+			}),
+		}),
+		env({}),
+		{
+			resolvePublicLix: async () => ({ ok: true, lixId: LIX_A }),
+			lixFetch: async () => {
+				proxied = true;
+				return new Response("unexpected");
+			},
+		},
+	);
+
+	assert.equal(response.status, 400);
+	assert.deepEqual(await response.json(), {
+		error: { code: "LIX_READ_ONLY", message: "lix is read-only" },
+	});
+	assert.equal(proxied, false);
 });
 
 void test("authenticated non-members are downgraded to the public read transport", async () => {

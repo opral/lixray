@@ -1,4 +1,16 @@
 {
 	"extends": "../../tsconfig.json",
+	"compilerOptions": {
+		"allowJs": true,
+		"paths": {
+			"~/*": ["../../src/*"],
+			"/node_modules/@lix-js/sdk/dist/index.js": [
+				"../../../vendor/lix/packages/js-sdk/dist/index.d.ts"
+			],
+			"/node_modules/@lix-js/storage-opfs/dist/index.js": [
+				"../../../vendor/lix/packages/storage-opfs/dist/index.d.ts"
+			]
+		}
+	},
 	"include": ["*.ts"]
 }

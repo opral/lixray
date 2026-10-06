@@ -57,7 +57,7 @@ From the application checkout:
 ```sh
 git submodule update --init --recursive
 pnpm install --frozen-lockfile
-node scripts/prepare-vendored-lix-sdk.mjs --source --native
+node scripts/prepare-vendored-lix-sdk.mjs --source
 pnpm --dir web-app ci:prepare:web
 pnpm --dir web-app ci:lint
 pnpm --dir web-app ci:check

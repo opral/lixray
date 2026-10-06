@@ -21,13 +21,43 @@ void test("isClearlyReadOnlySql keeps SELECT/VALUES and rejects writes", () => {
 	assert.equal(isClearlyReadOnlySql("VALUES (1)"), true);
 	assert.equal(
 		isClearlyReadOnlySql("WITH x AS (SELECT 1) SELECT * FROM x"),
-		false,
+		true,
 	);
 	assert.equal(isClearlyReadOnlySql("SELECT 1; DELETE FROM lix_file"), false);
 	assert.equal(
 		isClearlyReadOnlySql("INSERT INTO lix_file (path) VALUES ($1)"),
 		false,
 	);
+});
+
+void test("isClearlyReadOnlySql accepts read-only CTEs and rejects modifying CTEs", () => {
+	for (const sql of [
+		"WITH x AS (SELECT 1) SELECT * FROM x",
+		"WITH RECURSIVE x(id) AS (SELECT 1 UNION ALL SELECT id + 1 FROM x) SELECT * FROM x",
+		"WITH x AS NOT MATERIALIZED (SELECT 1), y AS MATERIALIZED (SELECT * FROM x) VALUES (1)",
+		"WITH x AS (WITH y AS (SELECT 1) SELECT * FROM y) SELECT * FROM x",
+		'WITH "(" ("(") AS (SELECT \')\') SELECT * FROM "(";',
+		"/* read */ WITH x AS (SELECT 'DELETE FROM hidden') SELECT * FROM x",
+		"SELECT ';' AS value;",
+	]) {
+		assert.equal(isClearlyReadOnlySql(sql), true, sql);
+	}
+
+	for (const sql of [
+		"WITH x AS (DELETE FROM lix_file RETURNING *) SELECT * FROM x",
+		"WITH x AS (SELECT 1), y AS (WITH z AS (UPDATE lix_file SET path = '/' RETURNING *) SELECT * FROM z) SELECT * FROM y",
+		"WITH x AS (SELECT 1) DELETE FROM lix_file",
+		"WITH x AS (SELECT 1) INSERT INTO lix_file(path) VALUES ('/x')",
+		"WITH x AS (SELECT 1) UPDATE lix_file SET path = '/x'",
+		"WITH x AS (CREATE TABLE hidden (id INT)) SELECT 1",
+		"WITH x AS (SELECT 1) CREATE TABLE hidden (id INT)",
+		"WITH x AS (SELECT 1) SELECT 1; CREATE TABLE hidden (id INT)",
+		"SELECT 1; SELECT 2",
+		"SELECT 1;;",
+		"WITH x AS (SELECT 1)",
+	]) {
+		assert.equal(isClearlyReadOnlySql(sql), false, sql);
+	}
 });
 
 void test("mutating SELECT functions require write access", () => {

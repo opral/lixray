@@ -45,6 +45,66 @@ void test("deduplicates simultaneous profile activity scans", async () => {
 	assert.equal(loads, 1);
 });
 
+void test("does not let a pre-invalidation scan repopulate the cache", async () => {
+	const cache = new PublicProfileActivityCache();
+	let releaseOld!: (value: PublicProfileActivity) => void;
+	const oldScan = cache.resolve(
+		"namespace-a",
+		() => new Promise((resolve) => (releaseOld = resolve)),
+	);
+
+	cache.invalidate("namespace-a");
+	const fresh = await cache.resolve("namespace-a", async () => activity(9));
+	assert.equal(fresh.totalFiles, 9);
+	releaseOld(activity(1));
+	assert.equal((await oldScan).totalFiles, 1);
+
+	let loads = 0;
+	const cached = await cache.resolve("namespace-a", async () => {
+		loads++;
+		return activity(10);
+	});
+	assert.equal(cached.totalFiles, 9);
+	assert.equal(loads, 0);
+});
+
+void test("retries after a loader throws synchronously", async () => {
+	const cache = new PublicProfileActivityCache();
+	await assert.rejects(
+		cache.resolve("namespace-a", () => {
+			throw new Error("synchronous scan setup failure");
+		}),
+		/synchronous scan setup failure/,
+	);
+	const recovered = await cache.resolve("namespace-a", async () => activity(7));
+	assert.equal(recovered.totalFiles, 7);
+});
+
+void test("expires old keys and evicts least-recently-used entries at capacity", async () => {
+	let now = 1_800_000_000_000;
+	const cache = new PublicProfileActivityCache({
+		maxEntries: 2,
+		freshForMs: 100,
+		fallbackForMs: 200,
+		now: () => now,
+	});
+	await cache.resolve("a", async () => activity(1));
+	await cache.resolve("b", async () => activity(2));
+	await cache.resolve("a", async () => activity(3)); // Make a most recently used.
+	await cache.resolve("c", async () => activity(4));
+	assert.equal(cache.size, 2);
+	let loads = 0;
+	await cache.resolve("b", async () => {
+		loads++;
+		return activity(5);
+	});
+	assert.equal(loads, 1, "least-recently-used b should have been evicted");
+
+	now += 60_001;
+	await cache.resolve("d", async () => activity(6));
+	assert.equal(cache.size, 1, "expired entries should be purged on access");
+});
+
 void test("serves a stale server result when refreshing fails", async () => {
 	let now = 1_800_000_000_000;
 	const cache = new PublicProfileActivityCache({

@@ -13,10 +13,13 @@ test("existing OPFS replica opens through the app, preserves edits, and survives
 	// must locate that file using the same durable browser identity.
 	await page.close();
 	const first = await context.newPage();
-	const path =
-		seeded.fixtureKind === "synthetic-sparse-v77-full-sync"
-			? "/?slowLegacy=1"
-			: "/";
+	const path = [
+		"synthetic-sparse-v77-full-sync",
+		"synthetic-v82-v2-partial-replica",
+		"synthetic-current-v3-partial-replica",
+	].includes(seeded.fixtureKind)
+		? "/?slowLegacy=1"
+		: "/";
 	await first.goto(path);
 	await first.waitForFunction(() => Boolean(window.migrationQa));
 	// Do not wrap this in test-side retries: the real app must resume transient
@@ -68,6 +71,8 @@ async function assertValues(page) {
 				untracked: true,
 			});
 		}
+	} else if (["v2-partial", "v3-partial"].includes(result.kind)) {
+		expect(result.rows).toEqual([result.pendingRow]);
 	} else {
 		expect(result.main).toEqual([
 			{ key: "local", value: "L" },
@@ -94,8 +99,12 @@ for (const scenario of [
 		await page.waitForFunction(() => Boolean(window.migrationQa));
 		const seeded = await page.evaluate(() => window.migrationQa.seed());
 		test.skip(
-			seeded.fixtureKind !== "synthetic-sparse-v77-full-sync",
-			"Requires the legacy receipt pause",
+			![
+				"synthetic-sparse-v77-full-sync",
+				"synthetic-v82-v2-partial-replica",
+				"synthetic-current-v3-partial-replica",
+			].includes(seeded.fixtureKind),
+			"Requires a migration receipt pause",
 		);
 		await page.close();
 		const first = await context.newPage();
@@ -181,4 +190,35 @@ test("saved legacy device changes can be downloaded without changing the open re
 	expect(await current.evaluate(() => window.migrationQa.values())).toEqual(
 		initial,
 	);
+});
+
+test("durable admission supports offline reopen after owner closes", async ({
+	context,
+	page,
+}) => {
+	await page.goto("/");
+	await page.waitForFunction(() => Boolean(window.migrationQa));
+	const seeded = await page.evaluate(() => window.migrationQa.seed());
+	await page.close();
+	const online = await context.newPage();
+	await online.goto("/");
+	await online.waitForFunction(() => Boolean(window.migrationQa));
+	await online.evaluate(() => window.migrationQa.open());
+	await assertValues(online);
+	await online.close();
+	// Load the new document's modules online, then make every repository transport
+	// call fail. The prior owner and its memory-only admission cache are gone.
+	const offline = await context.newPage();
+	await offline.goto("/");
+	await offline.waitForFunction(() => Boolean(window.migrationQa));
+	// Fail actual repository fetches at the browser network boundary. Keep assets
+	// available and navigator online, as when only the service is unreachable.
+	await context.route("**/lix/v1/**", (route) =>
+		route.abort("internetdisconnected"),
+	);
+	expect(await offline.evaluate(() => navigator.onLine)).toBe(true);
+	expect((await offline.evaluate(() => window.migrationQa.open())).name).toBe(
+		seeded.name,
+	);
+	await assertValues(offline);
 });

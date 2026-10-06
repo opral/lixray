@@ -37,15 +37,13 @@ const modeArguments = process.argv.slice(2);
 if (
 	modeArguments.some(
 		(argument) =>
-			!["--native", "--resolve-only", "--source"].includes(argument),
+			!["--resolve-only", "--source"].includes(argument),
 	)
 ) {
 	throw new Error(
 		`Unsupported vendored Lix preparation mode: ${modeArguments.join(" ")}`,
 	);
 }
-if (modeArguments.includes("--native"))
-	console.warn("[lix-sdk] --native is deprecated; Node memory sessions use WASM. Native filesystem builds belong to @lix-js/storage-filesystem.");
 const buildSource = modeArguments.includes("--source");
 const resolveOnly = modeArguments.includes("--resolve-only");
 if (resolveOnly && buildSource)
@@ -88,15 +86,16 @@ if (buildSource) {
 		toolchainEnv,
 		sdkRoot,
 	);
+	// SDK source imports this generated package export during typechecking.
 	run(
 		process.execPath,
-		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
+		[join(sdkRoot, "scripts", "build-compatibility.js")],
 		toolchainEnv,
 		sdkRoot,
 	);
 	run(
 		process.execPath,
-		[join(sdkRoot, "scripts", "build-compatibility.js")],
+		[tsc, "-p", join(sdkRoot, "tsconfig.json")],
 		toolchainEnv,
 		sdkRoot,
 	);

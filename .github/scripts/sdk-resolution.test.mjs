@@ -98,12 +98,10 @@ test("SDK resolve-only mode reports misses without requiring any Rust toolchain"
 	assert.equal(result.status, 0, result.stderr);
 	assert.equal(readFileSync(output, "utf8"), "ready=true\n");
 	assert.doesNotMatch(result.stdout, /SOURCE BUILD/);
-	// The retained legacy CLI prepares the same WASM artifact and never
-	// requires a native build script, Cargo manifest, or native binary.
+	// WASM is the sole preparation mode for the JavaScript SDK. A stale native
+	// mode must fail validation instead of silently preparing the same artifact.
 	result = run("0", ["--native"]);
-	assert.equal(result.status, 0, result.stderr);
-	assert.match(result.stderr, /--native is deprecated/);
-	assert.doesNotMatch(result.stdout, /SOURCE BUILD|native SDK/);
-	assert.equal(readFileSync(join(sdk, "src/wasm/lix_js_sdk_bg.wasm"), "utf8"), "fixture");
+	assert.notEqual(result.status, 0);
+	assert.match(result.stderr, /Unsupported vendored Lix preparation mode: --native/);
 
 });

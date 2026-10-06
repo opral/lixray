@@ -54,7 +54,8 @@ export async function createSyncFixture({
 		if (
 			scenario === "editing" ||
 			scenario === "history" ||
-			scenario === "conflicts"
+			scenario === "conflicts" ||
+			scenario === "performance"
 		)
 			await installSyncDiagnostics(context);
 		if (local && scenario !== "performance") {
@@ -160,6 +161,9 @@ export async function createSyncFixture({
 	// browser contexts and explicit seeds on a disposable stack. CI gives each
 	// scenario its own stack and storage prefix.
 	const repositoryId = DEMO_REPOSITORY_ID;
+	let describedCheckpoint:
+		| { commitId: string; conversationId: string; title: string }
+		| undefined;
 	let repositoryUrl = new URL("/@acme/launch-q3", baseURL).toString();
 	const realtimeTimeout = 30_000;
 	const repositoryOperationTimeout = 90_000;
@@ -264,6 +268,50 @@ export async function createSyncFixture({
 					},
 				);
 				expect(checkpoint.ok(), await checkpoint.text()).toBe(true);
+			}
+			if (scenario === "history") {
+				const title = `Qualification ${randomUUID()}`;
+				const response = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `described-checkpoint-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT commit_id FROM lix_create_checkpoint($1, NULL)",
+							params: [{ kind: "text", value: title }],
+						},
+					},
+				);
+				expect(response.ok(), await response.text()).toBe(true);
+				const created = (await response.json()) as {
+					rows?: Array<Array<{ value?: unknown }>>;
+				};
+				const commitId = created.rows?.[0]?.[0]?.value;
+				if (typeof commitId !== "string")
+					throw new Error("Missing described checkpoint ID");
+				const pointer = await sharedContext.request.post(
+					new URL("execute", endpoint).toString(),
+					{
+						headers: {
+							...headers,
+							"Idempotency-Key": `checkpoint-conversation-${randomUUID()}`,
+						},
+						data: {
+							sql: "SELECT conversation_id FROM lix_log() WHERE commit_id = $1",
+							params: [{ kind: "text", value: commitId }],
+						},
+					},
+				);
+				expect(pointer.ok(), await pointer.text()).toBe(true);
+				const result = (await pointer.json()) as {
+					rows?: Array<Array<{ value?: unknown }>>;
+				};
+				const conversationId = result.rows?.[0]?.[0]?.value;
+				if (typeof conversationId !== "string")
+					throw new Error("Missing authority conversation ID");
+				describedCheckpoint = { commitId, conversationId, title };
 			}
 		} finally {
 			const closed = await sharedContext.request.delete(
@@ -391,7 +439,10 @@ export async function createSyncFixture({
 			return selectRepositoryScope();
 		};
 		let authorityReadSequence = 0;
-		const authorityCheckpointCount = async (): Promise<number> => {
+		const authorityScalar = async (
+			sql: string,
+			params: Array<{ kind: "text"; value: string }> = [],
+		): Promise<unknown> => {
 			const repositoryEndpoint = new URL(
 				`/lix/v1/${repositoryId}/`,
 				baseURL,
@@ -417,8 +468,8 @@ export async function createSyncFixture({
 							"Lix-Session-Id": sessionId,
 						},
 						data: {
-							sql: "SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
-							params: [],
+							sql,
+							params,
 						},
 					},
 				);
@@ -427,9 +478,7 @@ export async function createSyncFixture({
 					rows?: Array<Array<{ kind?: string; value?: unknown }>>;
 				};
 				const cell = result.rows?.[0]?.[0];
-				if (cell?.kind !== "int" || typeof cell.value !== "number") {
-					throw new Error("authority returned an invalid checkpoint count");
-				}
+				if (!cell) throw new Error("authority returned no scalar value");
 				return cell.value;
 			} finally {
 				const closed = await sharedContext.request.delete(
@@ -444,6 +493,52 @@ export async function createSyncFixture({
 				expect(closed.status()).toBe(204);
 			}
 		};
+		const authorityCheckpointCount = async (): Promise<number> => {
+			const count = await authorityScalar(
+				"SELECT count(*) AS checkpoint_count FROM lix_log() WHERE is_checkpoint",
+			);
+			if (typeof count !== "number")
+				throw new Error("authority returned an invalid checkpoint count");
+			return count;
+		};
+		const authorityLatestCheckpointTitle = async (): Promise<string | null> => {
+			const title = await authorityScalar(
+				`SELECT c.title
+				 FROM lix_log() AS l
+				 LEFT JOIN lix_conversation AS c ON c.id = l.conversation_id
+				 WHERE l.is_checkpoint
+				 ORDER BY l.position ASC
+				 LIMIT 1`,
+			);
+			if (title !== null && typeof title !== "string")
+				throw new Error(
+					"authority returned an invalid latest checkpoint title",
+				);
+			return title;
+		};
+		const authorityHead = async (): Promise<string> => {
+			const head = await authorityScalar(
+				"SELECT lix_active_branch_commit_id() AS commit_id",
+			);
+			if (typeof head !== "string")
+				throw new Error("authority returned an invalid head");
+			return head;
+		};
+		const replicaHead = async (page: Page): Promise<string> =>
+			page.evaluate(async () => {
+				const result = await (
+					globalThis as typeof globalThis & {
+						__lixSyncHead: () => Promise<{
+							rows?: Array<Array<{ value?: unknown }>>;
+						}>;
+					}
+				).__lixSyncHead();
+				const head = result.rows?.[0]?.[0]?.value;
+				if (typeof head !== "string")
+					throw new Error(`Invalid local head: ${JSON.stringify(result)}`);
+				return head;
+			});
+
 		const renderedCheckpointCount = async (
 			history: Locator,
 			expected: number,
@@ -590,6 +685,28 @@ export async function createSyncFixture({
 						page.getByRole("button", { name: /^(Checkpoint|Checkpointing…)$/ }),
 					).toHaveCount(0);
 				}
+			} catch (error) {
+				// Preserve the failed offline state before reconnecting can hydrate
+				// missing ancestry or publish a previously pending observer frame.
+				try {
+					await test.info().attach("offline-checkpoint-read-diagnostics.json", {
+						body: JSON.stringify(
+							await Promise.allSettled([
+								collectSyncDiagnostics(left),
+								collectSyncDiagnostics(right),
+							]),
+							null,
+							2,
+						),
+						contentType: "application/json",
+					});
+				} catch (diagnosticError) {
+					test.info().annotations.push({
+						type: "offline-checkpoint-diagnostic-error",
+						description: String(diagnosticError),
+					});
+				}
+				throw error;
 			} finally {
 				await sharedContext.setOffline(false);
 				offlineContexts.delete(sharedContext);
@@ -1182,6 +1299,29 @@ export async function createSyncFixture({
 				});
 			});
 		}
+		async function checkpointConversation() {
+			if (!describedCheckpoint) throw new Error("Requires the history fixture");
+			// Use a separate browser profile: neither OPFS nor native metadata has
+			// been installed by another app view before this SQL query runs.
+			const context = await newContext();
+			contexts.push(context);
+			const page = await newPage(context);
+			await page.goto(`${repositoryUrl}/sql`);
+			const editor = page.getByRole("textbox", { name: "SQL query" });
+			await expect(editor).toBeVisible({ timeout: repositoryOperationTimeout });
+			await editor.fill(
+				`SELECT conversation_id FROM lix_log() WHERE commit_id = '${describedCheckpoint.commitId}'`,
+			);
+			await page.locator('[data-attr="sql-run-query"]').click();
+			await expect(page.locator('[data-attr="sql-run-status"]')).toContainText(
+				"1 row",
+				{ timeout: repositoryOperationTimeout },
+			);
+			expect(await page.getByRole("cell").allTextContents()).toEqual([
+				describedCheckpoint.conversationId,
+			]);
+			await context.close();
+		}
 		async function editing() {
 			await Promise.all([openFiles(left), openFiles(right)]);
 			const lockState = await left.evaluate(async () => {
@@ -1362,21 +1502,63 @@ export async function createSyncFixture({
 						initialCheckpointCount,
 						repositoryOperationTimeout,
 					);
-					{
-						await expect(freshHistory).toContainText("Latest checkpoint");
+					const checkpointRows = freshHistory
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li");
+					if (describedCheckpoint) {
+						await expect(checkpointRows.first()).toContainText(
+							describedCheckpoint.title,
+						);
+					} else {
+						const latestTitle = await authorityLatestCheckpointTitle();
+						if (latestTitle !== null)
+							await expect(checkpointRows.first()).toContainText(latestTitle);
+						else
+							await expect(
+								checkpointRows
+									.first()
+									.locator('[data-attr="history-view-checkpoint"]'),
+							).toBeVisible();
 					}
-					{
-						await expect(freshHistory).toContainText("Initial checkpoint");
-					}
+					await expect(
+						checkpointRows
+							.last()
+							.locator('[data-attr="history-view-checkpoint"]'),
+					).toBeVisible();
 					await expect(
 						fresh.locator("[data-atelier-extension-suspended]"),
 					).toHaveCount(0);
 					// Working changes use the engine's hot authority. Keep a bounded
 					// allowance for historical checkpoint metadata on a fresh replica.
 					if (scenario === "performance") {
-						expect(coldReadCount([fresh])).toBeLessThanOrEqual(
-							coldReadsBeforeFreshHistory + 2,
+						const coldReadCountBefore = coldReadsBeforeFreshHistory;
+						const coldReadCountAfter = coldReadCount([fresh]);
+						const coldReadRequestUrls = (coldReads.get(fresh) ?? []).slice(
+							coldReadsBeforeFreshHistory,
 						);
+						const pendingColdReadRequestUrls = [
+							...(pendingColdReads.get(fresh) ?? []),
+						].map((request) => request.url());
+						const profile = {
+							phase: "fresh-bootstrap-history",
+							coldReadCountBefore,
+							coldReadCountAfter,
+							coldReadCountDelta: coldReadCountAfter - coldReadCountBefore,
+							coldReadBudgetDelta: 2,
+							coldReadRequestUrls,
+							pendingColdReadCount: pendingColdReadRequestUrls.length,
+							pendingColdReadRequestUrls,
+						};
+						try {
+							expect(coldReadCount([fresh])).toBeLessThanOrEqual(
+								coldReadsBeforeFreshHistory + 2,
+							);
+						} finally {
+							await test.info().attach("cold-history-profile.json", {
+								body: JSON.stringify(profile, null, 2),
+								contentType: "application/json",
+							});
+						}
 					}
 
 					return { freshContext, fresh };
@@ -1619,6 +1801,59 @@ export async function createSyncFixture({
 				});
 			}
 		}
+		async function staleReopen(state: EditingState) {
+			const { freshContext, createdUrl } = state;
+			let fresh = state.fresh;
+			const before = await authorityHead();
+			await expect
+				.poll(() => replicaHead(fresh), { timeout: 30_000 })
+				.toBe(before);
+			await freshContext.setOffline(true);
+			offlineContexts.add(freshContext);
+			try {
+				const marker = ` stale-reopen-${randomUUID()}`;
+				await state.leftEditor.click();
+				await left.keyboard.press("Control+End");
+				await left.keyboard.insertText(marker);
+				await expect
+					.poll(
+						() =>
+							authorityScalar(
+								"SELECT CAST(content AS TEXT) FROM lix_file WHERE id = $1",
+								[{ kind: "text", value: state.createdFileId }],
+							),
+						{ timeout: 30_000 },
+					)
+					.toContain(marker);
+				await expect.poll(authorityHead, { timeout: 30_000 }).not.toBe(before);
+				expect(await replicaHead(fresh)).toBe(before);
+				await fresh.close();
+				await freshContext.setOffline(false);
+				offlineContexts.delete(freshContext);
+				fresh = await newPage(freshContext);
+				observePage(fresh, "stale-reopen");
+				await fresh.goto(createdUrl);
+				await expect(
+					fresh.locator('.ProseMirror[contenteditable="true"]:visible'),
+				).toContainText(marker, { timeout: 30_000 });
+				const after = await authorityHead();
+				await expect
+					.poll(() => replicaHead(fresh), { timeout: 30_000 })
+					.toBe(after);
+				await test.info().attach("stale-reopen.json", {
+					body: JSON.stringify({
+						before,
+						after,
+						coldReads: coldReads.get(fresh) ?? [],
+					}),
+					contentType: "application/json",
+				});
+			} finally {
+				await freshContext.setOffline(false);
+				offlineContexts.delete(freshContext);
+			}
+		}
+
 		async function checkpoint(state: EditingState) {
 			const { fresh, leftEditor, rightEditor } = state;
 
@@ -1747,6 +1982,47 @@ export async function createSyncFixture({
 				),
 			);
 			expect(freshReplicaEntries).toHaveLength(1);
+			// Warm reuse requires a synchronized durable replica. The final edit in
+			// editing() is confirmed by the writers, but fresh can still be behind.
+			// Observe only the hot branch coordinate; do not prefetch any payload.
+			let warmBaselineHead: string | undefined;
+			if (scenario === "performance") {
+				let previousHead: string | undefined;
+				let previousColdReadCount = coldReadCount([fresh]);
+				let stableSamples = 0;
+				await expect
+					.poll(
+						async () => {
+							const head = await authorityHead();
+							const replicaHeads = await Promise.all(
+								[left, right, fresh].map(replicaHead),
+							);
+							const currentColdReadCount = coldReadCount([fresh]);
+							const settled =
+								head === previousHead &&
+								replicaHeads.every((replica) => replica === head) &&
+								currentColdReadCount === previousColdReadCount &&
+								(pendingColdReads.get(fresh)?.size ?? 0) === 0;
+							stableSamples = settled ? stableSamples + 1 : 0;
+							previousHead = head;
+							previousColdReadCount = currentColdReadCount;
+							if (stableSamples >= 8) warmBaselineHead = head;
+							return stableSamples;
+						},
+						{ intervals: [500], timeout: 30_000 },
+					)
+					.toBeGreaterThanOrEqual(8);
+				expect(await authorityHead()).toBe(warmBaselineHead);
+				expect(await replicaHead(fresh)).toBe(warmBaselineHead);
+				await test.info().attach("warm-reopen-baseline.json", {
+					body: JSON.stringify({
+						head: warmBaselineHead,
+						coldReadCount: coldReadCount([fresh]),
+					}),
+					contentType: "application/json",
+				});
+			}
+
 			const warmReopenUsableSamplesMs: number[] = [];
 			const warmReopenColdReads: string[][] = [];
 			const warmReopenProfiles: Array<{
@@ -1767,6 +2043,21 @@ export async function createSyncFixture({
 				observePage(fresh, `fresh-reopen-${sample + 1}`);
 				const reopenStartedAt = Date.now();
 				await fresh.goto(repositoryUrl, { waitUntil: "domcontentloaded" });
+				// Qualify the initial Home before navigating to Files. Switching
+				// surfaces earlier can unmount Home and cancel its tree subscription,
+				// so a Files-ready snapshot cannot prove Home's startup query budget.
+				await expect
+					.poll(
+						() =>
+							fresh.evaluate(
+								() =>
+									performance.getEntriesByName(
+										"lixray:repository-open:tree-ready",
+									).length,
+							),
+						{ timeout: 10_000 },
+					)
+					.toBe(1);
 				await showLibraryFiles(fresh);
 				await libraryFileIds(fresh);
 				await expect(await libraryFileEntry(fresh, createdFileId!)).toBeVisible(
@@ -1777,6 +2068,8 @@ export async function createSyncFixture({
 				const sampleColdReads = [...(coldReads.get(fresh) ?? [])];
 				warmReopenColdReads.push(sampleColdReads);
 				warmReopenUsableSamplesMs.push(Date.now() - reopenStartedAt);
+				if (warmBaselineHead)
+					expect(await replicaHead(fresh)).toBe(warmBaselineHead);
 				// Keep durability verification outside the usable-time sample. This
 				// Playwright RPC validates identity continuity but is not app startup.
 				expect(
@@ -1853,6 +2146,7 @@ export async function createSyncFixture({
 					profilePath,
 					JSON.stringify(
 						{
+							warmBaselineHead,
 							warmReopenUsableSamplesMs,
 							warmReopenColdReads,
 							medianWarmReopenUsableMs,
@@ -2056,8 +2350,20 @@ export async function createSyncFixture({
 					repositoryOperationTimeout,
 				);
 				await expect(history).toContainText("Working changes");
-				await expect(history).toContainText("Latest checkpoint");
-				await expect(history).toContainText("Initial checkpoint");
+				await expect(
+					history
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li")
+						.first()
+						.locator('[data-attr="history-view-checkpoint"]'),
+				).toBeVisible();
+				await expect(
+					history
+						.getByRole("list", { name: "Checkpoints" })
+						.locator(":scope > li")
+						.last()
+						.locator('[data-attr="history-view-checkpoint"]'),
+				).toBeVisible();
 			}
 			// Bounded, not zero: the relation-scoped working diff reads commit
 			// trees (see the fresh-bootstrap budget above).
@@ -2074,9 +2380,15 @@ export async function createSyncFixture({
 			// replica and report its request count without imposing a zero-read budget.
 			const freshReadsBeforeCheckpoint = coldReadCount([fresh]);
 			const freshHistory = await openHistoryPanel(fresh);
-			await freshHistory
-				.getByRole("button", { name: /Latest checkpoint/ })
-				.click();
+			// Select an older checkpoint so an already-viewed latest row cannot
+			// toggle review mode off.
+			const olderCheckpoint = freshHistory
+				.getByRole("list", { name: "Checkpoints" })
+				.locator(":scope > li")
+				.nth(1)
+				.locator('[data-attr="history-view-checkpoint"]');
+			await expect(olderCheckpoint).toBeVisible({ timeout: 30_000 });
+			await olderCheckpoint.click();
 			await expect(fresh.getByRole("button", { name: "Exit" })).toBeVisible({
 				timeout: 30_000,
 			});
@@ -2174,11 +2486,13 @@ export async function createSyncFixture({
 		}
 		return {
 			navigation,
+			checkpointConversation,
 			editing,
 			checkpoint,
 			concurrent,
 			independentConflicts,
 			continuousIndependentEdits,
+			staleReopen,
 			reopen,
 			partialCheckpoint,
 			history,

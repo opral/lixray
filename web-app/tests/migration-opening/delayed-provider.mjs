@@ -21,11 +21,14 @@ export async function createLixStorageProvider(options) {
 										requests.some(
 											(request) =>
 												request.space.id >= 0x100000 &&
-												(request.space.id & 0xfffff) === 0x70014 &&
-												request.keys.some(
-													(key) =>
-														new TextDecoder().decode(key) === "repository",
-												),
+												request.keys.some((key) => {
+													const space = request.space.id & 0xfffff;
+													const identity = new TextDecoder().decode(key);
+													return (
+														(space === 0x70014 && identity === "repository") ||
+														(space === 0x70019 && identity === "current")
+													);
+												}),
 										)
 									) {
 										delayed = true;

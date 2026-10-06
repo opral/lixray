@@ -1,0 +1,39 @@
+{
+  "candidate_commit": "f0dcfee8cc60c1c6930b537f5b4fb85264a7b07a",
+  "reference_worktree": "/tmp/lix-v019-window1-reference",
+  "reference_delta": "Only mainline_window_size changed to old behavior: historical relation or any LIMIT uses window 1; no LIMIT uses 64.",
+  "command": "CARGO_TARGET_DIR=/root/repos-iv/lix-history-offline-fix/target RUST_MIN_STACK=16777216 cargo test -p lix --features all-simulations,server-protocol,server-protocol-client --lib checkpoint_log_retirement_interest_profile -- --nocapture --test-threads=1",
+  "candidate_binary": "/tmp/lix-v019-comparator-artifacts/candidate-f0dcfee8-lix-test-binary",
+  "workload": "Genuine public API/file operations: one retired checkpoint proves UNDO_STATE populated; 30 visible file checkpoints; lix_log() LIMIT 40; memory partial replica; three 0ms and three 50ms simulated RTT samples.",
+  "candidate": {
+    "request_count": 10,
+    "physical_fallback_calls": 8,
+    "native_metadata_walk_calls": 2,
+    "response_bytes": 21186,
+    "checkpoint_retirement_batches": 1,
+    "checkpoint_retirement_identities": 30,
+    "cold_elapsed_ms_rtt0": [14.963734, 14.049674, 13.944266],
+    "cold_elapsed_ms_rtt50": [530.40954, 541.660329, 538.914073],
+    "warm_page_ms": {
+      "limit10": [2.68407, 2.564415, 2.570947],
+      "limit20": [3.009994, 2.888354, 2.891159],
+      "limit40": [1.960609, 1.918521, 1.92844]
+    }
+  },
+  "reference": {
+    "request_count": 10,
+    "physical_fallback_calls": 8,
+    "native_metadata_walk_calls": 2,
+    "response_bytes": 23123,
+    "checkpoint_retirement_batches": 30,
+    "checkpoint_retirement_identities": 30,
+    "cold_elapsed_ms_rtt0": [28.948922, 28.25653, 27.998395],
+    "cold_elapsed_ms_rtt50": [553.500897, 555.056059, 548.675181],
+    "warm_page_ms": {
+      "limit10": [4.7352, 4.752223, 4.76184],
+      "limit20": [10.612597, 10.595205, 10.570398],
+      "limit40": [15.425975, 15.363708, 15.278497]
+    }
+  },
+  "qualification": "Authorities were independently seeded, so random UUID/tree identity variation remains. RPC counts were equal, and byte/time deltas must not be described as a causal network reduction. Exact batch-count and warm-page improvements are observed; wall times are exploratory paired workload measurements."
+}
