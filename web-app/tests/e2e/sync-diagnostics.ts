@@ -132,7 +132,17 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			},
 		});
 		const lifecycle: unknown[] = [];
+		const pendingOperations = new Map<string, unknown>();
 		const recordLifecycle = (value: unknown) => {
+			// Telemetry bursts must not evict the RPCs that explain a stalled
+			// repository operation from this bounded diagnostic buffer.
+			if (
+				typeof value === "object" &&
+				value !== null &&
+				"kind" in value &&
+				value.kind === "telemetry"
+			)
+				return;
 			lifecycle.push(value);
 			if (lifecycle.length > 100) lifecycle.shift();
 		};
@@ -177,6 +187,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		globalThis.SharedWorker = new Proxy(Original, {
 			construct(target, args: ConstructorParameters<typeof SharedWorker>) {
 				const worker = new target(...args);
+				const workerIndex = ports.length;
 				ports.push(worker.port);
 				const requests = new Map<number, unknown>();
 				const post = worker.port.postMessage.bind(worker.port);
@@ -203,11 +214,23 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 					if (message)
 						recordLifecycle({
 							direction: "send",
+							workerIndex,
 							at: performance.now(),
 							id: message.id,
 							sessionId: message.sessionId,
 							kind: message.operation?.kind ?? message.kind,
 						});
+					if (typeof message?.id === "number" && message.operation?.kind) {
+						pendingOperations.set(`${workerIndex}:${message.id}`, {
+							id: message.id,
+							workerIndex,
+							sessionId: message.sessionId,
+							kind: message.operation.kind,
+							startedAt: performance.now(),
+						});
+						if (pendingOperations.size > 200)
+							pendingOperations.delete(pendingOperations.keys().next().value!);
+					}
 					Reflect.apply(post, this, [value, transferOrOptions]);
 				};
 				worker.port.addEventListener(
@@ -220,8 +243,11 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							error?: { code?: string };
 						}>,
 					) => {
+						if (typeof event.data?.id === "number")
+							pendingOperations.delete(`${workerIndex}:${event.data.id}`);
 						recordLifecycle({
 							direction: "receive",
+							workerIndex,
 							at: performance.now(),
 							id: event.data?.id,
 							kind: event.data?.kind,
@@ -313,7 +339,15 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						params: [],
 					}),
 				]);
-				return { health, rows, head, checkpointLog, observerFrames, lifecycle };
+				return {
+					health,
+					rows,
+					head,
+					checkpointLog,
+					observerFrames,
+					lifecycle,
+					pendingOperations: [...pendingOperations.values()],
+				};
 			},
 		});
 	});
