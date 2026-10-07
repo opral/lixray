@@ -22,6 +22,7 @@ import {
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
 import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
+import { createTrackedOfflineContexts } from "./tracked-offline-contexts";
 import {
 	captureSyncPushError,
 	isClientCanceledSyncProxyRequest,
@@ -69,6 +70,11 @@ export async function createSyncFixture({
 	const localRequestSources = new WeakMap<Request, string>();
 	const localPushCaptures = new WeakMap<Request, SyncPushErrorCapture>();
 	let localPushCaptureEnabled = false;
+	const offlineContexts = createTrackedOfflineContexts<BrowserContext>();
+	const setContextOffline = (context: BrowserContext, offline: boolean) =>
+		offlineContexts.setOffline(context, offline, (value) =>
+			context.setOffline(value),
+		);
 	const newContext = async () => {
 		const context = await browser.newContext();
 		if (
@@ -102,6 +108,7 @@ export async function createSyncFixture({
 				const request = route.request();
 				const url = request.url();
 				if (
+					offlineContexts.has(context) ||
 					!localPushCaptureEnabled ||
 					!isSyncPushProtocolRequest(request.method(), url)
 				) {
@@ -502,7 +509,6 @@ export async function createSyncFixture({
 			url: string;
 			message: string;
 		}> = [];
-		const offlineContexts = new WeakSet<BrowserContext>();
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
 		const pendingColdReads = new Map<Page, Set<Request>>();
@@ -778,8 +784,7 @@ export async function createSyncFixture({
 			await expect(checkpointButton).toBeVisible({ timeout: 30_000 });
 			await expect(checkpointButton).toBeEnabled({ timeout: 30_000 });
 			sharedContext.on("request", captureCheckpoint);
-			offlineContexts.add(sharedContext);
-			await sharedContext.setOffline(true);
+			await setContextOffline(sharedContext, true);
 			try {
 				const checkpointDeadline = Date.now() + 5_000;
 				await checkpointButton.click({ timeout: 5_000 });
@@ -826,8 +831,7 @@ export async function createSyncFixture({
 				}
 				throw error;
 			} finally {
-				await sharedContext.setOffline(false);
-				offlineContexts.delete(sharedContext);
+				await setContextOffline(sharedContext, false);
 			}
 			try {
 				await expect
@@ -1841,9 +1845,8 @@ export async function createSyncFixture({
 					const markers = [0, 1].map(
 						(index) => `independent-${first}-${index}-${randomUUID()}`,
 					);
-					for (const { context } of replicas) offlineContexts.add(context);
 					await Promise.all(
-						replicas.map(({ context }) => context.setOffline(true)),
+						replicas.map(({ context }) => setContextOffline(context, true)),
 					);
 					await Promise.all(
 						replicas.map(async ({ view }, index) => {
@@ -1862,16 +1865,14 @@ export async function createSyncFixture({
 							{ timeout: 5_000 },
 						);
 					}
-					await replicas[first]!.context.setOffline(false);
-					offlineContexts.delete(replicas[first]!.context);
+					await setContextOffline(replicas[first]!.context, false);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[first]!);
 					await expect(replicas[last]!.view.locator("p").last()).toHaveText(
 						markers[last]!,
 					);
-					await replicas[last]!.context.setOffline(false);
-					offlineContexts.delete(replicas[last]!.context);
+					await setContextOffline(replicas[last]!.context, false);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[last]!);
@@ -1897,13 +1898,12 @@ export async function createSyncFixture({
 				throw error;
 			} finally {
 				const cleanup = await Promise.allSettled([
-					...replicas.map(({ context }) => context.setOffline(false)),
+					...replicas.map(({ context }) => setContextOffline(context, false)),
 					sharedContext.request.delete(
 						new URL("session", endpoint).toString(),
 						{ headers },
 					),
 				]);
-				for (const { context } of replicas) offlineContexts.delete(context);
 				for (const result of cleanup) {
 					if (result.status !== "rejected") continue;
 					if (!primaryFailure) cleanupFailure ??= result;
@@ -2084,8 +2084,7 @@ export async function createSyncFixture({
 			await expect
 				.poll(() => replicaHead(fresh), { timeout: 30_000 })
 				.toBe(before);
-			await freshContext.setOffline(true);
-			offlineContexts.add(freshContext);
+			await setContextOffline(freshContext, true);
 			try {
 				const marker = ` stale-reopen-${randomUUID()}`;
 				await state.leftEditor.click();
@@ -2104,8 +2103,7 @@ export async function createSyncFixture({
 				await expect.poll(authorityHead, { timeout: 30_000 }).not.toBe(before);
 				expect(await replicaHead(fresh)).toBe(before);
 				await fresh.close();
-				await freshContext.setOffline(false);
-				offlineContexts.delete(freshContext);
+				await setContextOffline(freshContext, false);
 				fresh = await newPage(freshContext);
 				observePage(fresh, "stale-reopen");
 				await fresh.goto(createdUrl);
@@ -2125,8 +2123,7 @@ export async function createSyncFixture({
 					contentType: "application/json",
 				});
 			} finally {
-				await freshContext.setOffline(false);
-				offlineContexts.delete(freshContext);
+				await setContextOffline(freshContext, false);
 			}
 		}
 
