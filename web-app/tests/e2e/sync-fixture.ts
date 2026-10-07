@@ -21,6 +21,7 @@ import {
 	isRetryableMergeConflict,
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
+import { createRecoveredNetworkChangeTracker } from "./recovered-network-change-tracker";
 import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
 import { createTrackedOfflineContexts } from "./tracked-offline-contexts";
 import {
@@ -66,11 +67,16 @@ export async function createSyncFixture({
 	const syncFailures: string[] = [];
 	const syncFailureDetails: string[] = [];
 	const localSyncProxyNotes: string[] = [];
+	const recoveredNetworkChangeConsoleFailures: Array<{
+		isRecovered: () => boolean;
+		message: string;
+	}> = [];
 	const transientPushRecovery = createTransientPushRecoveryTracker();
 	const localRequestSources = new WeakMap<Request, string>();
 	const localPushCaptures = new WeakMap<Request, SyncPushErrorCapture>();
 	let localPushCaptureEnabled = false;
 	const offlineContexts = createTrackedOfflineContexts<BrowserContext>();
+	const appOrigin = baseURL ? new URL(baseURL).origin : null;
 	const setContextOffline = (context: BrowserContext, offline: boolean) =>
 		offlineContexts.setOffline(context, offline, (value) =>
 			context.setOffline(value),
@@ -904,6 +910,25 @@ export async function createSyncFixture({
 			// a confirmed offline failure instead of sampling the current phase.
 			const offlineConsoleRequests =
 				createOfflineConsoleRequestTracker<Request>();
+			const recoveredNetworkChange =
+				createRecoveredNetworkChangeTracker<Request>();
+			const successfulScriptResponses = new WeakSet<Request>();
+			const isAppScriptRequest = (request: Request) => {
+				if (
+					appOrigin === null ||
+					request.method() !== "GET" ||
+					request.resourceType() !== "script"
+				)
+					return false;
+				try {
+					const url = new URL(request.url());
+					return (
+						url.origin === appOrigin && url.pathname.startsWith("/assets/")
+					);
+				} catch {
+					return false;
+				}
+			};
 			const pageColdReads: string[] = [];
 			coldReads.set(page, pageColdReads);
 			const pagePendingColdReads = new Set<Request>();
@@ -919,6 +944,7 @@ export async function createSyncFixture({
 			const pageBlobLanePayloadSizes: number[] = [];
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
+				recoveredNetworkChange.started(request);
 				if (
 					request.method() === "POST" &&
 					request.url().endsWith("/sync/push")
@@ -971,6 +997,9 @@ export async function createSyncFixture({
 			page.on("requestfinished", (request) => {
 				pendingBlobLaneRequests.delete(request);
 				offlineConsoleRequests.finished(request);
+				if (successfulScriptResponses.has(request)) {
+					recoveredNetworkChange.completedReload(request);
+				}
 			});
 			page.on("pageerror", (error) => {
 				runtimeFailures.push(`${label} pageerror: ${error.message}`);
@@ -988,6 +1017,21 @@ export async function createSyncFixture({
 					) &&
 					(offlineConsoleRequests.consume(message.location().url) ||
 						offlineContexts.has(page.context()));
+				const networkChangeFailureId =
+					!expectedOfflineNoise &&
+					message.type() === "error" &&
+					/^Failed to load resource: net::ERR_NETWORK_CHANGED$/i.test(
+						message.text(),
+					)
+						? recoveredNetworkChange.console(message.location().url)
+						: null;
+				if (networkChangeFailureId !== null) {
+					recoveredNetworkChangeConsoleFailures.push({
+						isRecovered: () =>
+							recoveredNetworkChange.recovered(networkChangeFailureId),
+						message: `${label} console: ${message.text()}`,
+					});
+				}
 				const transientPushNoise =
 					(scenario === "editing" ||
 						scenario === "history" ||
@@ -1006,6 +1050,7 @@ export async function createSyncFixture({
 					message.type() === "error" &&
 					!expectedCasNoise &&
 					!expectedOfflineNoise &&
+					networkChangeFailureId === null &&
 					!transientPushNoise
 				) {
 					runtimeFailures.push(`${label} console: ${message.text()}`);
@@ -1021,6 +1066,12 @@ export async function createSyncFixture({
 				) {
 					offlineConsoleRequests.failed(request);
 					return;
+				}
+				if (
+					errorText === "net::ERR_NETWORK_CHANGED" &&
+					isAppScriptRequest(request)
+				) {
+					recoveredNetworkChange.failed(request);
 				}
 				if (/abort|cancel/i.test(errorText)) {
 					unreadableBlobLaneResponses.delete(request);
@@ -1038,6 +1089,9 @@ export async function createSyncFixture({
 				}
 			});
 			page.on("response", (response) => {
+				if (response.ok() && isAppScriptRequest(response.request())) {
+					successfulScriptResponses.add(response.request());
+				}
 				const url = response.url();
 				if (!/\/lix\/v1\/[^/]+\/sync\//.test(url)) return;
 				const responseRequest = response.request();
@@ -2718,9 +2772,14 @@ export async function createSyncFixture({
 				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
 			];
+			const unresolvedRecoveredNetworkChangeConsoleFailures =
+				recoveredNetworkChangeConsoleFailures
+					.filter((failure) => !failure.isRecovered())
+					.map((failure) => failure.message);
 			const unresolvedRuntimeFailures = [
 				...runtimeFailures,
 				...unresolvedConsoleFailures,
+				...unresolvedRecoveredNetworkChangeConsoleFailures,
 			];
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
