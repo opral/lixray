@@ -21,6 +21,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		globalThis.BroadcastChannel = new Proxy(OriginalChannel, {
 			construct(target, args: ConstructorParameters<typeof BroadcastChannel>) {
 				const channel = new target(...args);
+				const portIndex = ports.length;
 				if (!args[0].startsWith("lix:repository-rpc:v1:")) return channel;
 				const listeners = new Set<(event: MessageEvent) => void>();
 				const requests = new Map<number, unknown>();
@@ -40,13 +41,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 					} | null;
 					if (message?.kind === "input") {
 						const request = message.message;
-						recordLifecycle({
-							direction: "send",
-							at: performance.now(),
-							id: request?.id,
-							sessionId: request?.sessionId,
-							kind: request?.operation?.kind,
-						});
+						recordRequest(portIndex, request);
 						if (
 							typeof request?.id === "number" &&
 							request.operation?.kind?.startsWith("observe")
@@ -90,14 +85,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 									error?: { code?: string };
 							  }
 							| undefined;
-						recordLifecycle({
-							direction: "receive",
-							at: performance.now(),
-							id: response?.id,
-							kind: response?.kind,
-							ok: response?.ok,
-							errorCode: response?.error?.code,
-						});
+						recordResponse(portIndex, response);
 						if (typeof response?.id === "number" && requests.has(response.id)) {
 							const operation = requests.get(response.id);
 							requests.delete(response.id);
@@ -146,6 +134,55 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			lifecycle.push(value);
 			if (lifecycle.length > 100) lifecycle.shift();
 		};
+		type DiagnosticRequest = {
+			id?: number;
+			sessionId?: number;
+			kind?: string;
+			operation?: { kind?: string };
+		};
+		const recordRequest = (
+			portIndex: number,
+			request: DiagnosticRequest | null | undefined,
+		) => {
+			if (!request) return;
+			const entry = {
+				direction: "send",
+				portIndex,
+				at: performance.now(),
+				id: request.id,
+				sessionId: request.sessionId,
+				kind: request.operation?.kind ?? request.kind,
+			};
+			recordLifecycle(entry);
+			if (typeof request.id === "number" && request.operation?.kind) {
+				pendingOperations.set(`${portIndex}:${request.id}`, entry);
+				if (pendingOperations.size > 200)
+					pendingOperations.delete(pendingOperations.keys().next().value!);
+			}
+		};
+		const recordResponse = (
+			portIndex: number,
+			response:
+				| {
+						id?: number;
+						kind?: string;
+						ok?: boolean;
+						error?: { code?: string };
+				  }
+				| undefined,
+		) => {
+			if (typeof response?.id === "number")
+				pendingOperations.delete(`${portIndex}:${response.id}`);
+			recordLifecycle({
+				direction: "receive",
+				portIndex,
+				at: performance.now(),
+				id: response?.id,
+				kind: response?.kind,
+				ok: response?.ok,
+				errorCode: response?.error?.code,
+			});
+		};
 		const observerFrames: unknown[] = [];
 		const record = (value: unknown) => {
 			let budget = 32768;
@@ -187,7 +224,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		globalThis.SharedWorker = new Proxy(Original, {
 			construct(target, args: ConstructorParameters<typeof SharedWorker>) {
 				const worker = new target(...args);
-				const workerIndex = ports.length;
+				const portIndex = ports.length;
 				ports.push(worker.port);
 				const requests = new Map<number, unknown>();
 				const post = worker.port.postMessage.bind(worker.port);
@@ -211,26 +248,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						if (requests.size > 200)
 							requests.delete(requests.keys().next().value!);
 					}
-					if (message)
-						recordLifecycle({
-							direction: "send",
-							workerIndex,
-							at: performance.now(),
-							id: message.id,
-							sessionId: message.sessionId,
-							kind: message.operation?.kind ?? message.kind,
-						});
-					if (typeof message?.id === "number" && message.operation?.kind) {
-						pendingOperations.set(`${workerIndex}:${message.id}`, {
-							id: message.id,
-							workerIndex,
-							sessionId: message.sessionId,
-							kind: message.operation.kind,
-							startedAt: performance.now(),
-						});
-						if (pendingOperations.size > 200)
-							pendingOperations.delete(pendingOperations.keys().next().value!);
-					}
+					recordRequest(portIndex, message);
 					Reflect.apply(post, this, [value, transferOrOptions]);
 				};
 				worker.port.addEventListener(
@@ -243,17 +261,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							error?: { code?: string };
 						}>,
 					) => {
-						if (typeof event.data?.id === "number")
-							pendingOperations.delete(`${workerIndex}:${event.data.id}`);
-						recordLifecycle({
-							direction: "receive",
-							workerIndex,
-							at: performance.now(),
-							id: event.data?.id,
-							kind: event.data?.kind,
-							ok: event.data?.ok,
-							errorCode: event.data?.error?.code,
-						});
+						recordResponse(portIndex, event.data);
 						if (
 							typeof event.data?.id !== "number" ||
 							!requests.has(event.data.id)
