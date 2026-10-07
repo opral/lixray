@@ -1971,11 +1971,24 @@ export async function createSyncFixture({
 		}
 		async function continuousIndependentEdits(state: EditingState) {
 			const pages = [left, state.fresh];
+			const openingStartedAt = Date.now();
 			await Promise.all(pages.map((page) => page.goto(state.createdUrl)));
+			const navigationMs = Date.now() - openingStartedAt;
 			const editors = pages.map((page) =>
 				page.locator('.ProseMirror[contenteditable="true"]:visible'),
 			);
-			for (const editor of editors) await expect(editor).toBeVisible();
+			const editorReadyMs: number[] = [];
+			try {
+				for (const editor of editors) {
+					await expect(editor).toBeVisible();
+					editorReadyMs.push(Date.now() - openingStartedAt);
+				}
+			} finally {
+				await test.info().attach("document-open-profile.json", {
+					body: JSON.stringify({ syncDelayMs, navigationMs, editorReadyMs }),
+					contentType: "application/json",
+				});
+			}
 			await expect
 				.poll(async () => await editors[1]!.innerText(), {
 					timeout: realtimeTimeout,

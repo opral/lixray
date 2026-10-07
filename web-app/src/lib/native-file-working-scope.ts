@@ -1,4 +1,5 @@
 import type { Lix } from "@lix-js/sdk";
+import { isClearlyReadOnlySql } from "./lix-sql-access.ts";
 
 const FILE_CONTENT_SCOPE_SQL = "SELECT id, content FROM lix_file WHERE id = $1";
 const ACTIVE_BRANCH_HEAD_SQL =
@@ -36,12 +37,13 @@ export interface NativeFileWorkingScopeOptions {
 }
 
 /**
- * Gate Atelier's document Lix calls on one exact existing file and the active
- * native branch write frontier. The supported offline write is updating the
- * selected existing file's `lix_file.content`, as the built-in text and
- * Markdown editors do. CSV metadata, conversation records, plugin-owned
- * tables, file creation, renames, and directory operations need their own
- * inputs and are not certified here.
+ * Gate document mutations on one exact existing file and the active native
+ * branch write frontier. Read-only SQL and observations pass through without
+ * waiting for offline write preparation. The supported offline write is
+ * updating the selected existing file's `lix_file.content`, as the built-in
+ * text and Markdown editors do. CSV metadata, conversation records,
+ * plugin-owned tables, file creation, renames, and directory operations need
+ * their own inputs and are not certified here.
  *
  * A preparation failure happens before the caller's SQL runs. Transient
  * offline/recovery failures retry only the idempotent file read and frontier
@@ -196,17 +198,11 @@ export function withNativeFileWorkingScope(
 				return (...args: unknown[]) => {
 					let iterator: AsyncIterableIterator<unknown> | undefined;
 					let finished = false;
-					const getIterator = async () => {
+					const getIterator = () => {
 						if (finished) return undefined;
 						if (iterator) return iterator;
-						try {
-							await ensureReady(false, true);
-						} catch (error) {
-							if (!(error instanceof NativeFileWorkingScopeUnavailableError))
-								throw error;
-						}
-						// return() may run while readiness is still pending. Do not
-						// start a raw observer after its consumer has already left.
+						// return() may run before the first next(). Do not start a
+						// raw observer after its consumer has already left.
 						if (finished) return undefined;
 						iterator ??= Reflect.apply(
 							method,
@@ -220,7 +216,7 @@ export function withNativeFileWorkingScope(
 							return this;
 						},
 						async next(value?: unknown) {
-							const source = await getIterator();
+							const source = getIterator();
 							return source
 								? source.next(value)
 								: { done: true, value: undefined };
@@ -232,7 +228,7 @@ export function withNativeFileWorkingScope(
 								: { done: true, value };
 						},
 						async throw(error?: unknown) {
-							const source = await getIterator();
+							const source = getIterator();
 							if (source?.throw) return source.throw(error);
 							throw error;
 						},
@@ -249,12 +245,29 @@ export function withNativeFileWorkingScope(
 			) {
 				return (...args: unknown[]) => {
 					const sql = typeof args[0] === "string" ? args[0] : undefined;
+					const readOnlyBatch =
+						key === "executeBatch" &&
+						Array.isArray(args[0]) &&
+						args[0].every(
+							(statement: unknown) =>
+								typeof statement === "object" &&
+								statement !== null &&
+								"sql" in statement &&
+								typeof statement.sql === "string" &&
+								isClearlyReadOnlySql(statement.sql),
+						);
 					const checkHead =
-						key !== "execute" || (sql !== undefined && mayWriteSql(sql));
+						key === "execute"
+							? sql === undefined || !isClearlyReadOnlySql(sql)
+							: key === "executeBatch"
+								? !readOnlyBatch
+								: true;
 					const invalidate =
-						key === "executeBatch" ||
+						(key === "executeBatch" && !readOnlyBatch) ||
 						key === "transaction" ||
 						(sql !== undefined && invalidatesScopeForSql(sql));
+					if (!checkHead && !invalidate)
+						return Reflect.apply(method, target, args) as unknown;
 					return ensureReady(checkHead, !checkHead).then((branchId) => {
 						const result = Reflect.apply(method, target, args) as unknown;
 						return Promise.resolve(result).then((value) =>
@@ -301,17 +314,6 @@ async function readActiveBranchHead(
 		throw new Error("The active branch head is unavailable.");
 	}
 	return head;
-}
-
-function mayWriteSql(sql: string): boolean {
-	const withoutLeadingComments = sql.replace(
-		/^(?:\s|--[^\n]*(?:\n|$)|\/\*[\s\S]*?\*\/)+/g,
-		"",
-	);
-	return (
-		invalidatesScopeForSql(withoutLeadingComments) ||
-		!/^(?:select|values)\b/i.test(withoutLeadingComments.trim())
-	);
 }
 
 function invalidatesScopeForSql(sql: string): boolean {
