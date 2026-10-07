@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import {
 	expect,
 	test,
+	type APIResponse,
 	type Browser,
 	type BrowserContext,
 	type Locator,
@@ -21,6 +22,12 @@ import {
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
 import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
+import {
+	captureSyncPushError,
+	isClientCanceledSyncProxyRequest,
+	isSyncPushProtocolRequest,
+	type SyncPushErrorCapture,
+} from "./sync-push-response-capture";
 
 import {
 	installSyncDiagnostics,
@@ -55,6 +62,13 @@ export async function createSyncFixture({
 }) {
 	const local = process.env.PLAYWRIGHT_SYNC_LOCAL === "1";
 	const analyticsStubFailures: string[] = [];
+	const syncFailures: string[] = [];
+	const syncFailureDetails: string[] = [];
+	const localSyncProxyNotes: string[] = [];
+	const transientPushRecovery = createTransientPushRecoveryTracker();
+	const localRequestSources = new WeakMap<Request, string>();
+	const localPushCaptures = new WeakMap<Request, SyncPushErrorCapture>();
+	let localPushCaptureEnabled = false;
 	const newContext = async () => {
 		const context = await browser.newContext();
 		if (
@@ -81,10 +95,104 @@ export async function createSyncFixture({
 				}),
 			);
 		}
-		if (local && syncDelayMs > 0) {
+		if (local && scenario !== "performance") {
 			await context.route("**/sync/**", async (route) => {
-				await new Promise((resolve) => setTimeout(resolve, syncDelayMs));
-				await route.continue();
+				if (syncDelayMs > 0)
+					await new Promise((resolve) => setTimeout(resolve, syncDelayMs));
+				const request = route.request();
+				const url = request.url();
+				if (
+					!localPushCaptureEnabled ||
+					!isSyncPushProtocolRequest(request.method(), url)
+				) {
+					await route.continue();
+					return;
+				}
+
+				let upstream: APIResponse;
+				try {
+					upstream = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
+				} catch (error) {
+					if (
+						isClientCanceledSyncProxyRequest(
+							error,
+							request.failure()?.errorText ?? null,
+						)
+					) {
+						localSyncProxyNotes.push(
+							`POST ${url}: client canceled before the local proxy received an upstream response`,
+						);
+						return;
+					}
+					throw error;
+				}
+
+				if (upstream.status() === 503) {
+					// This interception is limited to the small protocol push endpoint.
+					// route.fetch allocates the upstream APIResponse; captureSyncPushError
+					// bounds classification and retains only its safe error code. Blob and
+					// streaming sync lanes still use route.continue() unchanged.
+					const capture = await captureSyncPushError(upstream);
+					// Route.request(), page request events, and Response.request() resolve
+					// to the same Playwright Request wrapper, so exact object identity avoids
+					// retaining request bytes or risking a nearby retry's error code.
+					localPushCaptures.set(request, capture);
+					localSyncProxyNotes.push(
+						`503 ${url}: ${capture.errorCode ? `error.code=${capture.errorCode}` : (capture.bodyIssue ?? "response body unclassified")}`,
+					);
+				}
+
+				try {
+					await route.fulfill({ response: upstream });
+				} catch (error) {
+					const canceled = isClientCanceledSyncProxyRequest(
+						error,
+						request.failure()?.errorText ?? null,
+					);
+					const capture = localPushCaptures.get(request) ?? null;
+					localPushCaptures.delete(request);
+					if (!canceled) throw error;
+					if (upstream.status() === 503) {
+						const observation = transientPushRecovery.observe({
+							source:
+								localRequestSources.get(request) ??
+								`unattributed-${randomUUID()}`,
+							replicaId: request.headers()["lix-replica-id"] ?? null,
+							method: request.method(),
+							url,
+							status: upstream.status(),
+							body: request.postDataBuffer(),
+						});
+						if (
+							capture &&
+							(scenario === "editing" ||
+								scenario === "history" ||
+								scenario === "conflicts")
+						)
+							transientPushRecovery.classifyCode(
+								observation,
+								capture.errorCode,
+							);
+					}
+					localSyncProxyNotes.push(
+						upstream.status() === 200
+							? `200 ${url}: client canceled while fulfilling the upstream push response; the server acknowledgement may have been lost`
+							: `${upstream.status()} ${url}: client canceled while fulfilling the upstream response`,
+					);
+					return;
+				} finally {
+					try {
+						await upstream.dispose();
+					} catch (error) {
+						if (
+							!isClientCanceledSyncProxyRequest(
+								error,
+								request.failure()?.errorText ?? null,
+							)
+						)
+							syncFailures.push("local sync push response disposal failed");
+					}
+				}
 			});
 		}
 		return context;
@@ -383,9 +491,6 @@ export async function createSyncFixture({
 		if (!local) {
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
-		const syncFailures: string[] = [];
-		const syncFailureDetails: string[] = [];
-		const transientPushRecovery = createTransientPushRecoveryTracker();
 		const pendingSyncFailureDetails = new Set<Promise<void>>();
 		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
@@ -789,6 +894,7 @@ export async function createSyncFixture({
 			}
 		};
 		const observePage = (page: Page, label: string) => {
+			localPushCaptureEnabled = local;
 			// Chromium can report a failed resource to the console after the
 			// context has come back online. Correlate the console message with
 			// a confirmed offline failure instead of sampling the current phase.
@@ -809,6 +915,12 @@ export async function createSyncFixture({
 			const pageBlobLanePayloadSizes: number[] = [];
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
+				if (
+					request.method() === "POST" &&
+					request.url().endsWith("/sync/push")
+				) {
+					localRequestSources.set(request, label);
+				}
 				if (offlineContexts.has(page.context())) {
 					offlineRequests.add(request);
 				}
@@ -924,6 +1036,14 @@ export async function createSyncFixture({
 			page.on("response", (response) => {
 				const url = response.url();
 				if (!/\/lix\/v1\/[^/]+\/sync\//.test(url)) return;
+				const responseRequest = response.request();
+				const localPushCapture =
+					local &&
+					isSyncPushProtocolRequest(response.request().method(), url) &&
+					response.status() === 503
+						? (localPushCaptures.get(responseRequest) ?? null)
+						: null;
+				if (localPushCapture) localPushCaptures.delete(responseRequest);
 				const pushObservation = url.endsWith("/sync/push")
 					? transientPushRecovery.observe({
 							source: label,
@@ -934,6 +1054,22 @@ export async function createSyncFixture({
 							body: response.request().postDataBuffer(),
 						})
 					: undefined;
+				if (local && pushObservation?.status === 503) {
+					if (
+						scenario === "editing" ||
+						scenario === "history" ||
+						scenario === "conflicts"
+					)
+						transientPushRecovery.classifyCode(
+							pushObservation,
+							localPushCapture?.errorCode,
+						);
+					if (!localPushCapture) {
+						localSyncProxyNotes.push(
+							`503 ${url}: no bounded local proxy body capture matched the exact push request`,
+						);
+					}
+				}
 				if (
 					response.request().method() === "GET" &&
 					/\/sync\/blob(?:\?|$)/.test(url) &&
@@ -1005,25 +1141,34 @@ export async function createSyncFixture({
 					)
 						syncFailures.push(failure);
 					if (failureRecorded && url.endsWith("/sync/push")) {
-						const detail = response
-							.text()
-							.then((body) => {
-								syncFailureDetails.push(`${failure}: ${body.slice(0, 2_000)}`);
-								if (
-									pushObservation?.status === 503 &&
-									(scenario === "editing" ||
-										scenario === "history" ||
-										scenario === "conflicts")
-								)
-									transientPushRecovery.classify(pushObservation, body);
-							})
-							.catch((error: unknown) => {
-								syncFailureDetails.push(
-									`${failure}: unreadable response: ${String(error)}`,
-								);
-							});
-						pendingSyncFailureDetails.add(detail);
-						void detail.finally(() => pendingSyncFailureDetails.delete(detail));
+						if (local && pushObservation?.status === 503) {
+							// The local proxy already classified this bounded body before the
+							// browser received it. Chromium may not retain the response body.
+						} else {
+							const detail = response
+								.text()
+								.then((body) => {
+									syncFailureDetails.push(
+										`${failure}: ${body.slice(0, 2_000)}`,
+									);
+									if (
+										pushObservation?.status === 503 &&
+										(scenario === "editing" ||
+											scenario === "history" ||
+											scenario === "conflicts")
+									)
+										transientPushRecovery.classify(pushObservation, body);
+								})
+								.catch((error: unknown) => {
+									syncFailureDetails.push(
+										`${failure}: unreadable response: ${String(error)}`,
+									);
+								});
+							pendingSyncFailureDetails.add(detail);
+							void detail.finally(() =>
+								pendingSyncFailureDetails.delete(detail),
+							);
+						}
 					}
 					if (
 						response.status() === 409 &&
@@ -2595,6 +2740,7 @@ export async function createSyncFixture({
 						replayedMergeConflicts: mergeReplay.recovered(),
 						runtimeFailures: unresolvedRuntimeFailures,
 						analyticsStubFailures,
+						localSyncProxyNotes,
 					},
 					null,
 					2,

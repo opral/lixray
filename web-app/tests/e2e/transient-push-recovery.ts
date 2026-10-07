@@ -61,6 +61,10 @@ export function createTransientPushRecoveryTracker() {
 		observation: Observation;
 		typed: boolean;
 	}> = [];
+	const classifyCode = (observation: Observation, errorCode: unknown) => {
+		const failure = failures.find((entry) => entry.observation === observation);
+		if (failure) failure.typed = errorCode === "LIX_STORAGE_IO_UNAVAILABLE";
+	};
 	return {
 		observe(response: PushResponse): Observation {
 			const observation = {
@@ -74,10 +78,15 @@ export function createTransientPushRecoveryTracker() {
 			return observation;
 		},
 		classify(observation: Observation, responseBody: string) {
-			const failure = failures.find(
-				(entry) => entry.observation === observation,
+			classifyCode(
+				observation,
+				isStorageUnavailable(responseBody)
+					? "LIX_STORAGE_IO_UNAVAILABLE"
+					: null,
 			);
-			if (failure) failure.typed = isStorageUnavailable(responseBody);
+		},
+		classifyCode(observation: Observation, errorCode: unknown) {
+			classifyCode(observation, errorCode);
 		},
 		recovered() {
 			return failures
