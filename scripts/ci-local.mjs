@@ -164,7 +164,7 @@ run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile"
 	"--build-arg", "VITE_SUPABASE_URL=https://example.invalid",
 	"--build-arg", "VITE_SUPABASE_KEY=ci-public-placeholder",
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
-for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
+for (const scenario of ["navigation", "editing", "history", "conflicts", "batching"]) {
 	// Chromium can lose loopback requests when Docker changes the host network.
 	// Retry with fresh repository state so a partial first run cannot affect it.
 	for (let attempt = 0; attempt < 2; attempt++) {
