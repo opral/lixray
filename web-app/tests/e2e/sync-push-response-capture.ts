@@ -1,17 +1,17 @@
-export const MAX_SYNC_PUSH_ERROR_BODY_BYTES = 4_096;
+export const MAX_SYNC_PUBLICATION_ERROR_BODY_BYTES = 4_096;
 
-export type SyncPushResponseBody = {
+export type SyncPublicationResponseBody = {
 	status(): number;
 	headers(): Record<string, string>;
 	body(): Promise<Uint8Array>;
 };
 
-export type SyncPushErrorCapture = {
+export type SyncPublicationErrorCapture = {
 	errorCode: string | null;
 	bodyIssue: string | null;
 };
 
-export function isSyncPushProtocolRequest(
+export function isSyncPublicationProtocolRequest(
 	method: string,
 	url: string,
 ): boolean {
@@ -20,7 +20,9 @@ export function isSyncPushProtocolRequest(
 		const parsedUrl = new URL(url);
 		return (
 			["http:", "https:"].includes(parsedUrl.protocol) &&
-			/^\/lix\/v1\/[^/]+\/sync\/push$/.test(parsedUrl.pathname) &&
+			/^\/lix\/v1\/[^/]+\/sync\/(?:push|retained-bodies)$/.test(
+				parsedUrl.pathname,
+			) &&
 			!parsedUrl.search &&
 			!parsedUrl.hash
 		);
@@ -50,10 +52,10 @@ function safeErrorCode(body: Uint8Array): string | null {
 	}
 }
 
-/** Read only a bounded JSON 503 body and retain only its safe error code. */
-export async function captureSyncPushError(
-	response: SyncPushResponseBody,
-): Promise<SyncPushErrorCapture> {
+/** Classify a 503 only when its JSON body fits the bounded classification limit. */
+export async function captureSyncPublicationError(
+	response: SyncPublicationResponseBody,
+): Promise<SyncPublicationErrorCapture> {
 	if (response.status() !== 503) {
 		return {
 			errorCode: null,
@@ -63,11 +65,11 @@ export async function captureSyncPushError(
 	const contentLength = Number(response.headers()["content-length"]);
 	if (
 		Number.isSafeInteger(contentLength) &&
-		contentLength > MAX_SYNC_PUSH_ERROR_BODY_BYTES
+		contentLength > MAX_SYNC_PUBLICATION_ERROR_BODY_BYTES
 	) {
 		return {
 			errorCode: null,
-			bodyIssue: `response body exceeds ${MAX_SYNC_PUSH_ERROR_BODY_BYTES}-byte classification limit`,
+			bodyIssue: `response body exceeds ${MAX_SYNC_PUBLICATION_ERROR_BODY_BYTES}-byte classification limit`,
 		};
 	}
 
@@ -82,10 +84,10 @@ export async function captureSyncPushError(
 			bodyIssue: `response body unavailable (${name})`,
 		};
 	}
-	if (body.byteLength > MAX_SYNC_PUSH_ERROR_BODY_BYTES) {
+	if (body.byteLength > MAX_SYNC_PUBLICATION_ERROR_BODY_BYTES) {
 		return {
 			errorCode: null,
-			bodyIssue: `response body exceeds ${MAX_SYNC_PUSH_ERROR_BODY_BYTES}-byte classification limit`,
+			bodyIssue: `response body exceeds ${MAX_SYNC_PUBLICATION_ERROR_BODY_BYTES}-byte classification limit`,
 		};
 	}
 	const errorCode = safeErrorCode(body);

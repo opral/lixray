@@ -22,13 +22,13 @@ import {
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
 import { createRecoveredNetworkChangeTracker } from "./recovered-network-change-tracker";
-import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
+import { createTransientPublicationRecoveryTracker } from "./transient-push-recovery";
 import { createTrackedOfflineContexts } from "./tracked-offline-contexts";
 import {
-	captureSyncPushError,
+	captureSyncPublicationError,
 	isClientCanceledSyncProxyRequest,
-	isSyncPushProtocolRequest,
-	type SyncPushErrorCapture,
+	isSyncPublicationProtocolRequest,
+	type SyncPublicationErrorCapture,
 } from "./sync-push-response-capture";
 
 import {
@@ -40,6 +40,14 @@ const compatibility = getCompatibility();
 
 const DEMO_REPOSITORY_ID = "00000000-0000-4000-8000-000000000002";
 const SECONDARY_REPOSITORY_ID = "00000000-0000-4000-8000-000000000005";
+function requestHeader(request: Request, name: string): string | null {
+	const lowerName = name.toLowerCase();
+	return (
+		Object.entries(request.headers()).find(
+			([headerName]) => headerName.toLowerCase() === lowerName,
+		)?.[1] ?? null
+	);
+}
 export type SyncScenario =
 	| "navigation"
 	| "editing"
@@ -71,10 +79,14 @@ export async function createSyncFixture({
 		isRecovered: () => boolean;
 		message: string;
 	}> = [];
-	const transientPushRecovery = createTransientPushRecoveryTracker();
+	const transientPublicationRecovery =
+		createTransientPublicationRecoveryTracker();
 	const localRequestSources = new WeakMap<Request, string>();
-	const localPushCaptures = new WeakMap<Request, SyncPushErrorCapture>();
-	let localPushCaptureEnabled = false;
+	const localPublicationCaptures = new WeakMap<
+		Request,
+		SyncPublicationErrorCapture
+	>();
+	let localPublicationCaptureEnabled = false;
 	const offlineContexts = createTrackedOfflineContexts<BrowserContext>();
 	const appOrigin = baseURL ? new URL(baseURL).origin : null;
 	const setContextOffline = (context: BrowserContext, offline: boolean) =>
@@ -115,8 +127,8 @@ export async function createSyncFixture({
 				const url = request.url();
 				if (
 					offlineContexts.has(context) ||
-					!localPushCaptureEnabled ||
-					!isSyncPushProtocolRequest(request.method(), url)
+					!localPublicationCaptureEnabled ||
+					!isSyncPublicationProtocolRequest(request.method(), url)
 				) {
 					await route.continue();
 					return;
@@ -141,15 +153,14 @@ export async function createSyncFixture({
 				}
 
 				if (upstream.status() === 503) {
-					// This interception is limited to the small protocol push endpoint.
-					// route.fetch allocates the upstream APIResponse; captureSyncPushError
-					// bounds classification and retains only its safe error code. Blob and
-					// streaming sync lanes still use route.continue() unchanged.
-					const capture = await captureSyncPushError(upstream);
+					// Inspect publication errors only; the helper classifies a response
+					// only when its JSON body fits the configured bound. Request bodies
+					// remain opaque and both routes retain their normal protocol path.
+					const capture = await captureSyncPublicationError(upstream);
 					// Route.request(), page request events, and Response.request() resolve
 					// to the same Playwright Request wrapper, so exact object identity avoids
 					// retaining request bytes or risking a nearby retry's error code.
-					localPushCaptures.set(request, capture);
+					localPublicationCaptures.set(request, capture);
 					localSyncProxyNotes.push(
 						`503 ${url}: ${capture.errorCode ? `error.code=${capture.errorCode}` : (capture.bodyIssue ?? "response body unclassified")}`,
 					);
@@ -162,15 +173,20 @@ export async function createSyncFixture({
 						error,
 						request.failure()?.errorText ?? null,
 					);
-					const capture = localPushCaptures.get(request) ?? null;
-					localPushCaptures.delete(request);
+					const capture = localPublicationCaptures.get(request) ?? null;
+					localPublicationCaptures.delete(request);
 					if (!canceled) throw error;
 					if (upstream.status() === 503) {
-						const observation = transientPushRecovery.observe({
+						const observation = transientPublicationRecovery.observe({
 							source:
 								localRequestSources.get(request) ??
 								`unattributed-${randomUUID()}`,
-							replicaId: request.headers()["lix-replica-id"] ?? null,
+							replicaId: requestHeader(request, "lix-replica-id"),
+							sessionId: requestHeader(request, "lix-session-id"),
+							baselineLeaseId: requestHeader(
+								request,
+								"lix-native-baseline-lease",
+							),
 							method: request.method(),
 							url,
 							status: upstream.status(),
@@ -182,14 +198,14 @@ export async function createSyncFixture({
 								scenario === "history" ||
 								scenario === "conflicts")
 						)
-							transientPushRecovery.classifyCode(
+							transientPublicationRecovery.classifyCode(
 								observation,
 								capture.errorCode,
 							);
 					}
 					localSyncProxyNotes.push(
 						upstream.status() === 200
-							? `200 ${url}: client canceled while fulfilling the upstream push response; the server acknowledgement may have been lost`
+							? `200 ${url}: client canceled while fulfilling the upstream publication response; the server acknowledgement may have been lost`
 							: `${upstream.status()} ${url}: client canceled while fulfilling the upstream response`,
 					);
 					return;
@@ -510,7 +526,7 @@ export async function createSyncFixture({
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
-		const transientPushConsoleFailures: Array<{
+		const transientPublicationConsoleFailures: Array<{
 			source: string;
 			url: string;
 			message: string;
@@ -904,7 +920,7 @@ export async function createSyncFixture({
 			}
 		};
 		const observePage = (page: Page, label: string) => {
-			localPushCaptureEnabled = local;
+			localPublicationCaptureEnabled = local;
 			// Chromium can report a failed resource to the console after the
 			// context has come back online. Correlate the console message with
 			// a confirmed offline failure instead of sampling the current phase.
@@ -945,10 +961,7 @@ export async function createSyncFixture({
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
 				recoveredNetworkChange.started(request);
-				if (
-					request.method() === "POST" &&
-					request.url().endsWith("/sync/push")
-				) {
+				if (isSyncPublicationProtocolRequest(request.method(), request.url())) {
 					localRequestSources.set(request, label);
 				}
 				if (offlineContexts.has(page.context())) {
@@ -1032,15 +1045,15 @@ export async function createSyncFixture({
 						message: `${label} console: ${message.text()}`,
 					});
 				}
-				const transientPushNoise =
+				const transientPublicationNoise =
 					(scenario === "editing" ||
 						scenario === "history" ||
 						scenario === "conflicts") &&
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 503/i.test(message.text()) &&
-					message.location().url.endsWith("/sync/push");
-				if (transientPushNoise) {
-					transientPushConsoleFailures.push({
+					isSyncPublicationProtocolRequest("POST", message.location().url);
+				if (transientPublicationNoise) {
+					transientPublicationConsoleFailures.push({
 						source: label,
 						url: message.location().url,
 						message: `${label} console: ${message.text()}`,
@@ -1051,7 +1064,7 @@ export async function createSyncFixture({
 					!expectedCasNoise &&
 					!expectedOfflineNoise &&
 					networkChangeFailureId === null &&
-					!transientPushNoise
+					!transientPublicationNoise
 				) {
 					runtimeFailures.push(`${label} console: ${message.text()}`);
 				}
@@ -1077,7 +1090,7 @@ export async function createSyncFixture({
 					unreadableBlobLaneResponses.delete(request);
 				}
 				if (request.url().includes("/lix/v1/")) {
-					// Reconciliation cancels an obsolete in-flight long poll or push after
+					// Reconciliation cancels an obsolete in-flight long poll or publication after
 					// another request wins the ref CAS. Final convergence assertions prove
 					// that the replacement request completed.
 					if (/abort|cancel/i.test(errorText)) {
@@ -1095,36 +1108,45 @@ export async function createSyncFixture({
 				const url = response.url();
 				if (!/\/lix\/v1\/[^/]+\/sync\//.test(url)) return;
 				const responseRequest = response.request();
-				const localPushCapture =
+				const localPublicationCapture =
 					local &&
-					isSyncPushProtocolRequest(response.request().method(), url) &&
+					isSyncPublicationProtocolRequest(response.request().method(), url) &&
 					response.status() === 503
-						? (localPushCaptures.get(responseRequest) ?? null)
+						? (localPublicationCaptures.get(responseRequest) ?? null)
 						: null;
-				if (localPushCapture) localPushCaptures.delete(responseRequest);
-				const pushObservation = url.endsWith("/sync/push")
-					? transientPushRecovery.observe({
+				if (localPublicationCapture)
+					localPublicationCaptures.delete(responseRequest);
+				const publicationObservation = isSyncPublicationProtocolRequest(
+					response.request().method(),
+					url,
+				)
+					? transientPublicationRecovery.observe({
 							source: label,
-							replicaId: response.request().headers()["lix-replica-id"] ?? null,
+							replicaId: requestHeader(responseRequest, "lix-replica-id"),
+							sessionId: requestHeader(responseRequest, "lix-session-id"),
+							baselineLeaseId: requestHeader(
+								responseRequest,
+								"lix-native-baseline-lease",
+							),
 							method: response.request().method(),
 							url,
 							status: response.status(),
 							body: response.request().postDataBuffer(),
 						})
 					: undefined;
-				if (local && pushObservation?.status === 503) {
+				if (local && publicationObservation?.status === 503) {
 					if (
 						scenario === "editing" ||
 						scenario === "history" ||
 						scenario === "conflicts"
 					)
-						transientPushRecovery.classifyCode(
-							pushObservation,
-							localPushCapture?.errorCode,
+						transientPublicationRecovery.classifyCode(
+							publicationObservation,
+							localPublicationCapture?.errorCode,
 						);
-					if (!localPushCapture) {
+					if (!localPublicationCapture) {
 						localSyncProxyNotes.push(
-							`503 ${url}: no bounded local proxy body capture matched the exact push request`,
+							`503 ${url}: no bounded local proxy body capture matched the exact publication request`,
 						);
 					}
 				}
@@ -1195,38 +1217,29 @@ export async function createSyncFixture({
 					const failureRecorded = !pendingMergeReplay;
 					if (
 						failureRecorded &&
-						(!pushObservation || pushObservation.status !== 503)
+						(!publicationObservation || publicationObservation.status !== 503)
 					)
 						syncFailures.push(failure);
-					if (failureRecorded && url.endsWith("/sync/push")) {
-						if (local && pushObservation?.status === 503) {
-							// The local proxy already classified this bounded body before the
-							// browser received it. Chromium may not retain the response body.
-						} else {
-							const detail = response
-								.text()
-								.then((body) => {
-									syncFailureDetails.push(
-										`${failure}: ${body.slice(0, 2_000)}`,
-									);
-									if (
-										pushObservation?.status === 503 &&
-										(scenario === "editing" ||
-											scenario === "history" ||
-											scenario === "conflicts")
-									)
-										transientPushRecovery.classify(pushObservation, body);
-								})
-								.catch((error: unknown) => {
-									syncFailureDetails.push(
-										`${failure}: unreadable response: ${String(error)}`,
-									);
-								});
-							pendingSyncFailureDetails.add(detail);
-							void detail.finally(() =>
-								pendingSyncFailureDetails.delete(detail),
+					if (failureRecorded && publicationObservation?.status === 503) {
+						const detail = (async () => {
+							const capture =
+								localPublicationCapture ??
+								(await captureSyncPublicationError(response));
+							if (
+								scenario === "editing" ||
+								scenario === "history" ||
+								scenario === "conflicts"
+							)
+								transientPublicationRecovery.classifyCode(
+									publicationObservation,
+									capture.errorCode,
+								);
+							syncFailureDetails.push(
+								`${failure}: ${capture.errorCode ?? capture.bodyIssue ?? "response body unclassified"}`,
 							);
-						}
+						})();
+						pendingSyncFailureDetails.add(detail);
+						void detail.finally(() => pendingSyncFailureDetails.delete(detail));
 					}
 					if (
 						response.status() === 409 &&
@@ -2761,16 +2774,16 @@ export async function createSyncFixture({
 					contentType: "application/json",
 				});
 			}
-			const recoveredPushes = transientPushRecovery.recovered();
+			const recoveredPublications = transientPublicationRecovery.recovered();
 			const recoveredConsoleCounts = new Map<string, number>();
-			for (const push of recoveredPushes) {
-				const key = JSON.stringify([push.source, push.url]);
+			for (const publication of recoveredPublications) {
+				const key = JSON.stringify([publication.source, publication.url]);
 				recoveredConsoleCounts.set(
 					key,
 					(recoveredConsoleCounts.get(key) ?? 0) + 1,
 				);
 			}
-			const unresolvedConsoleFailures = transientPushConsoleFailures
+			const unresolvedConsoleFailures = transientPublicationConsoleFailures
 				.filter((failure) => {
 					const key = JSON.stringify([failure.source, failure.url]);
 					const recovered = recoveredConsoleCounts.get(key) ?? 0;
@@ -2781,7 +2794,7 @@ export async function createSyncFixture({
 				.map((failure) => failure.message);
 			const unresolvedSyncFailures = [
 				...syncFailures,
-				...transientPushRecovery.failures(),
+				...transientPublicationRecovery.failures(),
 				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
 			];
@@ -2801,8 +2814,8 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						syncFailureDetails,
-						recoveredTransientPushFailures: recoveredPushes.map(
-							(push) => `${push.status} ${push.url}`,
+						recoveredTransientPublicationFailures: recoveredPublications.map(
+							(publication) => `${publication.status} ${publication.url}`,
 						),
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
