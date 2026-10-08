@@ -57,8 +57,6 @@ void test("a different payload, page, endpoint, or identity does not recover pub
 		response(200, { source: "left" }),
 		response(200, { replicaId: "replica-b" }),
 		response(200, { sessionId: "session-b" }),
-		response(200, { baselineLeaseId: null }),
-		response(200, { baselineLeaseId: "lease-b" }),
 		response(200, { url: pushUrl.replace("repository", "other") }),
 		response(200, { url: retainedBodiesUrl }),
 		response(409),
@@ -67,6 +65,40 @@ void test("a different payload, page, endpoint, or identity does not recover pub
 		tracker.classify(tracker.observe(response(503)), storageFailure);
 		tracker.observe(replacement);
 		assert.deepEqual(tracker.failures(), [`503 ${pushUrl}`]);
+	}
+});
+
+void test("a renewed or missing read lease does not change publication identity", () => {
+	for (const url of [pushUrl, retainedBodiesUrl]) {
+		for (const [failedLease, successfulLease] of [
+			["lease-a", "lease-b"],
+			["lease-a", null],
+			[null, "lease-b"],
+		] as const) {
+			const tracker = createTransientPublicationRecoveryTracker();
+			const failed = tracker.observe(
+				response(503, { url, baselineLeaseId: failedLease }),
+			);
+			tracker.classify(failed, storageFailure);
+			const successful = tracker.observe(
+				response(200, { url, baselineLeaseId: successfulLease }),
+			);
+			assert.equal(failed.baselineLeaseId, failedLease);
+			assert.equal(successful.baselineLeaseId, successfulLease);
+			assert.deepEqual(tracker.failures(), []);
+			const [recovered] = tracker.recovered();
+			assert.equal(recovered?.baselineLeasePresent, failedLease !== null);
+			assert.equal(
+				recovered?.baselineLeaseChanged,
+				failedLease !== successfulLease,
+			);
+			assert.equal(
+				recovered?.successBaselineLeasePresent,
+				successfulLease !== null,
+			);
+			assert.equal(recovered?.successSequence, 2);
+			assert.equal(Object.hasOwn(recovered ?? {}, "baselineLeaseId"), false);
+		}
 	}
 });
 
@@ -80,6 +112,9 @@ void test("a missing optional baseline lease does not prevent exact publication 
 		tracker.observe(response(200, { url, baselineLeaseId: null }));
 		assert.deepEqual(tracker.failures(), []);
 		assert.equal(tracker.recovered().length, 1);
+		assert.equal(tracker.recovered()[0]?.baselineLeasePresent, false);
+		assert.equal(tracker.recovered()[0]?.baselineLeaseChanged, false);
+		assert.equal(tracker.recovered()[0]?.successBaselineLeasePresent, false);
 	}
 });
 

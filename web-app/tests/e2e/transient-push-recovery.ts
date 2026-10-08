@@ -3,7 +3,7 @@ type PublicationResponse = {
 	source: string;
 	replicaId: string | null;
 	sessionId: string | null;
-	/** Both publication routes allow omission; when present it scopes replay identity. */
+	/** Captured for diagnostics; publication routes do not validate this read lease. */
 	baselineLeaseId: string | null;
 	method: string;
 	url: string;
@@ -20,6 +20,23 @@ type Observation = Omit<PublicationResponse, "body"> & {
 	body: Buffer | null;
 	sequence: number;
 	key: string | null;
+};
+
+type TrackedFailure = {
+	observation: Observation;
+	typed: boolean;
+	successSequence: number | null;
+	successBaselineLeaseId: string | null;
+};
+
+type RecoveredPublication = Omit<
+	Observation,
+	"baselineLeaseId" | "body" | "key"
+> & {
+	baselineLeasePresent: boolean;
+	baselineLeaseChanged: boolean;
+	successBaselineLeasePresent: boolean;
+	successSequence: number;
 };
 
 function publicationKey(response: PublicationResponse): string | null {
@@ -48,7 +65,6 @@ function publicationKey(response: PublicationResponse): string | null {
 		response.source,
 		response.replicaId,
 		response.sessionId,
-		response.baselineLeaseId,
 		response.url,
 	]);
 }
@@ -73,13 +89,14 @@ function isStorageUnavailable(body: string): boolean {
 /** A storage 503 is recovered only by an exact later publication replay. */
 export function createTransientPublicationRecoveryTracker() {
 	let sequence = 0;
-	const failures: Array<{
-		observation: Observation;
-		typed: boolean;
-		successSequence: number | null;
-	}> = [];
+	const failures: TrackedFailure[] = [];
 	let retainedRequestBytes = 0;
 	let untrackedFailureCount = 0;
+	const isRecovered = (failure: TrackedFailure) =>
+		failure.typed &&
+		failure.observation.key !== null &&
+		failure.successSequence !== null &&
+		failure.successSequence > failure.observation.sequence;
 	const classifyCode = (observation: Observation, errorCode: unknown) => {
 		const failure = failures.find((entry) => entry.observation === observation);
 		if (failure) failure.typed = errorCode === "LIX_STORAGE_IO_UNAVAILABLE";
@@ -113,6 +130,7 @@ export function createTransientPublicationRecoveryTracker() {
 						failure.observation.body?.equals(observation.body)
 					) {
 						failure.successSequence = observation.sequence;
+						failure.successBaselineLeaseId = observation.baselineLeaseId;
 						retainedRequestBytes -= failure.observation.body.byteLength;
 						failure.observation.body = null;
 					}
@@ -136,6 +154,7 @@ export function createTransientPublicationRecoveryTracker() {
 						observation,
 						typed: false,
 						successSequence: null,
+						successBaselineLeaseId: null,
 					});
 					retainedRequestBytes += observation.body?.byteLength ?? 0;
 				}
@@ -154,20 +173,27 @@ export function createTransientPublicationRecoveryTracker() {
 			classifyCode(observation, errorCode);
 		},
 		recovered() {
-			return failures
-				.filter(
-					({ observation, typed, successSequence }) =>
-						typed &&
-						observation.key &&
-						successSequence !== null &&
-						successSequence > observation.sequence,
-				)
-				.map(({ observation }) => observation);
+			return failures.filter(isRecovered).map(
+				({ observation, successSequence, successBaselineLeaseId }) =>
+					({
+						source: observation.source,
+						replicaId: observation.replicaId,
+						sessionId: observation.sessionId,
+						method: observation.method,
+						url: observation.url,
+						status: observation.status,
+						sequence: observation.sequence,
+						baselineLeasePresent: observation.baselineLeaseId !== null,
+						baselineLeaseChanged:
+							observation.baselineLeaseId !== successBaselineLeaseId,
+						successBaselineLeasePresent: successBaselineLeaseId !== null,
+						successSequence: successSequence!,
+					}) satisfies RecoveredPublication,
+			);
 		},
 		failures() {
-			const recovered = new Set(this.recovered());
 			const unresolved = failures
-				.filter(({ observation }) => !recovered.has(observation))
+				.filter((failure) => !isRecovered(failure))
 				.map(({ observation }) => `${observation.status} ${observation.url}`);
 			if (untrackedFailureCount > 0)
 				unresolved.push(
