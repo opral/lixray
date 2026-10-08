@@ -6,6 +6,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export type EntityKind = "file" | "directory";
 
+export type EntityRouteLookupPolicy = "authoritative" | "partial_replica";
+
+export type EntityRouteLookup =
+	| { readonly kind: "found"; readonly entity: { id: string; path: string } }
+	| { readonly kind: "missing" }
+	| { readonly kind: "pending" };
+
+export const ENTITY_ROUTE_METADATA_WAIT_MS = 15_000;
+
 /** The verb an entity URL carries: /file/… for files, /folder/… for folders. */
 export function entityUrlVerb(kind: EntityKind): "file" | "folder" {
 	return kind === "directory" ? "folder" : "file";
@@ -28,6 +37,80 @@ export async function findLixEntity(
 	return row && typeof row.id === "string" && typeof row.path === "string"
 		? { id: row.id, path: row.path }
 		: null;
+}
+
+/**
+ * Resolves an id-bearing route without treating a partial replica's local
+ * absence as authoritative deletion. A missing row on a partial replica is
+ * observed until its metadata arrives or the bounded attempt expires.
+ */
+export async function resolveLixEntityForRoute(
+	lix: Pick<Lix, "execute" | "observe">,
+	kind: EntityKind,
+	lookup: { id: string },
+	options: {
+		readonly policy: EntityRouteLookupPolicy;
+		readonly signal: AbortSignal;
+		readonly timeoutMs?: number;
+		onWaiting?: () => void;
+	},
+): Promise<EntityRouteLookup> {
+	options.signal.throwIfAborted();
+	const current = await findLixEntity(lix, kind, lookup);
+	options.signal.throwIfAborted();
+	if (current) return { kind: "found", entity: current };
+	if (options.policy === "authoritative") return { kind: "missing" };
+
+	const table = kind === "file" ? "lix_file" : "lix_directory";
+	const sql = `SELECT id, path FROM ${table} WHERE id = $1`;
+	options.onWaiting?.();
+	const observation = lix.observe(sql, [lookup.id], {
+		signal: options.signal,
+	});
+	const timeout = Symbol("entity-route-metadata-timeout");
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const waitForEntity = async () => {
+			for await (const event of observation) {
+				options.signal.throwIfAborted();
+				const entity = entityFromRows(event.result.rows, lookup.id);
+				if (entity) return entity;
+			}
+			options.signal.throwIfAborted();
+			return null;
+		};
+		const timedOut = new Promise<typeof timeout>((resolve) => {
+			timer = setTimeout(
+				() => resolve(timeout),
+				options.timeoutMs ?? ENTITY_ROUTE_METADATA_WAIT_MS,
+			);
+		});
+		const result = await Promise.race([waitForEntity(), timedOut]);
+		return result === timeout || result === null
+			? { kind: "pending" }
+			: { kind: "found", entity: result };
+	} finally {
+		if (timer !== undefined) clearTimeout(timer);
+		await observation.return?.();
+	}
+}
+
+function entityFromRows(
+	rows: readonly unknown[],
+	expectedId: string,
+): { id: string; path: string } | null {
+	for (const value of rows) {
+		if (!value || typeof value !== "object") continue;
+		const row = value as { id?: unknown; path?: unknown };
+		if (
+			typeof row.id === "string" &&
+			row.id === expectedId &&
+			typeof row.path === "string"
+		) {
+			return { id: row.id, path: row.path };
+		}
+	}
+	return null;
 }
 
 export function encodeEntityId(id: string): string {

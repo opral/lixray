@@ -10,6 +10,7 @@ import {
 	parseEntityUrlSplat,
 	entityFromRoute,
 	canonicalEntitySplat,
+	resolveLixEntityForRoute,
 	resolvePublishedEntity,
 	conversationUrlSplat,
 	canonicalConversationSplat,
@@ -17,9 +18,107 @@ import {
 	conversationRoutePath,
 	conversationFromRoute,
 } from "./entity-url.ts";
+import type { Lix } from "@lix-js/sdk";
 
 const uuid = "017f22e2-79b0-7cc3-98c4-dc0c0c07398f";
 const token = "AX8i4nmwfMOYxNwMDAc5jw";
+
+function routeLookupLix({
+	rows = [],
+	observedRows = [],
+	onObserve,
+}: {
+	rows?: readonly object[];
+	observedRows?: readonly (readonly object[])[];
+	onObserve?: (
+		sql: string,
+		params: readonly unknown[],
+		signal: AbortSignal | undefined,
+		emit: (rows: readonly object[]) => void,
+	) => void;
+} = {}): Pick<Lix, "execute" | "observe"> & {
+	readonly observeReturnCount: number;
+} {
+	let returnCount = 0;
+	const lix = {
+		execute: async () => ({ rows: [...rows] }),
+		observe: (
+			sql: string,
+			params: unknown[] = [],
+			options: { signal?: AbortSignal } = {},
+		) => {
+			let index = 0;
+			let closed = false;
+			const observed: (readonly object[])[] = [...observedRows];
+			let waiter:
+				| ((
+						result: IteratorResult<{ result: { rows: readonly object[] } }>,
+				  ) => void)
+				| undefined;
+			const emit = (nextRows: readonly object[]) => {
+				if (closed) return;
+				if (waiter) {
+					const resolve = waiter;
+					waiter = undefined;
+					resolve({ done: false, value: { result: { rows: nextRows } } });
+				} else {
+					observed.push(nextRows);
+				}
+			};
+			const iterator: AsyncIterableIterator<{
+				result: { rows: readonly object[] };
+			}> = {
+				[Symbol.asyncIterator]() {
+					return this;
+				},
+				next() {
+					if (index < observed.length) {
+						return Promise.resolve({
+							done: false as const,
+							value: { result: { rows: observed[index++]! } },
+						});
+					}
+					if (closed)
+						return Promise.resolve({ done: true as const, value: undefined });
+					return new Promise((resolve) => {
+						waiter = resolve;
+					});
+				},
+				async return() {
+					returnCount++;
+					closed = true;
+					waiter?.({ done: true, value: undefined });
+					waiter = undefined;
+					return { done: true as const, value: undefined };
+				},
+				throw(error?: unknown) {
+					return Promise.reject(
+						error instanceof Error
+							? error
+							: new Error("Observation failed", { cause: error }),
+					);
+				},
+			};
+			onObserve?.(sql, params, options.signal, emit);
+			options.signal?.addEventListener(
+				"abort",
+				() => {
+					void iterator.return?.();
+				},
+				{ once: true },
+			);
+			return iterator;
+		},
+	};
+	return {
+		...lix,
+		get observeReturnCount() {
+			return returnCount;
+		},
+	} as unknown as Pick<Lix, "execute" | "observe"> & {
+		readonly observeReturnCount: number;
+	};
+}
 
 void test("UUID bytes use canonical unpadded Base64url across runtimes", () => {
 	assert.equal(encodeEntityId(uuid), token);
@@ -133,6 +232,102 @@ void test("folder routes resolve by ID and the /dir alias is absent", () => {
 		entityFromRoute(`/@opral/other/file/${token}`, "opral", "monorepo"),
 		null,
 	);
+});
+
+void test("partial file and folder routes wait for the exact ID to arrive", async () => {
+	for (const kind of ["file", "directory"] as const) {
+		let waiting = false;
+		const expectedSql = `SELECT id, path FROM lix_${kind} WHERE id = $1`;
+		const lix = routeLookupLix({
+			observedRows: [[], [{ id: `${uuid}-other`, path: "/wrong.md" }]],
+			onObserve(sql, params, _signal, emit) {
+				assert.equal(sql, expectedSql);
+				assert.deepEqual(params, [uuid]);
+				setTimeout(() => emit([{ id: uuid, path: `/${kind}.md` }]), 0);
+			},
+		});
+		const result = await resolveLixEntityForRoute(
+			lix,
+			kind,
+			{ id: uuid },
+			{
+				policy: "partial_replica",
+				signal: new AbortController().signal,
+				onWaiting: () => {
+					waiting = true;
+				},
+			},
+		);
+		assert.equal(waiting, true);
+		assert.deepEqual(result, {
+			kind: "found",
+			entity: { id: uuid, path: `/${kind}.md` },
+		});
+		assert.ok(lix.observeReturnCount > 0, "resolved observers are closed");
+	}
+});
+
+void test("authoritative absence remains definitive and never starts an observer", async () => {
+	const lix = routeLookupLix({
+		onObserve() {
+			assert.fail("authoritative absence must not wait on an observer");
+		},
+	});
+	const result = await resolveLixEntityForRoute(
+		lix,
+		"file",
+		{ id: uuid },
+		{ policy: "authoritative", signal: new AbortController().signal },
+	);
+	assert.deepEqual(result, { kind: "missing" });
+});
+
+void test("an already materialized entity resolves without opening an observer", async () => {
+	const lix = routeLookupLix({ rows: [{ id: uuid, path: "/ready.md" }] });
+	const result = await resolveLixEntityForRoute(
+		lix,
+		"file",
+		{ id: uuid },
+		{ policy: "partial_replica", signal: new AbortController().signal },
+	);
+	assert.deepEqual(result, {
+		kind: "found",
+		entity: { id: uuid, path: "/ready.md" },
+	});
+	assert.equal(lix.observeReturnCount, 0);
+});
+
+void test("a missing partial-replica entity has a bounded retryable result", async () => {
+	const lix = routeLookupLix({ observedRows: [[]] });
+	const result = await resolveLixEntityForRoute(
+		lix,
+		"directory",
+		{ id: uuid },
+		{
+			policy: "partial_replica",
+			signal: new AbortController().signal,
+			timeoutMs: 5,
+		},
+	);
+	assert.deepEqual(result, { kind: "pending" });
+	assert.ok(lix.observeReturnCount > 0, "timed out observer is closed");
+});
+
+void test("navigation abort closes a pending partial-replica lookup", async () => {
+	const controller = new AbortController();
+	const lix = routeLookupLix({
+		onObserve() {
+			setTimeout(() => controller.abort(), 0);
+		},
+	});
+	const lookup = resolveLixEntityForRoute(
+		lix,
+		"file",
+		{ id: uuid },
+		{ policy: "partial_replica", signal: controller.signal },
+	);
+	await assert.rejects(lookup, { name: "AbortError" });
+	assert.ok(lix.observeReturnCount > 0, "aborted observer is closed");
 });
 
 void test("published lookup distinguishes unavailable items from service failures", async (t) => {

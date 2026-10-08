@@ -1,9 +1,10 @@
 import { readRepositoryRoute } from "~/lib/repository-route-lifecycle";
 import {
 	canonicalEntitySplat,
-	findLixEntity,
 	parseEntityUrlSplat,
+	resolveLixEntityForRoute,
 } from "~/lib/entity-url";
+import { EntityRoutePending } from "~/components/entity-route-pending";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { AtelierDocumentCommandNotCompletedError } from "@opral/atelier";
@@ -16,6 +17,7 @@ import {
 	useRepositoryAtelierInstance,
 	useRepositoryFileOpenTrace,
 	useRepositoryDefaultBranchId,
+	useRepositoryEntityRouteLookupPolicy,
 } from "~/components/repository-atelier";
 import {
 	atelierBranchSearch,
@@ -34,6 +36,7 @@ function RepositoryFileRoute() {
 	const atelier = useRepositoryAtelierInstance();
 	const fileOpenTrace = useRepositoryFileOpenTrace();
 	const defaultBranchId = useRepositoryDefaultBranchId();
+	const lookupPolicy = useRepositoryEntityRouteLookupPolicy();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
 	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
@@ -48,6 +51,10 @@ function RepositoryFileRoute() {
 		id: string;
 		path: string;
 	} | null>(null);
+	const [pendingEntity, setPendingEntity] = useState<
+		"waiting" | "retry" | null
+	>(null);
+	const [lookupRetry, setLookupRetry] = useState(0);
 
 	// The URL path is descriptive. Rewriting it must not restart (and abort)
 	// the open command for the same stable file ID.
@@ -93,16 +100,37 @@ function RepositoryFileRoute() {
 		const controller = beginRouteNavigation();
 		fileOpenTrace?.ensureRoute(entityId);
 		let requestedPath = "";
-		void readRepositoryRoute(controller.signal, () =>
-			fileOpenTrace
-				? fileOpenTrace.run(() =>
-						findLixEntity(atelier.lix, "file", { id: entityId }),
-					)
-				: findLixEntity(atelier.lix, "file", { id: entityId }),
-		)
-			.then(async (entity) => {
+		let waitingForMetadata = false;
+		setPendingEntity(null);
+		void readRepositoryRoute(controller.signal, () => {
+			const resolve = () =>
+				resolveLixEntityForRoute(
+					atelier.lix,
+					"file",
+					{ id: entityId },
+					{
+						policy: lookupPolicy,
+						signal: controller.signal,
+						onWaiting: () => {
+							waitingForMetadata = true;
+							setPendingEntity("waiting");
+						},
+					},
+				);
+			return fileOpenTrace ? fileOpenTrace.run(resolve) : resolve();
+		})
+			.then(async (resolution) => {
 				if (controller.signal.aborted) return;
-				if (!entity) throw new Error("Entity not found");
+				waitingForMetadata = false;
+				if (resolution.kind === "pending") {
+					controller.abort();
+					fileOpenTrace?.cancel();
+					setPendingEntity("retry");
+					return;
+				}
+				if (resolution.kind === "missing") throw new Error("Entity not found");
+				setPendingEntity(null);
+				const entity = resolution.entity;
 				requestedPath = entity.path;
 				fileOpenTrace?.resolved(entityId, requestedPath);
 				const open = async (retriesLeft: number): Promise<void> => {
@@ -144,6 +172,14 @@ function RepositoryFileRoute() {
 			})
 			.catch((error: unknown) => {
 				if (controller.signal.aborted) return;
+				if (waitingForMetadata && lookupPolicy === "partial_replica") {
+					controller.abort();
+					fileOpenTrace?.cancel();
+					setPendingEntity("retry");
+					console.error("Unable to resolve the requested Atelier file", error);
+					return;
+				}
+				setPendingEntity(null);
 				// Atelier clears onReady when its workspace unmounts and supplies a
 				// new handle when it remounts. This handle has been disposed, so a
 				// retry on it would fail again. Leave the route pending; the new
@@ -190,6 +226,8 @@ function RepositoryFileRoute() {
 		defaultBranchId,
 		entityId,
 		fileOpenTrace,
+		lookupPolicy,
+		lookupRetry,
 		consumeShellNavigation,
 		markRouteSynced,
 		namespace,
@@ -197,5 +235,23 @@ function RepositoryFileRoute() {
 		repository,
 	]);
 
-	return null;
+	if (!pendingEntity) return null;
+	return (
+		<EntityRoutePending
+			kind="file"
+			retryable={pendingEntity === "retry"}
+			onRetry={() => setLookupRetry((attempt) => attempt + 1)}
+			onReturnHome={() => {
+				fileOpenTrace?.cancel();
+				void navigate({
+					to: "/@{$namespace}/$repository",
+					params: { namespace, repository },
+					search:
+						branch && defaultBranchId
+							? atelierBranchSearch(branch, defaultBranchId)
+							: {},
+				});
+			}}
+		/>
+	);
 }
