@@ -3,6 +3,24 @@ import type { BrowserContext, Page } from "@playwright/test";
 /** Read-only RPC probes on the existing session; no second engine or storage open. */
 export async function installSyncDiagnostics(context: BrowserContext) {
 	await context.addInitScript(() => {
+		// This callback is serialized into the page, so keep the predicate here
+		// and exercise this initializer directly in its regression test.
+		const isTerminalResponse = (
+			value: unknown,
+		): value is {
+			id: number;
+			ok: boolean;
+			value?: unknown;
+			error?: unknown;
+		} => {
+			if (!value || typeof value !== "object") return false;
+			const response = value as { id?: unknown; ok?: unknown; kind?: unknown };
+			return (
+				typeof response.id === "number" &&
+				typeof response.ok === "boolean" &&
+				!Object.hasOwn(response, "kind")
+			);
+		};
 		type DiagnosticPort = {
 			postMessage(message: unknown): void;
 			addEventListener(
@@ -86,7 +104,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							  }
 							| undefined;
 						recordResponse(portIndex, response);
-						if (typeof response?.id === "number" && requests.has(response.id)) {
+						if (isTerminalResponse(response) && requests.has(response.id)) {
 							const operation = requests.get(response.id);
 							requests.delete(response.id);
 							record({ operation, response });
@@ -171,7 +189,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 				  }
 				| undefined,
 		) => {
-			if (typeof response?.id === "number")
+			if (isTerminalResponse(response))
 				pendingOperations.delete(`${portIndex}:${response.id}`);
 			recordLifecycle({
 				direction: "receive",
@@ -262,10 +280,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						}>,
 					) => {
 						recordResponse(portIndex, event.data);
-						if (
-							typeof event.data?.id !== "number" ||
-							!requests.has(event.data.id)
-						)
+						if (!isTerminalResponse(event.data) || !requests.has(event.data.id))
 							return;
 						const operation = requests.get(event.data.id);
 						requests.delete(event.data.id);
@@ -295,7 +310,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						error?: unknown;
 					}>,
 				) => {
-					if (event.data.id === id)
+					if (isTerminalResponse(event.data) && event.data.id === id)
 						finish(
 							event.data.ok ? event.data.value : { error: event.data.error },
 						);
