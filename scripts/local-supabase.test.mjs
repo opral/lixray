@@ -66,6 +66,16 @@ test("isolated Supabase workdirs copy only local project inputs and assign uniqu
 	const settings = getLocalSupabaseSettings({
 		env: { LIXRAY_SUPABASE_WORKDIR: project.workdir },
 	});
+	assert.throws(
+		() =>
+			getLocalSupabaseSettings({
+				env: {
+					LIXRAY_SUPABASE_WORKDIR: project.workdir,
+					LIXRAY_SUPABASE_PROJECT_ID: "lixray",
+				},
+			}),
+		/match/,
+	);
 	assert.match(project.projectId, /^lixray_ci_/);
 	assert.equal(settings.projectId, project.projectId);
 	assert.equal(settings.apiUrl, project.apiUrl);

@@ -125,10 +125,18 @@ export function getLocalSupabaseSettings({
 	const projectId = readTomlString(config, "", "project_id");
 	if (!projectId)
 		throw new Error(`Supabase project_id is missing in ${configPath}.`);
+	if (
+		env.LIXRAY_SUPABASE_PROJECT_ID &&
+		env.LIXRAY_SUPABASE_PROJECT_ID !== projectId
+	) {
+		throw new Error(
+			`Supabase project ID in the environment does not match ${configPath}.`,
+		);
+	}
 	const apiPort = readTomlNumber(config, "api", "port") ?? 54321;
 	return {
 		workdir,
-		projectId: env.LIXRAY_SUPABASE_PROJECT_ID || projectId,
+		projectId,
 		apiUrl: env.LIXRAY_SUPABASE_API_URL || `http://127.0.0.1:${apiPort}`,
 	};
 }
