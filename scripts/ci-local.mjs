@@ -132,6 +132,7 @@ await cp(join(root, "vendor/lix/packages/storage-opfs/dist"), join(prepared, "st
 const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
 const webImage = `lixray-web:ci-local-${revision.slice(0, 12)}`;
 run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile", "-t", webImage,
+	...(process.env.LIXRAY_DOCKER_BUILD_NETWORK ? ["--network", process.env.LIXRAY_DOCKER_BUILD_NETWORK] : []),
 	"--build-arg", "VITE_SUPABASE_URL=https://example.invalid",
 	"--build-arg", "VITE_SUPABASE_KEY=ci-public-placeholder",
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
