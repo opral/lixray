@@ -93,7 +93,16 @@ function waitForResource<T>(
 	if (!signal) return resourcePromise;
 	return new Promise<T>((resolve, reject) => {
 		const abort = () => reject(abortError(signal));
+		if (signal.aborted) {
+			abort();
+			return;
+		}
 		signal.addEventListener("abort", abort, { once: true });
+		if (signal.aborted) {
+			signal.removeEventListener("abort", abort);
+			abort();
+			return;
+		}
 		void resourcePromise.then(resolve, reject).finally(() => {
 			signal.removeEventListener("abort", abort);
 		});

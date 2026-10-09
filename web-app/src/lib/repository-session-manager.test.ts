@@ -130,6 +130,53 @@ void test("preserves the caller's exact abort reason for a pending acquisition",
 	await new Promise((resolve) => setTimeout(resolve, 10));
 });
 
+void test("observes cancellation that occurs synchronously inside open", async () => {
+	const controller = new AbortController();
+	let finishOpen!: (resource: { close: () => Promise<void> }) => void;
+	let openAbortReason: unknown;
+	const reason = "sync abort during open";
+	const resource = { close: async () => {} };
+	const acquisition = acquireManagedRepositoryResource(
+		"repository-sync-open-abort",
+		(openSignal): Promise<typeof resource> => {
+			controller.abort(reason);
+			return new Promise((resolve, reject) => {
+				finishOpen = resolve;
+				openSignal.addEventListener(
+					"abort",
+					() => {
+						openAbortReason = openSignal.reason;
+						reject(openSignal.reason);
+					},
+					{ once: true },
+				);
+			});
+		},
+		{ signal: controller.signal },
+	);
+	const outcome = await Promise.race([
+		acquisition.then(
+			(lease) => ({ kind: "acquired" as const, lease }),
+			(error: unknown) => ({ kind: "rejected" as const, error }),
+		),
+		new Promise<{ kind: "pending" }>((resolve) =>
+			setTimeout(() => resolve({ kind: "pending" }), 20),
+		),
+	]);
+
+	if (outcome.kind === "pending") {
+		finishOpen(resource);
+		(await acquisition).release();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.fail("acquisition remained pending after its signal was aborted");
+	}
+	assert.equal(outcome.kind, "rejected");
+	if (outcome.kind === "rejected") assert.equal(outcome.error, reason);
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.ok(openAbortReason instanceof DOMException);
+	assert.equal(openAbortReason.name, "AbortError");
+});
+
 function abortError(signal: AbortSignal): Error {
 	return signal.reason instanceof Error
 		? signal.reason
