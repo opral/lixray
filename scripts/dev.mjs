@@ -201,10 +201,14 @@ function handleSignal(signal) {
 function stopDatabase() {
 	if (databaseStopped) return;
 	databaseStopped = true;
-	spawnSync(pnpm, ["--dir", "database", "stop"], {
+	const result = spawnSync(process.execPath, ["scripts/local-supabase.mjs", "stop"], {
 		cwd: repositoryRoot,
 		stdio: "inherit",
 	});
+	if (result.error) throw result.error;
+	if (result.status !== 0) {
+		throw new Error(`Could not stop the selected local Supabase project (${result.status ?? result.signal}).`);
+	}
 }
 
 function stopCompose() {
@@ -276,8 +280,8 @@ function localSupabaseStatus() {
 	try {
 		return parseEnv(
 			execFileSync(
-				pnpm,
-				["--dir", "database", "exec", "supabase", "status", "-o", "env"],
+				process.execPath,
+				["scripts/local-supabase.mjs", "status", "-o", "env"],
 				{
 					cwd: repositoryRoot,
 					encoding: "utf8",

@@ -1,13 +1,15 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { getLocalSupabaseSettings } from "../../scripts/local-supabase.mjs";
 
 // Addresses only the local CLI container; never uses linked project credentials.
+const { projectId } = getLocalSupabaseSettings();
 execFileSync(
 	"docker",
 	[
 		"exec",
 		"-i",
-		"supabase_db_lixray",
+		`supabase_db_${projectId}`,
 		"psql",
 		"-X",
 		"-U",
