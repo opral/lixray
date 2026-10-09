@@ -48,6 +48,16 @@ void test("preserves unrelated repository opening errors", () => {
 	);
 });
 
+void test("explains a stalled server open without exposing its error message", () => {
+	assert.equal(
+		formatRepositoryOpenError({
+			code: "LIX_OPEN_STALLED",
+			message: "private storage detail",
+		}),
+		"The server stopped making progress while opening this repository. Its storage is still retained. Please retry after the server recovers.",
+	);
+});
+
 void test("tells the user how to recover from an outdated repository owner", () => {
 	assert.equal(
 		formatRepositoryOpenError({

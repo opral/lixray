@@ -15,6 +15,9 @@ export function isRepositoryStorageInUse(caught: unknown): boolean {
 export function formatRepositoryOpenError(caught: unknown): string {
 	const message = getErrorMessage(caught);
 	const code = getErrorCode(caught);
+	if (code === "LIX_OPEN_STALLED") {
+		return "The server stopped making progress while opening this repository. Its storage is still retained. Please retry after the server recovers.";
+	}
 	if (isRepositoryLocalReplicaBroken(caught)) {
 		return "This device copy could not be opened. Reset from server to load a fresh copy.";
 	}
