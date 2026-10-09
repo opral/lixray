@@ -95,6 +95,7 @@ function waitForResource<T>(
 ): Promise<T> {
 	if (!signal) return resourcePromise;
 	return new Promise<T>((resolve, reject) => {
+		// eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- AbortSignal permits arbitrary reasons; match throwIfAborted exactly.
 		const abort = () => reject(abortError(signal));
 		if (signal.aborted) {
 			abort();

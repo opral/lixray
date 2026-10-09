@@ -146,6 +146,7 @@ void test("observes cancellation that occurs synchronously inside open", async (
 					"abort",
 					() => {
 						openAbortReason = openSignal.reason;
+						// eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- Exercise AbortSignal's arbitrary reason contract.
 						reject(openSignal.reason);
 					},
 					{ once: true },
