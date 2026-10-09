@@ -191,6 +191,37 @@ void test("recovery waits through transient admission 503 before retiring the re
 	});
 });
 
+void test("new server open states remain retryable before replica retirement", async () => {
+	for (const code of ["LIX_REPOSITORY_OPENING", "LIX_OPEN_DEADLINE_EXCEEDED"]) {
+		await withReplicaEnvironment(async () => {
+			let admissions = 0;
+			const result = await replaceRepositoryReplica({
+				source: "old",
+				failedName: "old",
+				url: new URL("https://example.test/lix/repository"),
+				headers: async () => ({}),
+				fetch: async (_input, init) => {
+					if (init?.method === "DELETE")
+						return new Response(null, { status: 204 });
+					if (init?.method === "POST") {
+						const body = JSON.parse(init.body as string) as {
+							replacementId: string;
+						};
+						return Response.json({ replicaId: body.replacementId });
+					}
+					admissions++;
+					if (admissions === 1)
+						return Response.json({ error: { code } }, { status: 503 });
+					return Response.json({ sessionId: "session" });
+				},
+			});
+			assert.match(result, /^old:replacement:/);
+			assert.equal(admissions, 2);
+			assert.equal(activeReplicaStorage("old"), result);
+		});
+	}
+});
+
 void test("terminal admission preserves safe diagnostics and leaves local routing untouched", async () => {
 	await withReplicaEnvironment(async () => {
 		let requests = 0;

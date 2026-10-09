@@ -347,6 +347,17 @@ export async function serverErrorEvents(
 	for (const [key, field] of [
 		["lix.error.source_code", "sourceCode"],
 		["lix.migration.phase", "migrationPhase"],
+		["lix.open.operation_id", "openOperationId"],
+		["lix.open.phase", "openPhase"],
+		["lix.open.failed_phase", "openFailurePhase"],
+		["lix.open.dependency", "openDependency"],
+		["lix.open.elapsed_ms", "openElapsedMs"],
+		["lix.open.idle_ms", "openIdleMs"],
+		["lix.open.rows", "openRows"],
+		["lix.open.bytes", "openBytes"],
+		["lix.open.completed_groups", "openCompletedGroups"],
+		["lix.open.from_format", "fromVersion"],
+		["lix.open.to_format", "toVersion"],
 		["lix.migration.from_version", "fromVersion"],
 		["lix.migration.to_version", "toVersion"],
 		["lix.migration.failure_reason", "failureReason"],
@@ -376,9 +387,11 @@ export async function serverErrorEvents(
 		["lix.payload.change_id", "changeId"],
 		["lix.payload.source_commit_id", "sourceCommitId"],
 	])
-		details[field!] = context[key!];
+		if (context[key!] !== undefined) details[field!] = context[key!];
 	if (httpStatus !== undefined) details.httpStatus = httpStatus;
 	for (const [key, field] of [
+		["lix.open.opener_retained", "openerRetained"],
+		["lix.open.request_deadline_exceeded", "requestDeadlineExceeded"],
 		["lix.error.retryable", "retryable"],
 		["lix.recovery.retry_exhausted", "admissionRetryExhausted"],
 		["lix.recovery.deadline_exceeded", "recoveryDeadlineExceeded"],

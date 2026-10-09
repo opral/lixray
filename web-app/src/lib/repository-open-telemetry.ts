@@ -179,6 +179,63 @@ export function repositoryOpenDiagnostics(
 	const details = candidate.details;
 	if (!details || typeof details !== "object") return result;
 	const fields = details as Record<string, unknown>;
+	const openPhases = [
+		"queued",
+		"checking_source",
+		"storage_initializing",
+		"storage_migrating",
+		"storage_publishing",
+		"engine_inspecting",
+		"engine_opening",
+		"engine_migrating",
+		"validating",
+		"publishing",
+		"ready",
+		"failed",
+	];
+	const openDependencies = [
+		"worker_queue",
+		"catalog_source",
+		"slatedb_open",
+		"authority_identity",
+		"engine",
+		"catalog_cas",
+		"none",
+		"current_slatedb_open",
+		"current_layout_marker_read",
+		"legacy_object_store_list",
+		"legacy_slatedb_open",
+		"legacy_slatedb_close",
+		"legacy_snapshot_read",
+		"migration_source_sequence_read",
+		"migration_source_sequence_write",
+		"migration_cursor_read",
+		"legacy_row_scan",
+		"migration_checkpoint_write",
+		"migration_publication_write",
+	];
+	for (const [key, allowed] of [
+		["openPhase", openPhases],
+		["openFailurePhase", openPhases],
+		["openDependency", openDependencies],
+	] as const) {
+		const value = fields[key];
+		if (typeof value === "string" && allowed.includes(value))
+			result[key] = value;
+	}
+	for (const key of [
+		"openElapsedMs",
+		"openIdleMs",
+		"openRows",
+		"openBytes",
+		"openCompletedGroups",
+	]) {
+		const value = parseBoundedPayloadCount(
+			fields[key],
+			Number.MAX_SAFE_INTEGER,
+		);
+		if (value !== undefined) result[key] = value;
+	}
 	if (candidate.code === WASM_ASSET_ERROR_CODE) {
 		// Accept both SDK error details and the already-normalized first-party
 		// diagnostic payload. Re-normalizing at the worker boundary must not
@@ -203,6 +260,8 @@ export function repositoryOpenDiagnostics(
 		"admissionRetryExhausted",
 		"recoveryDeadlineExceeded",
 		"sourcePreserved",
+		"openerRetained",
+		"requestDeadlineExceeded",
 		"payloadSourceDeferred",
 		"payloadPhysicalConflict",
 	]) {
@@ -214,6 +273,7 @@ export function repositoryOpenDiagnostics(
 	)
 		result.sourceCode = fields.sourceCode;
 	for (const key of [
+		"openOperationId",
 		"branchId",
 		"headCommitId",
 		"rootCommitId",
@@ -443,7 +503,7 @@ function parseBoundedPayloadCount(
 	const parsed =
 		typeof value === "number"
 			? value
-			: typeof value === "string" && /^\d{1,6}$/.test(value)
+			: typeof value === "string" && /^\d{1,16}$/.test(value)
 				? Number(value)
 				: undefined;
 	return Number.isSafeInteger(parsed) && parsed! >= 0 && parsed! <= max
