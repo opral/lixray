@@ -177,6 +177,95 @@ void test("observes cancellation that occurs synchronously inside open", async (
 	assert.equal(openAbortReason.name, "AbortError");
 });
 
+void test("cancels a close-barrier wait without bypassing closure for live waiters", async () => {
+	let openCount = 0;
+	let closeCount = 0;
+	let finishFirstClose!: () => void;
+	let markFirstCloseStarted!: () => void;
+	const firstCloseStarted = new Promise<void>((resolve) => {
+		markFirstCloseStarted = resolve;
+	});
+	const firstCloseGate = new Promise<void>((resolve) => {
+		finishFirstClose = resolve;
+	});
+	const open = async () => {
+		const resourceNumber = ++openCount;
+		return {
+			async close() {
+				closeCount += 1;
+				if (resourceNumber === 1) {
+					markFirstCloseStarted();
+					await firstCloseGate;
+				}
+			},
+		};
+	};
+	const firstLease = await acquireManagedRepositoryResource(
+		"repository-close-barrier-abort",
+		open,
+	);
+	firstLease.release();
+	await firstCloseStarted;
+
+	const controller = new AbortController();
+	const reason = "cancelled while waiting for close";
+	const cancelledAcquisition = acquireManagedRepositoryResource(
+		"repository-close-barrier-abort",
+		open,
+		{ signal: controller.signal },
+	);
+	const liveAcquisition = acquireManagedRepositoryResource(
+		"repository-close-barrier-abort",
+		open,
+	);
+	controller.abort(reason);
+
+	const cancelledOutcome = await Promise.race([
+		cancelledAcquisition.then(
+			(lease) => ({ kind: "acquired" as const, lease }),
+			(error: unknown) => ({ kind: "rejected" as const, error }),
+		),
+		new Promise<{ kind: "pending" }>((resolve) =>
+			setTimeout(() => resolve({ kind: "pending" }), 20),
+		),
+	]);
+	if (cancelledOutcome.kind === "pending") {
+		finishFirstClose();
+		await assert.rejects(
+			cancelledAcquisition,
+			(error: unknown) => error === reason,
+		);
+		(await liveAcquisition).release();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.fail(
+			"cancelled acquisition waited for the existing close to finish",
+		);
+	}
+	assert.equal(cancelledOutcome.kind, "rejected");
+	if (cancelledOutcome.kind === "rejected")
+		assert.equal(cancelledOutcome.error, reason);
+	const liveOutcome = await Promise.race([
+		liveAcquisition.then((lease) => ({ kind: "acquired" as const, lease })),
+		new Promise<{ kind: "pending" }>((resolve) =>
+			setTimeout(() => resolve({ kind: "pending" }), 20),
+		),
+	]);
+	if (liveOutcome.kind === "acquired") {
+		liveOutcome.lease.release();
+		finishFirstClose();
+		await new Promise((resolve) => setTimeout(resolve, 10));
+		assert.fail("live acquisition bypassed the existing close barrier");
+	}
+	assert.equal(openCount, 1);
+
+	finishFirstClose();
+	const freshLease = await liveAcquisition;
+	assert.equal(openCount, 2);
+	freshLease.release();
+	await new Promise((resolve) => setTimeout(resolve, 10));
+	assert.equal(closeCount, 2);
+});
+
 function abortError(signal: AbortSignal): Error {
 	return signal.reason instanceof Error
 		? signal.reason

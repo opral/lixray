@@ -30,7 +30,10 @@ export async function acquireManagedRepositoryResource<
 		options.signal?.throwIfAborted();
 		const existing = managedResources.get(key);
 		if (existing?.closePromise) {
-			await existing.closePromise.catch(() => undefined);
+			await waitForResource(
+				existing.closePromise.catch(() => undefined),
+				options.signal,
+			);
 			continue;
 		}
 
