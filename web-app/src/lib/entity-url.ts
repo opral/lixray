@@ -13,8 +13,6 @@ export type EntityRouteLookup =
 	| { readonly kind: "missing" }
 	| { readonly kind: "pending" };
 
-export const ENTITY_ROUTE_METADATA_WAIT_MS = 15_000;
-
 /** The verb an entity URL carries: /file/… for files, /folder/… for folders. */
 export function entityUrlVerb(kind: EntityKind): "file" | "folder" {
 	return kind === "directory" ? "folder" : "file";
@@ -41,8 +39,10 @@ export async function findLixEntity(
 
 /**
  * Resolves an id-bearing route without treating a partial replica's local
- * absence as authoritative deletion. A missing row on a partial replica is
- * observed until its metadata arrives or the bounded attempt expires.
+ * absence as authoritative deletion. A missing row on a partial replica stays
+ * pending on one exact-ID observation for the route lifetime. The route's
+ * abort signal closes it on navigation or unmount; the pending view keeps the
+ * return-home action available while metadata is still arriving.
  */
 export async function resolveLixEntityForRoute(
 	lix: Pick<Lix, "execute" | "observe">,
@@ -51,7 +51,6 @@ export async function resolveLixEntityForRoute(
 	options: {
 		readonly policy: EntityRouteLookupPolicy;
 		readonly signal: AbortSignal;
-		readonly timeoutMs?: number;
 		onWaiting?: () => void;
 	},
 ): Promise<EntityRouteLookup> {
@@ -67,31 +66,21 @@ export async function resolveLixEntityForRoute(
 	const observation = lix.observe(sql, [lookup.id], {
 		signal: options.signal,
 	});
-	const timeout = Symbol("entity-route-metadata-timeout");
-	let timer: ReturnType<typeof setTimeout> | undefined;
+	const iterator = observation[Symbol.asyncIterator]();
+	let completed = false;
 	try {
-		const waitForEntity = async () => {
-			for await (const event of observation) {
-				options.signal.throwIfAborted();
-				const entity = entityFromRows(event.result.rows, lookup.id);
-				if (entity) return entity;
-			}
+		while (true) {
+			const event = await iterator.next();
 			options.signal.throwIfAborted();
-			return null;
-		};
-		const timedOut = new Promise<typeof timeout>((resolve) => {
-			timer = setTimeout(
-				() => resolve(timeout),
-				options.timeoutMs ?? ENTITY_ROUTE_METADATA_WAIT_MS,
-			);
-		});
-		const result = await Promise.race([waitForEntity(), timedOut]);
-		return result === timeout || result === null
-			? { kind: "pending" }
-			: { kind: "found", entity: result };
+			if (event.done) {
+				completed = true;
+				return { kind: "pending" };
+			}
+			const entity = entityFromRows(event.value.result.rows, lookup.id);
+			if (entity) return { kind: "found", entity };
+		}
 	} finally {
-		if (timer !== undefined) clearTimeout(timer);
-		await observation.return?.();
+		if (!completed) await iterator.return?.();
 	}
 }
 

@@ -85,7 +85,7 @@ function routeLookupLix({
 					});
 				},
 				async return() {
-					returnCount++;
+					if (!closed) returnCount++;
 					closed = true;
 					waiter?.({ done: true, value: undefined });
 					waiter = undefined;
@@ -297,27 +297,60 @@ void test("an already materialized entity resolves without opening an observer",
 	assert.equal(lix.observeReturnCount, 0);
 });
 
-void test("a missing partial-replica entity has a bounded retryable result", async () => {
-	const lix = routeLookupLix({ observedRows: [[]] });
-	const result = await resolveLixEntityForRoute(
-		lix,
-		"directory",
-		{ id: uuid },
-		{
-			policy: "partial_replica",
-			signal: new AbortController().signal,
-			timeoutMs: 5,
+void test("partial route waits past the old timeout until exact metadata arrives", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	t.after(() => t.mock.timers.reset());
+	let observeStarted!: () => void;
+	const started = new Promise<void>((resolve) => {
+		observeStarted = resolve;
+	});
+	const lix = routeLookupLix({
+		observedRows: [[]],
+		onObserve(_sql, _params, _signal, emit) {
+			setTimeout(() => emit([{ id: uuid, path: "/arrived-later.md" }]), 20_001);
+			observeStarted();
 		},
+	});
+	const lookup = resolveLixEntityForRoute(
+		lix,
+		"file",
+		{ id: uuid },
+		{ policy: "partial_replica", signal: new AbortController().signal },
 	);
-	assert.deepEqual(result, { kind: "pending" });
-	assert.ok(lix.observeReturnCount > 0, "timed out observer is closed");
+	await started;
+	t.mock.timers.tick(15_001);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(
+		lix.observeReturnCount,
+		0,
+		"route observation remains open past the old 15s cutoff",
+	);
+	t.mock.timers.tick(5_000);
+	assert.deepEqual(await lookup, {
+		kind: "found",
+		entity: { id: uuid, path: "/arrived-later.md" },
+	});
+	assert.equal(
+		lix.observeReturnCount,
+		1,
+		"resolved route observation closes exactly once",
+	);
 });
 
-void test("navigation abort closes a pending partial-replica lookup", async () => {
+void test("navigation abort closes a long-lived partial-replica lookup exactly once", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	t.after(() => t.mock.timers.reset());
 	const controller = new AbortController();
+	let observeStarted!: () => void;
+	let observedSignal: AbortSignal | undefined;
+	const started = new Promise<void>((resolve) => {
+		observeStarted = resolve;
+	});
 	const lix = routeLookupLix({
-		onObserve() {
-			setTimeout(() => controller.abort(), 0);
+		observedRows: [[]],
+		onObserve(_sql, _params, signal) {
+			observedSignal = signal;
+			observeStarted();
 		},
 	});
 	const lookup = resolveLixEntityForRoute(
@@ -326,8 +359,19 @@ void test("navigation abort closes a pending partial-replica lookup", async () =
 		{ id: uuid },
 		{ policy: "partial_replica", signal: controller.signal },
 	);
-	await assert.rejects(lookup, { name: "AbortError" });
-	assert.ok(lix.observeReturnCount > 0, "aborted observer is closed");
+	await started;
+	t.mock.timers.tick(15_001);
+	await new Promise<void>((resolve) => setImmediate(resolve));
+	assert.equal(lix.observeReturnCount, 0);
+	const rejected = assert.rejects(lookup, { name: "AbortError" });
+	controller.abort();
+	await rejected;
+	assert.equal(observedSignal?.aborted, true);
+	assert.equal(
+		lix.observeReturnCount,
+		1,
+		"navigation closes the active route observer exactly once",
+	);
 });
 
 void test("published lookup distinguishes unavailable items from service failures", async (t) => {
