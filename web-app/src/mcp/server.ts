@@ -110,7 +110,7 @@ export const DIFF_CARD_GUIDE =
 export const DIFF_TOOL_DESCRIPTION =
 	'List the files that differ between two points of the Lix in context, each added, modified, removed, or moved (with before_path). before and after are each { checkpoint_id }, { commit_id }, { branch_id }, "working" (the branch as it stands), or "latest_checkpoint" (the nearest checkpoint behind it); paths narrows the list. Read-only. "What changed since the last checkpoint" is { before: "latest_checkpoint", after: "working" }. MCP Apps hosts render the same collapsible card a write shows; summarize in one sentence rather than listing the files.';
 
-export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix for its bounded file_paths manifest or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. When file_paths_complete is true, use the manifest instead of querying paths again. query_sql is the read path for repository data and files; execute_sql is the one write path. For file size, select OCTET_LENGTH(content), then fetch only the needed range with SUBSTRING(content FROM 1 FOR length). Do not select full content just to measure it or retrieve an excerpt. Agents previously overfetched because read_files selected the entire content blob and enforced its 1 MiB cutoff only after retrieval (issue 485). CAST(content AS TEXT) is appropriate only for known small text files. execute_sql puts every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: true to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
+export const MCP_SERVER_INSTRUCTIONS = `LixRay exposes the JavaScript Lix SDK over MCP. Match this server by its exact LixRay name rather than broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly; do not call open_lix or list_lixes first. Call list_lixes only when the target Lix is unknown. SQL calls accept lix_ref with optional branch_id, defaulting to the repository default branch. Use open_lix for its bounded file_paths manifest or to obtain a context for other tools. An existing context remains pinned to its selected branch; pass it alone instead of lix_ref. When file_paths_complete is true, use the manifest instead of querying paths again. query_sql is the read path for repository data and files; execute_sql is the one write path. For file size, select OCTET_LENGTH(content), then fetch only the needed range with SUBSTRING(content FROM 1 FOR length). Do not select full content just to measure it or retrieve an excerpt. Agents previously overfetched because read_files selected the entire content blob and enforced its 1 MiB cutoff only after retrieval (issue 485). CAST(content AS TEXT) is appropriate only for known small text files. execute_sql puts every create, update, move, rename, copy, delete and directory change of one coherent change into one ordered atomic batch, with last_seen_commit_id to guard it and checkpoint: { title, description? } to mark it. ${DIFF_CARD_GUIDE} The context is an explicit, encrypted Lix-and-branch handle; it is not an MCP session. Prefer structuredContent when the host provides it. Never copy a context token from the prose summary. Text-only hosts receive a later content text block that is the full structuredContent JSON — parse that object for context and SQL rows.
 
 Lix SQL is a Postgres dialect subset, not SQLite. Discover tables/columns through information_schema; use $1, $2 parameters. The SQL tools carry essential guidance; the full SQL reference is available at ${SQL_GUIDE_URI}. A successful mutation is already saved. Read back when the outcome is unknown or validation is part of the task; never blindly retry an uncertain write.
 
@@ -118,10 +118,10 @@ ${UNDO_TOOL_DESCRIPTION}
 
 ${MCP_URL_GUIDE}
 
-Writes persist without a checkpoint; execute_sql already saved the files. Use checkpoint: true on the batch, or create_checkpoint, to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
+Writes persist without a checkpoint; execute_sql already saved the files. Use checkpoint: { title, description? } on the batch, or create_checkpoint, to mark meaningful milestones so the user can follow your work and return to important states. Create a checkpoint when you finish a substantial, coherent piece of work, such as completing a document, implementing a feature, or finishing a related batch of changes. Also checkpoint when the user asks. Use judgment: routine edits, typo fixes, and intermediate steps usually do not need checkpoints. Do not checkpoint after every edit or ask the user to manage checkpoint timing. A checkpoint marks progress; it is not required to save changes. Its title describes the important change relative to the chosen scope baseline; description is optional context. create_checkpoint requires explicit scope: { type: "all" } or { type: "selected", selections: [{ relation, row_refs }] }. Obtain canonical row_refs with SELECT CAST(row_ref AS TEXT) AS row_ref FROM lix_diff('relation'). Selected files include tracked content and ancestor dependencies. Batch checkpoints default to only the batch affected rows; specify scope: { type: "all" } to include all pending branch changes. Receipts expose baseline_commit_id, previous_head_commit_id, commit_id, head_commit_id and included_scope. An incomplete receipt still means the checkpoint and metadata were saved; never create it again to retry receipt reads. Use update_checkpoint to correct title or description without another milestone. Use restore with a commit_id to copy that saved state into a new commit on the selected branch. Do not invent tools, arguments, or branch state.`;
 
 export const CREATE_CHECKPOINT_TOOL_DESCRIPTION =
-	"Mark a milestone on the branch in context so the user can follow your work and return to it. Changes are already saved automatically; a checkpoint is not required to save them.";
+	"Mark a milestone with a meaningful title, optional description and explicit all/selected scope. Get row_refs from lix_diff. Returns baseline, checkpoint, head and dependencies. Metadata is atomic. Changes are already saved automatically; a checkpoint is not required to save.";
 
 export const RESTORE_TOOL_DESCRIPTION =
 	"Copy content from commit_id into a new commit on the context branch. Preserves history and working baseline; undo can reverse it. Returns the new commit_id, or null if unchanged. Use a commit_id from create_checkpoint or history.";
@@ -518,6 +518,7 @@ const executeBatchOutput = withError(
 		context,
 		commit: commitSpan.nullable(),
 		checkpoint_commit_id: z.string().optional(),
+		checkpoint: z.lazy(() => checkpointReceipt).optional(),
 		warning: z.string().optional(),
 		results: z.array(
 			z
@@ -544,8 +545,50 @@ const branchOutput = withError(
 			.strict(),
 	}),
 );
+const checkpointSelections = z
+	.array(
+		z
+			.object({
+				relation: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/),
+				row_refs: z.array(z.string().min(1)).min(1).max(1000),
+			})
+			.strict(),
+	)
+	.min(1)
+	.max(100);
+const checkpointScope = z.union([
+	z.object({ type: z.literal("all") }).strict(),
+	z
+		.object({ type: z.literal("selected"), selections: checkpointSelections })
+		.strict(),
+]);
+const checkpointTitle = z
+	.string()
+	.trim()
+	.min(1)
+	.refine((title) => !/[\r\n]/.test(title), "Use a one-line title.");
+const checkpointMetadata = {
+	title: checkpointTitle,
+	description: z.string().optional(),
+	expected_head_commit_id: commitId.optional(),
+};
+const checkpointReceipt = z.object({
+	commit_id: z.string(),
+	baseline_commit_id: z.string(),
+	previous_head_commit_id: z.string(),
+	head_commit_id: z.string(),
+	conversation_id: z.string().optional(),
+	included_scope_complete: z.boolean(),
+	warning: z.string().optional(),
+	title: z.string(),
+	description: z.string().optional(),
+	scope: checkpointScope,
+	included_scope: z.array(
+		z.object({ relation: z.string(), row_refs: z.array(z.string()) }),
+	),
+});
 const checkpointOutput = withError(
-	z.object({ context, commit_id: z.string() }),
+	z.object({ context, ...checkpointReceipt.shape }),
 );
 const undoOutput = withError(
 	z.object({
@@ -623,6 +666,7 @@ function traceToolDispatch(
 			[
 				"execute_sql",
 				"create_checkpoint",
+				"update_checkpoint",
 				"restore",
 				"undo",
 				"redo",
@@ -986,7 +1030,16 @@ export function createLixrayMcpServer(
 					.describe(
 						"Refuse the batch if a file it touches changed since this commit.",
 					),
-				checkpoint: z.boolean().optional(),
+				checkpoint: z
+					.object({
+						...checkpointMetadata,
+						scope: z
+							.object({ type: z.literal("all") })
+							.strict()
+							.optional(),
+					})
+					.strict()
+					.optional(),
 				options: executeOptions.optional(),
 			})
 			.strict(),
@@ -1035,7 +1088,10 @@ export function createLixrayMcpServer(
 				commit: executed.commit,
 				results: executed.results,
 				...(executed.checkpointCommitId
-					? { checkpoint_commit_id: executed.checkpointCommitId }
+					? {
+							checkpoint_commit_id: executed.checkpointCommitId,
+							checkpoint: executed.checkpointReceipt,
+						}
 					: {}),
 				...(executed.warning ? { warning: executed.warning } : {}),
 			};
@@ -1139,14 +1195,56 @@ export function createLixrayMcpServer(
 		"create_checkpoint",
 		"Create checkpoint",
 		CREATE_CHECKPOINT_TOOL_DESCRIPTION,
-		z.object({ context }).strict(),
+		z
+			.object({ context, ...checkpointMetadata, scope: checkpointScope })
+			.strict(),
 		checkpointOutput,
 		writeAnnotations(false, false),
 		securitySchemes,
-		async ({ context: token }) => {
-			const result = await service.createCheckpoint(token);
-			return { context: result.context, commit_id: result.commitId };
+		async ({
+			context: token,
+			title,
+			description,
+			scope,
+			expected_head_commit_id,
+		}) => {
+			const result = await service.createCheckpoint(token, {
+				title,
+				description,
+				scope,
+				expected_head_commit_id,
+			});
+			const { commitId: ignoredCommitId, ...receipt } = result;
+			void ignoredCommitId;
+			return receipt;
 		},
+		undefined,
+		surfaceVersion,
+		requestId,
+		service,
+		options.urlOrigin,
+	);
+
+	registerTool(
+		server,
+		"update_checkpoint",
+		"Update checkpoint",
+		"Correct a checkpoint title or its opening description without creating another checkpoint. Omit a field to preserve it; description: null clears its text. Replies are preserved.",
+		z
+			.object({
+				context,
+				commit_id: commitId,
+				title: checkpointTitle.optional(),
+				description: z.string().nullable().optional(),
+			})
+			.strict(),
+		withError(
+			z.object({ context, commit_id: z.string(), conversation_id: z.string() }),
+		),
+		writeAnnotations(true, true),
+		securitySchemes,
+		async ({ context: token, commit_id, ...input }) =>
+			service.updateCheckpoint(token, commit_id, input),
 		undefined,
 		surfaceVersion,
 		requestId,
@@ -1551,7 +1649,7 @@ export function mcpDocumentationResponse(
 			"",
 			"Match the exact LixRay server name instead of broad repository or file keywords. For SQL with an exact @handle/slug or Lix UUID, pass lix_ref directly to query_sql or execute_sql, optionally branch_id; no opening call is required. Call list_lixes only when the target is unknown. Prefer the returned context from structuredContent. Never copy a context token from the prose summary; text-only hosts receive a later text block that is the full structuredContent JSON. open_lix includes a bounded file_paths manifest; when file_paths_complete is true, do not list files again. A context selects one Lix and one branch and is encrypted, expiring, and independent from the MCP transport request.",
 			"",
-			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). query_sql is the sole read path for repository data and file contents. For size use OCTET_LENGTH(content), and for excerpts use SUBSTRING(content FROM 1 FOR length); do not fetch the whole blob to measure or slice it. Agents previously overfetched because read_files selected full content before applying the 1 MiB size check (issue 485). CAST(content AS TEXT) is for known small text files. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: true marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
+			"Use query_sql for one read-only SQL statement and execute_sql for any atomic ordered SQL batch; each tool's description carries the SQL guide (Lix is a Postgres dialect subset, not SQLite: discover tables through information_schema). query_sql is the sole read path for repository data and file contents. For size use OCTET_LENGTH(content), and for excerpts use SUBSTRING(content FROM 1 FOR length); do not fetch the whole blob to measure or slice it. Agents previously overfetched because read_files selected full content before applying the 1 MiB size check (issue 485). CAST(content AS TEXT) is for known small text files. execute_sql is the one write path and is always treated as potentially destructive: file creates, updates, moves, renames, deletes and directory operations are one ordered atomic batch against public lix_file and lix_directory tables. A move is UPDATE lix_file SET path, which keeps the file id so links survive; copy plus delete does not. last_seen_commit_id refuses a batch that touches a file changed since that commit; checkpoint: { title, description? } marks the result. get_entity_urls only resolves browser links and is not a file CRUD tool. Directory paths have no trailing slash: /skills, not /skills/.",
 			"A successful execute_sql persisted the mutation. Read back only when the write outcome is unknown or validation is part of the task.",
 			MCP_URL_GUIDE,
 			"HTTP responses include X-Request-ID for support correlation. Diagnostic identifiers stay out of tool results.",
@@ -2160,7 +2258,7 @@ function summarizeToolResult(
 		return "Branch created.";
 	}
 	if (name === "create_checkpoint") {
-		return `Checkpoint created at commit ${String(result.commit_id)}.`;
+		return `Checkpoint “${String(result.title)}” created at commit ${String(result.commit_id)}.`;
 	}
 	if (name === "restore") {
 		return typeof result.commit_id === "string"
@@ -2324,6 +2422,7 @@ function toolSurfaceDescriptions(): Array<Record<string, unknown>> {
 		"switch_branch",
 		"create_branch",
 		"create_checkpoint",
+		"update_checkpoint",
 		"restore",
 		"undo",
 		"redo",

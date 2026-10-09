@@ -125,7 +125,7 @@ void test("each tool carries its own guide; SQL supports files directly", () => 
 	// Writes: the one write path, with its guard, checkpoint, and recipes.
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one write path/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /one call per coherent change/);
-	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /checkpoint: true/);
+	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /checkpoint: \{ title/);
 	assert.match(EXECUTE_SQL_TOOL_DESCRIPTION, /last_seen_commit_id/);
 	assert.match(
 		EXECUTE_SQL_TOOL_DESCRIPTION,

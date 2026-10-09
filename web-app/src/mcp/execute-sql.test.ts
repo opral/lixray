@@ -11,7 +11,12 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { openLix, type Lix } from "@lix-js/sdk";
+import {
+	openLix,
+	type Lix,
+	type SqlParam,
+	type ExecuteOptions as SdkExecuteOptions,
+} from "@lix-js/sdk";
 import { trace, SpanStatusCode } from "@opentelemetry/api";
 import { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import {
@@ -719,3 +724,154 @@ for (const concurrentPath of ["/target.md", "/unrelated.md"]) {
 		}
 	});
 }
+
+void test("MCP checkpoint inputs are strict and metadata correction retains identity", async () => {
+	const lix = await openLix();
+	const { call, close } = await connect(lix);
+	try {
+		const context = ok(await call("open_lix", { lix_ref: LIX_REF })).context;
+		for (const input of [
+			{ scope: { type: "all" } },
+			{ title: "  ", scope: { type: "all" } },
+			{ title: "First\nSecond", scope: { type: "all" } },
+			{ title: "Valid" },
+			{ title: "Valid", scope: { type: "some" } },
+			{ title: "Valid", scope: { type: "selected", selections: [] } },
+			{ title: "Valid", scope: { type: "all" }, extra: true },
+		]) {
+			const rejected = await call("create_checkpoint", { context, ...input });
+			assert.equal(rejected.isError, true);
+		}
+		const baselineHead = await head(lix);
+		const rejectedBatch = await call("execute_sql", {
+			context,
+			statements: [upsert("/rejected.md", "bad")],
+			checkpoint: true,
+		});
+		assert.equal(rejectedBatch.isError, true);
+		assert.equal(await head(lix), baselineHead);
+		const receipt = ok(
+			await call("create_checkpoint", {
+				context,
+				title: "Start work",
+				description: "Context",
+				scope: { type: "all" },
+			}),
+		);
+		assert.equal(receipt.head_commit_id, await head(lix));
+		assert.equal(receipt.commit_id, receipt.head_commit_id);
+		assert.equal(receipt.previous_head_commit_id, baselineHead);
+		assert.equal(receipt.included_scope_complete, true);
+		assert.equal(typeof receipt.baseline_commit_id, "string");
+		assert.equal(typeof receipt.conversation_id, "string");
+		const corrected = ok(
+			await call("update_checkpoint", {
+				context,
+				commit_id: receipt.commit_id,
+				title: "Begin feature work",
+				description: null,
+			}),
+		);
+		assert.equal(corrected.commit_id, receipt.commit_id);
+		assert.equal(corrected.conversation_id, receipt.conversation_id);
+		assert.equal(
+			(await lix.execute("SELECT commit_id FROM lix_log() WHERE is_checkpoint"))
+				.rows.length,
+			1,
+		);
+	} finally {
+		await close();
+	}
+});
+
+void test("MCP batch checkpoint receipt includes only the affected rows and dependencies", async () => {
+	const lix = await openLix();
+	const { call, close } = await connect(lix);
+	try {
+		await seed(lix, { "/unrelated.md": "Draft" });
+		const receipt = ok(
+			await call("execute_sql", {
+				lix_ref: LIX_REF,
+				statements: [upsert("/docs/finished.md", "Done")],
+				checkpoint: { title: "Finish document" },
+			}),
+		);
+		const checkpoint = receipt.checkpoint as Record<string, unknown>;
+		assert.equal(receipt.warning, undefined);
+		assert.equal(checkpoint.commit_id, receipt.checkpoint_commit_id);
+		assert.equal(checkpoint.title, "Finish document");
+		assert.equal(checkpoint.head_commit_id, await head(lix));
+		assert.notEqual(checkpoint.head_commit_id, checkpoint.commit_id);
+		assert.equal(checkpoint.included_scope_complete, true);
+		const scope = checkpoint.included_scope as Array<{
+			relation: string;
+			row_refs: string[];
+		}>;
+		assert.equal(
+			scope.find((s) => s.relation === "lix_file")?.row_refs.length,
+			1,
+		);
+		assert.ok(scope.some((s) => s.relation === "lix_directory"));
+		assert.deepEqual(
+			(await lix.execute("SELECT to_path FROM lix_diff('lix_file')")).rows,
+			[{ to_path: "/unrelated.md" }],
+		);
+	} finally {
+		await close();
+	}
+});
+
+void test("MCP receipt enrichment failure reports saved checkpoint without suggesting recreation", async () => {
+	const lix = await openLix();
+	const { call, close } = await connect(lix);
+	const originalExecute = lix.execute.bind(lix);
+	try {
+		// Runtime transactions execute on their transaction handle, so inject at
+		// beginTransaction to fail only the read after checkpoint publication.
+		const begin = lix.beginTransaction.bind(lix);
+		lix.beginTransaction = async () => {
+			const tx = await begin();
+			const execute = tx.execute.bind(tx);
+			Object.assign(tx, {
+				execute: async (
+					sql: string,
+					params?: SqlParam[],
+					options?: SdkExecuteOptions,
+				) => {
+					if (sql.startsWith("SELECT conversation_id FROM lix_log($1)"))
+						throw new Error("Receipt read unavailable");
+					return execute(sql, params, options);
+				},
+			});
+			return tx;
+		};
+		const receipt = ok(
+			await call("execute_sql", {
+				lix_ref: LIX_REF,
+				statements: [upsert("/saved.md", "Saved")],
+				checkpoint: { title: "Save document" },
+			}),
+		);
+		assert.equal(typeof receipt.checkpoint_commit_id, "string");
+		assert.equal(
+			(receipt.checkpoint as Record<string, unknown>).included_scope_complete,
+			false,
+		);
+		assert.match(receipt.warning as string, /Checkpoint and metadata saved/);
+		assert.match(
+			receipt.warning as string,
+			/Do not repeat checkpoint creation/,
+		);
+		assert.equal(
+			(
+				await originalExecute(
+					"SELECT commit_id FROM lix_log() WHERE is_checkpoint",
+				)
+			).rows.length,
+			1,
+		);
+		assert.equal((await files(lix)).get("/saved.md")?.content, "Saved");
+	} finally {
+		await close();
+	}
+});

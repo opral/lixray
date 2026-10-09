@@ -258,7 +258,7 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (
-			request.sql === "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)"
+			request.sql.startsWith("SELECT commit_id FROM lix_create_checkpoint(")
 		) {
 			return {
 				columns: ["commit_id"],
@@ -317,6 +317,40 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
+		if (
+			request.sql ===
+			"SELECT commit_id, working_base_commit_id FROM lix_branch WHERE id = lix_active_branch_id()"
+		)
+			return {
+				columns: ["commit_id", "working_base_commit_id"],
+				rows: [
+					[
+						{ kind: "text" as const, value: "commit-1" },
+						{ kind: "text" as const, value: "commit-0" },
+					],
+				],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		if (request.sql.startsWith("SELECT conversation_id FROM lix_log"))
+			return {
+				columns: ["conversation_id"],
+				rows: [[{ kind: "text" as const, value: "conversation-1" }]],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+
+		if (request.sql.startsWith("SELECT id FROM lix_conversation WHERE target"))
+			return {
+				columns: ["id"],
+				rows: [[{ kind: "text" as const, value: "conversation-1" }]],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -785,6 +819,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 				"switch_branch",
 				"create_branch",
 				"create_checkpoint",
+				"update_checkpoint",
 				"restore",
 				"undo",
 				"redo",
@@ -829,7 +864,7 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		assert.match(queryTool.description ?? "", /not SQLite/);
 		assert.match(executeSqlTool.description ?? "", /UPDATE lix_file SET path/);
 		assert.match(executeSqlTool.description ?? "", /outcome is unknown/);
-		assert.match(executeSqlTool.description ?? "", /checkpoint: true/);
+		assert.match(executeSqlTool.description ?? "", /checkpoint: \{ title/);
 		assert.match(executeSqlTool.description ?? "", /one write path/);
 		const executeInput = executeSqlTool.inputSchema as {
 			properties: Record<string, unknown>;
@@ -869,8 +904,8 @@ void test("modern MCP discover and tool calls work without a session id", async 
 		// rest are one-liners, output schemas are success-only.
 		const listingChars = JSON.stringify(tools.tools).length;
 		assert.ok(
-			listingChars < 34_000,
-			`tools/list is ${listingChars} chars; keep it under 34k`,
+			listingChars < 38_000,
+			`tools/list is ${listingChars} chars; keep it under 38k`,
 		);
 		for (const tool of tools.tools) {
 			const limit = isGuidedTool(tool.name) ? 1_800 : 320;
@@ -1512,8 +1547,8 @@ void test("MCP tool text describes outcomes without echoing the context token", 
 			},
 			{
 				name: "create_checkpoint",
-				arguments: { context },
-				text: /Checkpoint created/,
+				arguments: { context, title: "Complete work", scope: { type: "all" } },
+				text: /Checkpoint .*created/,
 			},
 			{ name: "undo", arguments: { context }, text: /Undo committed as/ },
 			{ name: "redo", arguments: { context }, text: /Redo committed as/ },

@@ -86,7 +86,7 @@ diagnostic timestamps or identifiers.
 - `get_entity_urls`: stable document links and readable display links for files and directories.
 - `diff`: list the files that differ between two points (a checkpoint, a
   commit, a branch, `working`, or `latest_checkpoint`).
-- `create_checkpoint`, `restore`, `undo`, `redo`: mark milestones, copy an old
+- `create_checkpoint`, `update_checkpoint`, `restore`, `undo`, `redo`: mark milestones, copy an old
   state into a new commit, and undo or redo.
 - `active_branch_id`, `create_branch`, `switch_branch`, `merge_branch_preview`,
   `merge_branch`: branches. `create_branch` takes `name`, an optional `id`, and
@@ -159,7 +159,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
 6. Write with `execute_sql`, one call per coherent change: its creates,
    updates, moves, renames, copies, deletes and directory changes in one
    ordered atomic batch, guarded by `last_seen_commit_id` and marked by
-   `checkpoint: true` when it is a milestone. It is always treated as
+   `checkpoint: { title, description? }` when it is a milestone. It is always treated as
    potentially destructive. The mutation is already persisted — `rowsAffected`
    and any rows the batch itself returned are sufficient.
 7. Successful batches are persisted. Read back when the outcome is unknown or
@@ -169,7 +169,7 @@ See [MCP telemetry](./mcp-telemetry.md) for span lifetimes and privacy rules.
    browser links; it is not a persistence-verification read.
 
 A successful `execute_sql` mutation is already saved. Writes persist without a
-checkpoint. Use `checkpoint: true` on the batch, or `create_checkpoint`, to
+checkpoint. Use `checkpoint: { title, description? }` on the batch, or `create_checkpoint`, to
 mark meaningful milestones so the user
 can follow your work and return to important states. Create a checkpoint when
 you finish a substantial, coherent piece of work, such as completing a document,
@@ -178,6 +178,45 @@ when the user asks. Use judgment: routine edits, typo fixes, and intermediate
 steps usually do not need checkpoints. Do not checkpoint after every edit or
 ask the user to manage checkpoint timing. A checkpoint marks progress; it is not
 required to save changes.
+
+A checkpoint title is required, non-empty, and one line. It describes the important
+change relative to the chosen scope baseline; description is optional context.
+Standalone creation requires an explicit scope:
+
+```json
+{
+  "context": "<context from open_lix>",
+  "title": "Finish the import validation guide",
+  "description": "Document malformed-row handling and retry behavior.",
+  "scope": { "type": "all" }
+}
+```
+
+For selected rows use `scope: { type: "selected", selections: [{ relation,
+row_refs }] }`. Obtain canonical references with `SELECT CAST(row_ref AS TEXT)
+AS row_ref FROM lix_diff('lix_file') WHERE to_path = $1`; each selected file
+includes its tracked content and required ancestor directories. Selection is
+validated against pending working changes in the checkpoint transaction.
+`expected_head_commit_id` refuses a checkpoint if the branch head changed.
+
+Batch checkpoints include only the batch's affected rows by default. To include
+all pending branch changes, set `checkpoint.scope` to `{ "type": "all" }`.
+They guard against changes made after the batch. If checkpoint creation fails,
+the batch remains saved and the warning says not to repeat it.
+
+Checkpoint receipts expose `baseline_commit_id`, `previous_head_commit_id`,
+`commit_id`, `head_commit_id`, `conversation_id`, and `included_scope` (the
+actual changed row references, including dependency expansion). Selected
+checkpoints can leave an ordinary head with still-pending changes. Metadata and
+checkpoint creation are atomic. If post-commit receipt reads fail,
+`included_scope_complete: false` and a warning identify the saved checkpoint;
+do not create another checkpoint to retry those reads.
+
+Use `update_checkpoint({ context, commit_id, title?, description? })` to correct
+metadata without another checkpoint. Omitted fields are preserved;
+`description: null` clears the opening description's text. Replies remain
+intact. Description corrections use a pointer stored on MCP-created checkpoint
+conversations; other conversations can be edited directly with SQL.
 
 ## What a result carries
 
@@ -259,8 +298,8 @@ SQL execution preserves Lix's receipt: `query_sql.result.commit` is null for a
 read; `execute_sql` has one top-level `commit: { before, after } | null` for the
 batch. Its per-statement results contain rows, counts and notices, without
 repeating the receipt; `commit.after` is the commit to pass as the next
-batch's `last_seen_commit_id`. With `checkpoint: true` the result also carries
-`checkpoint_commit_id`. If completion reporting or the checkpoint fails after
+batch's `last_seen_commit_id`. With `checkpoint: { title, description? }` the result also carries
+`checkpoint_commit_id` and the full `checkpoint` receipt. If completion reporting or the checkpoint fails after
 the batch committed, the result is still a success and carries a `warning`
 ("Saved; checkpoint unavailable. Do not repeat the batch."); do not repeat it.
 
@@ -336,7 +375,7 @@ as an ordered batch that commits or rolls back as a whole.
 - Delete: `DELETE FROM lix_file WHERE path = $1`. Directories work the same
   on `lix_directory`; moving a directory moves its files, ids kept. Paths
   have no trailing slash.
-- `checkpoint: true` marks the batch's result as a checkpoint and returns
+- `checkpoint: { title, description? }` marks the batch's result as a checkpoint and returns
   `checkpoint_commit_id`.
 - `last_seen_commit_id` (the `commit_id` of `open_lix`, or `commit.after`
   of an earlier batch) guards the batch. It runs in one transaction that
@@ -357,7 +396,7 @@ ids and links survive), leave a redirect where one was, and checkpoint:
 {
   "lix_ref": "@acme/company",
   "last_seen_commit_id": "<commit_id from open_lix>",
-  "checkpoint": true,
+  "checkpoint": { "title": "Consolidate the GTM plan and archive source notes" },
   "statements": [
     {
       "sql": "INSERT INTO lix_file (path, content) VALUES ($1, CAST($2 AS BYTEA)) ON CONFLICT (path) DO UPDATE SET content = excluded.content",
