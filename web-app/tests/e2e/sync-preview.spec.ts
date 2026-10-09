@@ -26,7 +26,7 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 	browser,
 	baseURL,
 }) => {
-	test.setTimeout(240_000);
+	test.setTimeout(360_000);
 	const fixture = await createSyncFixture({
 		browser,
 		baseURL,
@@ -45,6 +45,39 @@ test("@editing shared OPFS tabs edit in both directions and converge with an ind
 		await fixture.close(primaryFailure);
 	}
 });
+
+for (const syncDelayMs of [0, 100, 500]) {
+	test(`@batching 60 alternating edits converge under ${syncDelayMs} ms sync latency`, async ({
+		browser,
+		baseURL,
+	}) => {
+		test.skip(
+			process.env.PLAYWRIGHT_SYNC_LOCAL !== "1",
+			"latency injection requires a disposable local stack",
+		);
+		test.setTimeout(360_000);
+		const fixture = await createSyncFixture({
+			browser,
+			baseURL,
+			scenario: "editing",
+			syncDelayMs,
+			editRounds: 60,
+			checkBatching: true,
+		});
+		let primaryFailure: unknown;
+		try {
+			const state = await fixture.editing();
+			await fixture.concurrent(state);
+			await fixture.continuousIndependentEdits(state);
+			await fixture.staleReopen(state);
+		} catch (error) {
+			primaryFailure = error;
+			throw error;
+		} finally {
+			await fixture.close(primaryFailure);
+		}
+	});
+}
 
 test("@history offline checkpoints survive reopen and preserve exact full and partial history", async ({
 	browser,

@@ -41,6 +41,7 @@ await build({
 	entryPoints: [
 		resolve(root, "telemetry.mjs"),
 		resolve(root, "railway-server.mjs"),
+		resolve(root, "undici-runtime.mjs"),
 	],
 	outdir: resolve(root, "../dist/runtime"),
 	outExtension: { ".js": ".mjs" },

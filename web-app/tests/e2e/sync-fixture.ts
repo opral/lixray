@@ -5,6 +5,7 @@ import { writeFile } from "node:fs/promises";
 import {
 	expect,
 	test,
+	type APIResponse,
 	type Browser,
 	type BrowserContext,
 	type Locator,
@@ -20,7 +21,15 @@ import {
 	isRetryableMergeConflict,
 } from "./retained-body-recovery";
 import { createOfflineConsoleRequestTracker } from "./offline-console-request-tracker";
-import { createTransientPushRecoveryTracker } from "./transient-push-recovery";
+import { createRecoveredNetworkChangeTracker } from "./recovered-network-change-tracker";
+import { createTransientPublicationRecoveryTracker } from "./transient-push-recovery";
+import { createTrackedOfflineContexts } from "./tracked-offline-contexts";
+import {
+	captureSyncPublicationError,
+	isClientCanceledSyncProxyRequest,
+	isSyncPublicationProtocolRequest,
+	type SyncPublicationErrorCapture,
+} from "./sync-push-response-capture";
 
 import {
 	installSyncDiagnostics,
@@ -31,6 +40,14 @@ const compatibility = getCompatibility();
 
 const DEMO_REPOSITORY_ID = "00000000-0000-4000-8000-000000000002";
 const SECONDARY_REPOSITORY_ID = "00000000-0000-4000-8000-000000000005";
+function requestHeader(request: Request, name: string): string | null {
+	const lowerName = name.toLowerCase();
+	return (
+		Object.entries(request.headers()).find(
+			([headerName]) => headerName.toLowerCase() === lowerName,
+		)?.[1] ?? null
+	);
+}
 export type SyncScenario =
 	| "navigation"
 	| "editing"
@@ -42,13 +59,40 @@ export async function createSyncFixture({
 	browser,
 	baseURL,
 	scenario,
+	syncDelayMs = 0,
+	editRounds = 12,
+	checkBatching = false,
 }: {
 	browser: Browser;
 	baseURL: string | undefined;
 	scenario: SyncScenario;
+	syncDelayMs?: number;
+	editRounds?: number;
+	checkBatching?: boolean;
 }) {
 	const local = process.env.PLAYWRIGHT_SYNC_LOCAL === "1";
 	const analyticsStubFailures: string[] = [];
+	const syncFailures: string[] = [];
+	const syncFailureDetails: string[] = [];
+	const localSyncProxyNotes: string[] = [];
+	const recoveredNetworkChangeConsoleFailures: Array<{
+		isRecovered: () => boolean;
+		message: string;
+	}> = [];
+	const transientPublicationRecovery =
+		createTransientPublicationRecoveryTracker();
+	const localRequestSources = new WeakMap<Request, string>();
+	const localPublicationCaptures = new WeakMap<
+		Request,
+		SyncPublicationErrorCapture
+	>();
+	let localPublicationCaptureEnabled = false;
+	const offlineContexts = createTrackedOfflineContexts<BrowserContext>();
+	const appOrigin = baseURL ? new URL(baseURL).origin : null;
+	const setContextOffline = (context: BrowserContext, offline: boolean) =>
+		offlineContexts.setOffline(context, offline, (value) =>
+			context.setOffline(value),
+		);
 	const newContext = async () => {
 		const context = await browser.newContext();
 		if (
@@ -74,6 +118,111 @@ export async function createSyncFixture({
 							: JSON.stringify({ featureFlags: {}, featureFlagPayloads: {} }),
 				}),
 			);
+		}
+		if (local && scenario !== "performance") {
+			await context.route("**/sync/**", async (route) => {
+				if (syncDelayMs > 0)
+					await new Promise((resolve) => setTimeout(resolve, syncDelayMs));
+				const request = route.request();
+				const url = request.url();
+				if (
+					offlineContexts.has(context) ||
+					!localPublicationCaptureEnabled ||
+					!isSyncPublicationProtocolRequest(request.method(), url)
+				) {
+					await route.continue();
+					return;
+				}
+
+				let upstream: APIResponse;
+				try {
+					upstream = await route.fetch({ maxRedirects: 0, maxRetries: 0 });
+				} catch (error) {
+					if (
+						isClientCanceledSyncProxyRequest(
+							error,
+							request.failure()?.errorText ?? null,
+						)
+					) {
+						localSyncProxyNotes.push(
+							`POST ${url}: client canceled before the local proxy received an upstream response`,
+						);
+						return;
+					}
+					throw error;
+				}
+
+				if (upstream.status() === 503) {
+					// Inspect publication errors only; the helper classifies a response
+					// only when its JSON body fits the configured bound. Request bodies
+					// remain opaque and both routes retain their normal protocol path.
+					const capture = await captureSyncPublicationError(upstream);
+					// Route.request(), page request events, and Response.request() resolve
+					// to the same Playwright Request wrapper, so exact object identity avoids
+					// retaining request bytes or risking a nearby retry's error code.
+					localPublicationCaptures.set(request, capture);
+					localSyncProxyNotes.push(
+						`503 ${url}: ${capture.errorCode ? `error.code=${capture.errorCode}` : (capture.bodyIssue ?? "response body unclassified")}`,
+					);
+				}
+
+				try {
+					await route.fulfill({ response: upstream });
+				} catch (error) {
+					const canceled = isClientCanceledSyncProxyRequest(
+						error,
+						request.failure()?.errorText ?? null,
+					);
+					const capture = localPublicationCaptures.get(request) ?? null;
+					localPublicationCaptures.delete(request);
+					if (!canceled) throw error;
+					if (upstream.status() === 503) {
+						const observation = transientPublicationRecovery.observe({
+							source:
+								localRequestSources.get(request) ??
+								`unattributed-${randomUUID()}`,
+							replicaId: requestHeader(request, "lix-replica-id"),
+							sessionId: requestHeader(request, "lix-session-id"),
+							baselineLeaseId: requestHeader(
+								request,
+								"lix-native-baseline-lease",
+							),
+							method: request.method(),
+							url,
+							status: upstream.status(),
+							body: request.postDataBuffer(),
+						});
+						if (
+							capture &&
+							(scenario === "editing" ||
+								scenario === "history" ||
+								scenario === "conflicts")
+						)
+							transientPublicationRecovery.classifyCode(
+								observation,
+								capture.errorCode,
+							);
+					}
+					localSyncProxyNotes.push(
+						upstream.status() === 200
+							? `200 ${url}: client canceled while fulfilling the upstream publication response; the server acknowledgement may have been lost`
+							: `${upstream.status()} ${url}: client canceled while fulfilling the upstream response`,
+					);
+					return;
+				} finally {
+					try {
+						await upstream.dispose();
+					} catch (error) {
+						if (
+							!isClientCanceledSyncProxyRequest(
+								error,
+								request.failure()?.errorText ?? null,
+							)
+						)
+							syncFailures.push("local sync push response disposal failed");
+					}
+				}
+			});
 		}
 		return context;
 	};
@@ -225,6 +374,7 @@ export async function createSyncFixture({
 		expect(opened.ok()).toBe(true);
 		const { sessionId } = (await opened.json()) as { sessionId: string };
 		const headers = { ...authorization, "Lix-Session-Id": sessionId };
+
 		try {
 			const countResponse = await sharedContext.request.post(
 				new URL("execute", endpoint).toString(),
@@ -370,21 +520,17 @@ export async function createSyncFixture({
 		if (!local) {
 			expect(cacheProbes[1]!.requestId).not.toBe(cacheProbes[0]!.requestId);
 		}
-		const syncFailures: string[] = [];
-		const syncFailureDetails: string[] = [];
-		const transientPushRecovery = createTransientPushRecoveryTracker();
 		const pendingSyncFailureDetails = new Set<Promise<void>>();
 		const mergeReplay = createMergeReplayTracker();
 		const pendingMergeClassifications = new Set<Promise<void>>();
 		const recoveredMergeConflicts: string[] = [];
 		const retainedBodyRecovery = createRetainedBodyRecoveryTracker();
 		const runtimeFailures: string[] = [];
-		const transientPushConsoleFailures: Array<{
+		const transientPublicationConsoleFailures: Array<{
 			source: string;
 			url: string;
 			message: string;
 		}> = [];
-		const offlineContexts = new WeakSet<BrowserContext>();
 		const offlineRequests = new WeakSet<Request>();
 		const coldReads = new Map<Page, string[]>();
 		const pendingColdReads = new Map<Page, Set<Request>>();
@@ -660,8 +806,7 @@ export async function createSyncFixture({
 			await expect(checkpointButton).toBeVisible({ timeout: 30_000 });
 			await expect(checkpointButton).toBeEnabled({ timeout: 30_000 });
 			sharedContext.on("request", captureCheckpoint);
-			offlineContexts.add(sharedContext);
-			await sharedContext.setOffline(true);
+			await setContextOffline(sharedContext, true);
 			try {
 				const checkpointDeadline = Date.now() + 5_000;
 				await checkpointButton.click({ timeout: 5_000 });
@@ -708,8 +853,7 @@ export async function createSyncFixture({
 				}
 				throw error;
 			} finally {
-				await sharedContext.setOffline(false);
-				offlineContexts.delete(sharedContext);
+				await setContextOffline(sharedContext, false);
 			}
 			try {
 				await expect
@@ -776,11 +920,31 @@ export async function createSyncFixture({
 			}
 		};
 		const observePage = (page: Page, label: string) => {
+			localPublicationCaptureEnabled = local;
 			// Chromium can report a failed resource to the console after the
 			// context has come back online. Correlate the console message with
 			// a confirmed offline failure instead of sampling the current phase.
 			const offlineConsoleRequests =
 				createOfflineConsoleRequestTracker<Request>();
+			const recoveredNetworkChange =
+				createRecoveredNetworkChangeTracker<Request>();
+			const successfulScriptResponses = new WeakSet<Request>();
+			const isAppScriptRequest = (request: Request) => {
+				if (
+					appOrigin === null ||
+					request.method() !== "GET" ||
+					request.resourceType() !== "script"
+				)
+					return false;
+				try {
+					const url = new URL(request.url());
+					return (
+						url.origin === appOrigin && url.pathname.startsWith("/assets/")
+					);
+				} catch {
+					return false;
+				}
+			};
 			const pageColdReads: string[] = [];
 			coldReads.set(page, pageColdReads);
 			const pagePendingColdReads = new Set<Request>();
@@ -796,6 +960,10 @@ export async function createSyncFixture({
 			const pageBlobLanePayloadSizes: number[] = [];
 			blobLanePayloadSizes.set(page, pageBlobLanePayloadSizes);
 			page.on("request", (request) => {
+				recoveredNetworkChange.started(request);
+				if (isSyncPublicationProtocolRequest(request.method(), request.url())) {
+					localRequestSources.set(request, label);
+				}
 				if (offlineContexts.has(page.context())) {
 					offlineRequests.add(request);
 				}
@@ -842,6 +1010,9 @@ export async function createSyncFixture({
 			page.on("requestfinished", (request) => {
 				pendingBlobLaneRequests.delete(request);
 				offlineConsoleRequests.finished(request);
+				if (successfulScriptResponses.has(request)) {
+					recoveredNetworkChange.completedReload(request);
+				}
 			});
 			page.on("pageerror", (error) => {
 				runtimeFailures.push(`${label} pageerror: ${error.message}`);
@@ -859,15 +1030,30 @@ export async function createSyncFixture({
 					) &&
 					(offlineConsoleRequests.consume(message.location().url) ||
 						offlineContexts.has(page.context()));
-				const transientPushNoise =
+				const networkChangeFailureId =
+					!expectedOfflineNoise &&
+					message.type() === "error" &&
+					/^Failed to load resource: net::ERR_NETWORK_CHANGED$/i.test(
+						message.text(),
+					)
+						? recoveredNetworkChange.console(message.location().url)
+						: null;
+				if (networkChangeFailureId !== null) {
+					recoveredNetworkChangeConsoleFailures.push({
+						isRecovered: () =>
+							recoveredNetworkChange.recovered(networkChangeFailureId),
+						message: `${label} console: ${message.text()}`,
+					});
+				}
+				const transientPublicationNoise =
 					(scenario === "editing" ||
 						scenario === "history" ||
 						scenario === "conflicts") &&
 					message.type() === "error" &&
 					/Failed to load resource:.*status of 503/i.test(message.text()) &&
-					message.location().url.endsWith("/sync/push");
-				if (transientPushNoise) {
-					transientPushConsoleFailures.push({
+					isSyncPublicationProtocolRequest("POST", message.location().url);
+				if (transientPublicationNoise) {
+					transientPublicationConsoleFailures.push({
 						source: label,
 						url: message.location().url,
 						message: `${label} console: ${message.text()}`,
@@ -877,7 +1063,8 @@ export async function createSyncFixture({
 					message.type() === "error" &&
 					!expectedCasNoise &&
 					!expectedOfflineNoise &&
-					!transientPushNoise
+					networkChangeFailureId === null &&
+					!transientPublicationNoise
 				) {
 					runtimeFailures.push(`${label} console: ${message.text()}`);
 				}
@@ -893,11 +1080,17 @@ export async function createSyncFixture({
 					offlineConsoleRequests.failed(request);
 					return;
 				}
+				if (
+					errorText === "net::ERR_NETWORK_CHANGED" &&
+					isAppScriptRequest(request)
+				) {
+					recoveredNetworkChange.failed(request);
+				}
 				if (/abort|cancel/i.test(errorText)) {
 					unreadableBlobLaneResponses.delete(request);
 				}
 				if (request.url().includes("/lix/v1/")) {
-					// Reconciliation cancels an obsolete in-flight long poll or push after
+					// Reconciliation cancels an obsolete in-flight long poll or publication after
 					// another request wins the ref CAS. Final convergence assertions prove
 					// that the replacement request completed.
 					if (/abort|cancel/i.test(errorText)) {
@@ -909,18 +1102,54 @@ export async function createSyncFixture({
 				}
 			});
 			page.on("response", (response) => {
+				if (response.ok() && isAppScriptRequest(response.request())) {
+					successfulScriptResponses.add(response.request());
+				}
 				const url = response.url();
 				if (!/\/lix\/v1\/[^/]+\/sync\//.test(url)) return;
-				const pushObservation = url.endsWith("/sync/push")
-					? transientPushRecovery.observe({
+				const responseRequest = response.request();
+				const localPublicationCapture =
+					local &&
+					isSyncPublicationProtocolRequest(response.request().method(), url) &&
+					response.status() === 503
+						? (localPublicationCaptures.get(responseRequest) ?? null)
+						: null;
+				if (localPublicationCapture)
+					localPublicationCaptures.delete(responseRequest);
+				const publicationObservation = isSyncPublicationProtocolRequest(
+					response.request().method(),
+					url,
+				)
+					? transientPublicationRecovery.observe({
 							source: label,
-							replicaId: response.request().headers()["lix-replica-id"] ?? null,
+							replicaId: requestHeader(responseRequest, "lix-replica-id"),
+							sessionId: requestHeader(responseRequest, "lix-session-id"),
+							baselineLeaseId: requestHeader(
+								responseRequest,
+								"lix-native-baseline-lease",
+							),
 							method: response.request().method(),
 							url,
 							status: response.status(),
 							body: response.request().postDataBuffer(),
 						})
 					: undefined;
+				if (local && publicationObservation?.status === 503) {
+					if (
+						scenario === "editing" ||
+						scenario === "history" ||
+						scenario === "conflicts"
+					)
+						transientPublicationRecovery.classifyCode(
+							publicationObservation,
+							localPublicationCapture?.errorCode,
+						);
+					if (!localPublicationCapture) {
+						localSyncProxyNotes.push(
+							`503 ${url}: no bounded local proxy body capture matched the exact publication request`,
+						);
+					}
+				}
 				if (
 					response.request().method() === "GET" &&
 					/\/sync\/blob(?:\?|$)/.test(url) &&
@@ -988,27 +1217,27 @@ export async function createSyncFixture({
 					const failureRecorded = !pendingMergeReplay;
 					if (
 						failureRecorded &&
-						(!pushObservation || pushObservation.status !== 503)
+						(!publicationObservation || publicationObservation.status !== 503)
 					)
 						syncFailures.push(failure);
-					if (failureRecorded && url.endsWith("/sync/push")) {
-						const detail = response
-							.text()
-							.then((body) => {
-								syncFailureDetails.push(`${failure}: ${body.slice(0, 2_000)}`);
-								if (
-									pushObservation?.status === 503 &&
-									(scenario === "editing" ||
-										scenario === "history" ||
-										scenario === "conflicts")
-								)
-									transientPushRecovery.classify(pushObservation, body);
-							})
-							.catch((error: unknown) => {
-								syncFailureDetails.push(
-									`${failure}: unreadable response: ${String(error)}`,
+					if (failureRecorded && publicationObservation?.status === 503) {
+						const detail = (async () => {
+							const capture =
+								localPublicationCapture ??
+								(await captureSyncPublicationError(response));
+							if (
+								scenario === "editing" ||
+								scenario === "history" ||
+								scenario === "conflicts"
+							)
+								transientPublicationRecovery.classifyCode(
+									publicationObservation,
+									capture.errorCode,
 								);
-							});
+							syncFailureDetails.push(
+								`${failure}: ${capture.errorCode ?? capture.bodyIssue ?? "response body unclassified"}`,
+							);
+						})();
 						pendingSyncFailureDetails.add(detail);
 						void detail.finally(() => pendingSyncFailureDetails.delete(detail));
 					}
@@ -1683,9 +1912,8 @@ export async function createSyncFixture({
 					const markers = [0, 1].map(
 						(index) => `independent-${first}-${index}-${randomUUID()}`,
 					);
-					for (const { context } of replicas) offlineContexts.add(context);
 					await Promise.all(
-						replicas.map(({ context }) => context.setOffline(true)),
+						replicas.map(({ context }) => setContextOffline(context, true)),
 					);
 					await Promise.all(
 						replicas.map(async ({ view }, index) => {
@@ -1704,16 +1932,14 @@ export async function createSyncFixture({
 							{ timeout: 5_000 },
 						);
 					}
-					await replicas[first]!.context.setOffline(false);
-					offlineContexts.delete(replicas[first]!.context);
+					await setContextOffline(replicas[first]!.context, false);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[first]!);
 					await expect(replicas[last]!.view.locator("p").last()).toHaveText(
 						markers[last]!,
 					);
-					await replicas[last]!.context.setOffline(false);
-					offlineContexts.delete(replicas[last]!.context);
+					await setContextOffline(replicas[last]!.context, false);
 					await expect
 						.poll(authorityContent, { timeout: realtimeTimeout })
 						.toContain(markers[last]!);
@@ -1739,13 +1965,12 @@ export async function createSyncFixture({
 				throw error;
 			} finally {
 				const cleanup = await Promise.allSettled([
-					...replicas.map(({ context }) => context.setOffline(false)),
+					...replicas.map(({ context }) => setContextOffline(context, false)),
 					sharedContext.request.delete(
 						new URL("session", endpoint).toString(),
 						{ headers },
 					),
 				]);
-				for (const { context } of replicas) offlineContexts.delete(context);
 				for (const result of cleanup) {
 					if (result.status !== "rejected") continue;
 					if (!primaryFailure) cleanupFailure ??= result;
@@ -1759,25 +1984,107 @@ export async function createSyncFixture({
 		}
 		async function continuousIndependentEdits(state: EditingState) {
 			const pages = [left, state.fresh];
+			const openingStartedAt = Date.now();
 			await Promise.all(pages.map((page) => page.goto(state.createdUrl)));
+			const navigationMs = Date.now() - openingStartedAt;
 			const editors = pages.map((page) =>
 				page.locator('.ProseMirror[contenteditable="true"]:visible'),
 			);
-			for (const editor of editors) await expect(editor).toBeVisible();
+			const editorReadyMs: number[] = [];
+			try {
+				for (const editor of editors) {
+					await expect(editor).toBeVisible();
+					editorReadyMs.push(Date.now() - openingStartedAt);
+				}
+			} finally {
+				await test.info().attach("document-open-profile.json", {
+					body: JSON.stringify({ syncDelayMs, navigationMs, editorReadyMs }),
+					contentType: "application/json",
+				});
+			}
 			await expect
 				.poll(async () => await editors[1]!.innerText(), {
 					timeout: realtimeTimeout,
 				})
 				.toBe(await editors[0]!.innerText());
+			const startedAt = Date.now();
+			const contexts = new Set(pages.map((page) => page.context()));
+			const metrics = {
+				proofPages: 0,
+				manifestGroups: 0,
+				scalarManifests: 0,
+				manifestMembers: 0,
+				encodedManifestBytes: 0,
+				decodedInlineBytes: 0,
+				largestManifestGroup: 0,
+				largestEncodedManifestGroup: 0,
+			};
+			const activeTransfers = new Map<Request, number>();
+			const transferIntervals: Array<[number, number]> = [];
+			let peakConcurrentTransfers = 0;
+			const finishTransfer = (request: Request) => {
+				const start = activeTransfers.get(request);
+				if (start === undefined) return;
+				transferIntervals.push([start, Date.now()]);
+				activeTransfers.delete(request);
+			};
+			const captureBatch = (request: Request) => {
+				if (
+					request.url().includes("/sync/") &&
+					!request.url().includes("/sync/events")
+				) {
+					activeTransfers.set(request, Date.now());
+					peakConcurrentTransfers = Math.max(
+						peakConcurrentTransfers,
+						activeTransfers.size,
+					);
+				}
+				if (request.method() !== "POST") return;
+				if (request.url().endsWith("/sync/native-metadata-walk")) {
+					const body = request.postDataJSON() as { selection?: string };
+					if (body.selection === "incorporation") metrics.proofPages++;
+				} else if (request.url().endsWith("/sync/blobs")) {
+					const manifests = request.postDataJSON() as Array<{
+						inlineBytesBase64?: string | null;
+					}>;
+					const bytes = Buffer.byteLength(request.postData() ?? "");
+					metrics.manifestGroups++;
+					metrics.manifestMembers += manifests.length;
+					metrics.encodedManifestBytes += bytes;
+					metrics.decodedInlineBytes += manifests.reduce(
+						(sum, manifest) =>
+							sum +
+							(manifest.inlineBytesBase64
+								? Buffer.from(manifest.inlineBytesBase64, "base64").length
+								: 0),
+						0,
+					);
+					metrics.largestManifestGroup = Math.max(
+						metrics.largestManifestGroup,
+						manifests.length,
+					);
+					metrics.largestEncodedManifestGroup = Math.max(
+						metrics.largestEncodedManifestGroup,
+						bytes,
+					);
+				} else if (request.url().endsWith("/sync/blob"))
+					metrics.scalarManifests++;
+			};
+			for (const context of contexts) {
+				context.on("request", captureBatch);
+				context.on("requestfinished", finishTransfer);
+				context.on("requestfailed", finishTransfer);
+			}
 			// Keep the authority moving while the other independent replica recovers
 			// from a stale push. Waiting for convergence after each edit hides this race.
-			for (let round = 0; round < 12; round++) {
+			for (let round = 0; round < editRounds; round++) {
 				const index = round % 2;
 				await editors[index]!.click();
 				await pages[index]!.keyboard.press("Control+End");
 				await pages[index]!.keyboard.insertText(` online-${index}-${round}`);
 				await new Promise((resolve) => setTimeout(resolve, 150));
 			}
+			const editsFinishedAt = Date.now();
 			await expect
 				.poll(
 					async () => {
@@ -1789,6 +2096,55 @@ export async function createSyncFixture({
 					{ timeout: 30_000 },
 				)
 				.toBe(true);
+			for (const editor of editors) {
+				const markers = new Set((await editor.innerText()).split(/\s+/));
+				for (let round = 0; round < editRounds; round++) {
+					expect(
+						markers.has(`online-${round % 2}-${round}`),
+						`replica must retain edit marker ${round}`,
+					).toBe(true);
+				}
+			}
+			for (const context of contexts) {
+				context.off("request", captureBatch);
+				context.off("requestfinished", finishTransfer);
+				context.off("requestfailed", finishTransfer);
+			}
+			const finishedAt = Date.now();
+			for (const start of activeTransfers.values())
+				transferIntervals.push([start, finishedAt]);
+			transferIntervals.sort((a, b) => a[0] - b[0]);
+			let transferBusyMs = 0;
+			let intervalEnd = startedAt;
+			let sumRequestLatencyMs = 0;
+			for (const [start, end] of transferIntervals) {
+				sumRequestLatencyMs += end - start;
+				transferBusyMs += Math.max(0, end - Math.max(start, intervalEnd));
+				intervalEnd = Math.max(intervalEnd, end);
+			}
+			const report = {
+				...metrics,
+				peakConcurrentTransfers,
+				transferBusyMs,
+				sumRequestLatencyMs,
+				editRounds,
+				syncDelayMs,
+				burstToEqualityMs: finishedAt - startedAt,
+				postEditToEqualityMs: finishedAt - editsFinishedAt,
+			};
+			await test.info().attach("bounded-transfer-profile.json", {
+				body: JSON.stringify(report, null, 2),
+				contentType: "application/json",
+			});
+			if (checkBatching) {
+				// Live editing can recover from several advancing heads. Total
+				// request count is diagnostic; convergence under latency is the
+				// performance gate. Every individual transfer remains bounded.
+				expect(metrics.largestManifestGroup).toBeLessThanOrEqual(32);
+				expect(metrics.largestEncodedManifestGroup).toBeLessThanOrEqual(
+					1024 * 1024,
+				);
+			}
 			// Equality alone can pass before pending uploads settle. Require a later
 			// unique edit from each writer to reach its peer, with both editors open.
 			for (let index = 0; index < 2; index++) {
@@ -1808,8 +2164,7 @@ export async function createSyncFixture({
 			await expect
 				.poll(() => replicaHead(fresh), { timeout: 30_000 })
 				.toBe(before);
-			await freshContext.setOffline(true);
-			offlineContexts.add(freshContext);
+			await setContextOffline(freshContext, true);
 			try {
 				const marker = ` stale-reopen-${randomUUID()}`;
 				await state.leftEditor.click();
@@ -1828,8 +2183,7 @@ export async function createSyncFixture({
 				await expect.poll(authorityHead, { timeout: 30_000 }).not.toBe(before);
 				expect(await replicaHead(fresh)).toBe(before);
 				await fresh.close();
-				await freshContext.setOffline(false);
-				offlineContexts.delete(freshContext);
+				await setContextOffline(freshContext, false);
 				fresh = await newPage(freshContext);
 				observePage(fresh, "stale-reopen");
 				await fresh.goto(createdUrl);
@@ -1849,8 +2203,7 @@ export async function createSyncFixture({
 					contentType: "application/json",
 				});
 			} finally {
-				await freshContext.setOffline(false);
-				offlineContexts.delete(freshContext);
+				await setContextOffline(freshContext, false);
 			}
 		}
 
@@ -2421,16 +2774,16 @@ export async function createSyncFixture({
 					contentType: "application/json",
 				});
 			}
-			const recoveredPushes = transientPushRecovery.recovered();
+			const recoveredPublications = transientPublicationRecovery.recovered();
 			const recoveredConsoleCounts = new Map<string, number>();
-			for (const push of recoveredPushes) {
-				const key = JSON.stringify([push.source, push.url]);
+			for (const publication of recoveredPublications) {
+				const key = JSON.stringify([publication.source, publication.url]);
 				recoveredConsoleCounts.set(
 					key,
 					(recoveredConsoleCounts.get(key) ?? 0) + 1,
 				);
 			}
-			const unresolvedConsoleFailures = transientPushConsoleFailures
+			const unresolvedConsoleFailures = transientPublicationConsoleFailures
 				.filter((failure) => {
 					const key = JSON.stringify([failure.source, failure.url]);
 					const recovered = recoveredConsoleCounts.get(key) ?? 0;
@@ -2441,13 +2794,18 @@ export async function createSyncFixture({
 				.map((failure) => failure.message);
 			const unresolvedSyncFailures = [
 				...syncFailures,
-				...transientPushRecovery.failures(),
+				...transientPublicationRecovery.failures(),
 				...mergeReplay.failures(),
 				...retainedBodyRecovery.failures(),
 			];
+			const unresolvedRecoveredNetworkChangeConsoleFailures =
+				recoveredNetworkChangeConsoleFailures
+					.filter((failure) => !failure.isRecovered())
+					.map((failure) => failure.message);
 			const unresolvedRuntimeFailures = [
 				...runtimeFailures,
 				...unresolvedConsoleFailures,
+				...unresolvedRecoveredNetworkChangeConsoleFailures,
 			];
 			await test.info().attach("sync-diagnostics.json", {
 				body: JSON.stringify(
@@ -2456,14 +2814,15 @@ export async function createSyncFixture({
 						repositoryId,
 						syncFailures: unresolvedSyncFailures,
 						syncFailureDetails,
-						recoveredTransientPushFailures: recoveredPushes.map(
-							(push) => `${push.status} ${push.url}`,
+						recoveredTransientPublicationFailures: recoveredPublications.map(
+							(publication) => `${publication.status} ${publication.url}`,
 						),
 						recoveredRetainedBodyResponses: retainedBodyRecovery.recovered(),
 						typedMergeConflicts: recoveredMergeConflicts,
 						replayedMergeConflicts: mergeReplay.recovered(),
 						runtimeFailures: unresolvedRuntimeFailures,
 						analyticsStubFailures,
+						localSyncProxyNotes,
 					},
 					null,
 					2,

@@ -11,6 +11,11 @@ import { defineConfig, type Plugin } from "vite";
 const webAppDir = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(webAppDir, "..");
 const atelierSourceDir = path.resolve(repositoryRoot, "vendor/atelier/src");
+const supabaseProxyTarget = (
+	process.env.VITE_SUPABASE_URL?.trim() ||
+	process.env.SUPABASE_URL?.trim() ||
+	"http://127.0.0.1:54321"
+).replace(/\/+$/, "");
 
 function devHealthcheckPlugin(): Plugin {
 	return {
@@ -117,28 +122,28 @@ export default defineConfig(({ command }) => ({
 			command === "serve"
 				? {
 						"/auth": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 						},
 						"/rest": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 						},
 						"/storage": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 						},
 						"/realtime": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 							ws: true,
 						},
 						"/functions": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 						},
 						"/graphql": {
-							target: "http://127.0.0.1:54321",
+							target: supabaseProxyTarget,
 							changeOrigin: true,
 						},
 					}

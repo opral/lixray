@@ -2,12 +2,15 @@ import assert from "node:assert/strict";
 import { randomUUID, randomBytes, createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { getLocalSupabaseSettings } from "../../scripts/local-supabase.mjs";
 import { validateMcpJwtClaims } from "../../web-app/src/mcp/auth.ts";
 
 // Local integration test: synthetic consent, real GoTrue exchanges/refreshes.
 // Tokens travel through private process pipes only; never print credentials.
-const db = process.env.LIXRAY_TEST_DB_CONTAINER ?? "supabase_db_lixray";
-const auth = process.env.LIXRAY_TEST_AUTH_CONTAINER ?? "supabase_auth_lixray";
+const { projectId, apiUrl } = getLocalSupabaseSettings();
+const db = process.env.LIXRAY_TEST_DB_CONTAINER ?? `supabase_db_${projectId}`;
+const auth = process.env.LIXRAY_TEST_AUTH_CONTAINER ?? `supabase_auth_${projectId}`;
+const authIssuer = `${apiUrl.replace(/\/$/, "")}/auth/v1`;
 const sql = (query, databaseRole = "postgres") => {
 	try {
 		return execFileSync(
@@ -149,7 +152,7 @@ const ip = execFileSync(
 ).trim();
 const base = `http://${ip}:9999`;
 const restContainer =
-	process.env.LIXRAY_TEST_REST_CONTAINER ?? "supabase_rest_lixray";
+	process.env.LIXRAY_TEST_REST_CONTAINER ?? `supabase_rest_${projectId}`;
 const restIp = execFileSync(
 	"docker",
 	[
@@ -249,7 +252,7 @@ const validate = (token, initial, expectedResource = resource) => {
 	assert.equal(
 		validateMcpJwtClaims(
 			claims,
-			"http://127.0.0.1:54321/auth/v1",
+			authIssuer,
 			undefined,
 			expectedResource,
 		).ok,
@@ -260,7 +263,7 @@ const validate = (token, initial, expectedResource = resource) => {
 	assert.equal(
 		validateMcpJwtClaims(
 			claims,
-			"http://127.0.0.1:54321/auth/v1",
+			authIssuer,
 			undefined,
 			wrongResource,
 		).error,
@@ -394,7 +397,7 @@ try {
 		assert.equal(
 			validateMcpJwtClaims(
 				decode(issued),
-				"http://127.0.0.1:54321/auth/v1",
+				authIssuer,
 				undefined,
 				resource,
 			).ok,

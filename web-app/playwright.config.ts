@@ -18,7 +18,8 @@ export default defineConfig({
 	},
 	use: {
 		baseURL,
-		trace: "retain-on-failure",
+		trace:
+			process.env.PLAYWRIGHT_CAPTURE_TRACE === "1" ? "on" : "retain-on-failure",
 	},
 	webServer: process.env.PLAYWRIGHT_BASE_URL
 		? undefined

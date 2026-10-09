@@ -37,3 +37,32 @@ void test("Railway start warms persisted JWKS before accepting traffic", async (
 		"JWKS warmup must finish before the HTTP server listens",
 	);
 });
+
+void test("Railway installs the bundled Fetch runtime before importing app modules", async () => {
+	const source = await readFile(
+		new URL("./start-railway.mjs", import.meta.url),
+		"utf8",
+	);
+	const runtimeInstall = source.indexOf('await import("./undici-runtime.mjs")');
+	const telemetryImport = source.indexOf('import("./telemetry.mjs")');
+	const serverImport = source.indexOf('import("./railway-server.mjs")');
+	const appImport = source.indexOf(
+		'import("../dist/server/railway-server.js")',
+	);
+	assert.ok(runtimeInstall >= 0, "runtime helper must be imported at startup");
+	assert.ok(runtimeInstall < telemetryImport);
+	assert.ok(runtimeInstall < serverImport);
+	assert.ok(runtimeInstall < appImport);
+	assert.doesNotMatch(source, /from ["']\.\/(?:telemetry|railway-server)\.mjs/);
+
+	const bundleSource = await readFile(
+		new URL("./bundle-railway.mjs", import.meta.url),
+		"utf8",
+	);
+	assert.match(bundleSource, /resolve\(root, "undici-runtime\.mjs"\)/);
+	const dockerfile = await readFile(
+		new URL("../Dockerfile", import.meta.url),
+		"utf8",
+	);
+	assert.match(dockerfile, /dist\/runtime\/undici-runtime\.mjs/);
+});

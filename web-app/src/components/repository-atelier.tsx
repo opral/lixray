@@ -17,6 +17,7 @@ import {
 	findLixEntity,
 	parseEntityUrlSplat,
 	type EntityKind,
+	type EntityRouteLookupPolicy,
 } from "~/lib/entity-url";
 import {
 	Atelier,
@@ -190,6 +191,8 @@ const RepositoryAtelierContext = createContext<RepositoryAtelierHandle | null>(
 );
 const RepositoryFileOpenTraceContext =
 	createContext<BrowserFileOpenTraceController | null>(null);
+const RepositoryEntityRouteLookupPolicyContext =
+	createContext<EntityRouteLookupPolicy>("authoritative");
 const RepositoryDefaultBranchContext = createContext<string | null>(null);
 const RepositoryRouteLifecycleContext = createContext<
 	(() => AbortController) | null
@@ -1843,7 +1846,11 @@ export function RepositoryAtelier({
 													}}
 												/>
 											</div>
-											<Outlet />
+											<RepositoryEntityRouteLookupPolicyContext.Provider
+												value={publicPath ? "authoritative" : "partial_replica"}
+											>
+												<Outlet />
+											</RepositoryEntityRouteLookupPolicyContext.Provider>
 										</RepositoryFileOpenTraceContext.Provider>
 									</RepositoryAtelierContext.Provider>
 								</RepositoryShellNavigationContext.Provider>
@@ -1909,6 +1916,10 @@ export function RepositoryAtelier({
 
 export function useRepositoryAtelierInstance(): RepositoryAtelierHandle | null {
 	return useContext(RepositoryAtelierContext);
+}
+
+export function useRepositoryEntityRouteLookupPolicy(): EntityRouteLookupPolicy {
+	return useContext(RepositoryEntityRouteLookupPolicyContext);
 }
 
 export function useRepositoryFileOpenTrace(): BrowserFileOpenTraceController | null {

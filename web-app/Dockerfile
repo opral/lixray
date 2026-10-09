@@ -71,6 +71,7 @@ COPY --from=builder /app/web-app/dist ./dist
 COPY --from=builder /app/web-app/scripts/assert-railway-env.mjs ./scripts/assert-railway-env.mjs
 COPY --from=builder /app/web-app/dist/runtime/railway-server.mjs ./scripts/railway-server.mjs
 COPY --from=builder /app/web-app/dist/runtime/telemetry.mjs ./scripts/telemetry.mjs
+COPY --from=builder /app/web-app/dist/runtime/undici-runtime.mjs ./scripts/undici-runtime.mjs
 COPY --from=builder /app/web-app/scripts/start-railway.mjs ./scripts/start-railway.mjs
 COPY --from=builder /app/web-app/scripts/provision-repositories.mjs ./scripts/provision-repositories.mjs
 

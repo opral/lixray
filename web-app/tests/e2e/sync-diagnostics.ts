@@ -3,6 +3,24 @@ import type { BrowserContext, Page } from "@playwright/test";
 /** Read-only RPC probes on the existing session; no second engine or storage open. */
 export async function installSyncDiagnostics(context: BrowserContext) {
 	await context.addInitScript(() => {
+		// This callback is serialized into the page, so keep the predicate here
+		// and exercise this initializer directly in its regression test.
+		const isTerminalResponse = (
+			value: unknown,
+		): value is {
+			id: number;
+			ok: boolean;
+			value?: unknown;
+			error?: unknown;
+		} => {
+			if (!value || typeof value !== "object") return false;
+			const response = value as { id?: unknown; ok?: unknown; kind?: unknown };
+			return (
+				typeof response.id === "number" &&
+				typeof response.ok === "boolean" &&
+				!Object.hasOwn(response, "kind")
+			);
+		};
 		type DiagnosticPort = {
 			postMessage(message: unknown): void;
 			addEventListener(
@@ -21,6 +39,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		globalThis.BroadcastChannel = new Proxy(OriginalChannel, {
 			construct(target, args: ConstructorParameters<typeof BroadcastChannel>) {
 				const channel = new target(...args);
+				const portIndex = ports.length;
 				if (!args[0].startsWith("lix:repository-rpc:v1:")) return channel;
 				const listeners = new Set<(event: MessageEvent) => void>();
 				const requests = new Map<number, unknown>();
@@ -40,13 +59,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 					} | null;
 					if (message?.kind === "input") {
 						const request = message.message;
-						recordLifecycle({
-							direction: "send",
-							at: performance.now(),
-							id: request?.id,
-							sessionId: request?.sessionId,
-							kind: request?.operation?.kind,
-						});
+						recordRequest(portIndex, request);
 						if (
 							typeof request?.id === "number" &&
 							request.operation?.kind?.startsWith("observe")
@@ -90,15 +103,8 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 									error?: { code?: string };
 							  }
 							| undefined;
-						recordLifecycle({
-							direction: "receive",
-							at: performance.now(),
-							id: response?.id,
-							kind: response?.kind,
-							ok: response?.ok,
-							errorCode: response?.error?.code,
-						});
-						if (typeof response?.id === "number" && requests.has(response.id)) {
+						recordResponse(portIndex, response);
+						if (isTerminalResponse(response) && requests.has(response.id)) {
 							const operation = requests.get(response.id);
 							requests.delete(response.id);
 							record({ operation, response });
@@ -132,9 +138,68 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 			},
 		});
 		const lifecycle: unknown[] = [];
+		const pendingOperations = new Map<string, unknown>();
 		const recordLifecycle = (value: unknown) => {
+			// Telemetry bursts must not evict the RPCs that explain a stalled
+			// repository operation from this bounded diagnostic buffer.
+			if (
+				typeof value === "object" &&
+				value !== null &&
+				"kind" in value &&
+				value.kind === "telemetry"
+			)
+				return;
 			lifecycle.push(value);
 			if (lifecycle.length > 100) lifecycle.shift();
+		};
+		type DiagnosticRequest = {
+			id?: number;
+			sessionId?: number;
+			kind?: string;
+			operation?: { kind?: string };
+		};
+		const recordRequest = (
+			portIndex: number,
+			request: DiagnosticRequest | null | undefined,
+		) => {
+			if (!request) return;
+			const entry = {
+				direction: "send",
+				portIndex,
+				at: performance.now(),
+				id: request.id,
+				sessionId: request.sessionId,
+				kind: request.operation?.kind ?? request.kind,
+			};
+			recordLifecycle(entry);
+			if (typeof request.id === "number" && request.operation?.kind) {
+				pendingOperations.set(`${portIndex}:${request.id}`, entry);
+				if (pendingOperations.size > 200)
+					pendingOperations.delete(pendingOperations.keys().next().value!);
+			}
+		};
+		const recordResponse = (
+			portIndex: number,
+			response:
+				| {
+						id?: number;
+						kind?: string;
+						ok?: boolean;
+						error?: { code?: string };
+				  }
+				| undefined,
+		) => {
+			if (isTerminalResponse(response))
+				pendingOperations.delete(`${portIndex}:${response.id}`);
+			recordLifecycle({
+				direction: "receive",
+				portIndex,
+				at: performance.now(),
+				id: response?.id,
+				kind: response?.kind,
+				ok: response?.ok,
+				errorCode: response?.error?.code,
+			});
 		};
 		const observerFrames: unknown[] = [];
 		const record = (value: unknown) => {
@@ -177,6 +242,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 		globalThis.SharedWorker = new Proxy(Original, {
 			construct(target, args: ConstructorParameters<typeof SharedWorker>) {
 				const worker = new target(...args);
+				const portIndex = ports.length;
 				ports.push(worker.port);
 				const requests = new Map<number, unknown>();
 				const post = worker.port.postMessage.bind(worker.port);
@@ -200,14 +266,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						if (requests.size > 200)
 							requests.delete(requests.keys().next().value!);
 					}
-					if (message)
-						recordLifecycle({
-							direction: "send",
-							at: performance.now(),
-							id: message.id,
-							sessionId: message.sessionId,
-							kind: message.operation?.kind ?? message.kind,
-						});
+					recordRequest(portIndex, message);
 					Reflect.apply(post, this, [value, transferOrOptions]);
 				};
 				worker.port.addEventListener(
@@ -220,18 +279,8 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 							error?: { code?: string };
 						}>,
 					) => {
-						recordLifecycle({
-							direction: "receive",
-							at: performance.now(),
-							id: event.data?.id,
-							kind: event.data?.kind,
-							ok: event.data?.ok,
-							errorCode: event.data?.error?.code,
-						});
-						if (
-							typeof event.data?.id !== "number" ||
-							!requests.has(event.data.id)
-						)
+						recordResponse(portIndex, event.data);
+						if (!isTerminalResponse(event.data) || !requests.has(event.data.id))
 							return;
 						const operation = requests.get(event.data.id);
 						requests.delete(event.data.id);
@@ -261,7 +310,7 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						error?: unknown;
 					}>,
 				) => {
-					if (event.data.id === id)
+					if (isTerminalResponse(event.data) && event.data.id === id)
 						finish(
 							event.data.ok ? event.data.value : { error: event.data.error },
 						);
@@ -313,7 +362,15 @@ export async function installSyncDiagnostics(context: BrowserContext) {
 						params: [],
 					}),
 				]);
-				return { health, rows, head, checkpointLog, observerFrames, lifecycle };
+				return {
+					health,
+					rows,
+					head,
+					checkpointLog,
+					observerFrames,
+					lifecycle,
+					pendingOperations: [...pendingOperations.values()],
+				};
 			},
 		});
 	});

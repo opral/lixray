@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { randomInt } from "node:crypto";
 import test from "node:test";
 import { request } from "node:http";
 import { connect } from "node:net";
@@ -11,6 +10,7 @@ import {
 } from "@opentelemetry/sdk-trace-base";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { createRailwayServer } from "./railway-server.mjs";
+import { listenOnFetchSafePort } from "./test-http-listen.mjs";
 
 const exporter = new InMemorySpanExporter();
 const provider = new NodeTracerProvider({
@@ -24,24 +24,7 @@ async function serve(fetcher, run) {
 		clientRoot: "/nonexistent",
 		env: {},
 	});
-	// Node fetch rejects some valid OS ephemeral ports (for example 6000).
-	// Use a high port range accepted by fetch for every request in this suite.
-	let listening = false;
-	for (let attempt = 0; attempt < 20 && !listening; attempt++) {
-		try {
-			await new Promise((resolve, reject) => {
-				server.once("error", reject);
-				server.listen(randomInt(50000, 60000), "127.0.0.1", () => {
-					server.off("error", reject);
-					resolve();
-				});
-			});
-			listening = true;
-		} catch (error) {
-			if (error.code !== "EADDRINUSE") throw error;
-		}
-	}
-	if (!listening) throw new Error("Could not bind a safe test port.");
+	await listenOnFetchSafePort(server);
 	try {
 		await run(`http://127.0.0.1:${server.address().port}`);
 	} finally {

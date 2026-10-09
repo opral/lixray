@@ -1,10 +1,16 @@
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { initializeTelemetry } from "./telemetry.mjs";
-import { createRailwayServer } from "./railway-server.mjs";
-import "./assert-railway-env.mjs";
 
+// The runtime image bundles this helper separately because it has no
+// node_modules. Install the patched Fetch implementation before telemetry or
+// the app imports can capture Node's bundled fetch classes.
+await import("./undici-runtime.mjs");
+await import("./assert-railway-env.mjs");
+const [{ initializeTelemetry }, { createRailwayServer }] = await Promise.all([
+	import("./telemetry.mjs"),
+	import("./railway-server.mjs"),
+]);
 const telemetry = initializeTelemetry();
 const { default: app } = await import("../dist/server/railway-server.js");
 

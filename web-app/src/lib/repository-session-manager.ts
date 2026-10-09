@@ -30,7 +30,10 @@ export async function acquireManagedRepositoryResource<
 		options.signal?.throwIfAborted();
 		const existing = managedResources.get(key);
 		if (existing?.closePromise) {
-			await existing.closePromise.catch(() => undefined);
+			await waitForResource(
+				existing.closePromise.catch(() => undefined),
+				options.signal,
+			);
 			continue;
 		}
 
@@ -92,18 +95,26 @@ function waitForResource<T>(
 ): Promise<T> {
 	if (!signal) return resourcePromise;
 	return new Promise<T>((resolve, reject) => {
+		// eslint-disable-next-line @typescript-eslint/prefer-promise-reject-errors -- AbortSignal permits arbitrary reasons; match throwIfAborted exactly.
 		const abort = () => reject(abortError(signal));
+		if (signal.aborted) {
+			abort();
+			return;
+		}
 		signal.addEventListener("abort", abort, { once: true });
+		if (signal.aborted) {
+			signal.removeEventListener("abort", abort);
+			abort();
+			return;
+		}
 		void resourcePromise.then(resolve, reject).finally(() => {
 			signal.removeEventListener("abort", abort);
 		});
 	});
 }
 
-function abortError(signal: AbortSignal): Error {
-	return signal.reason instanceof Error
-		? signal.reason
-		: new DOMException("The operation was aborted.", "AbortError");
+function abortError(signal: AbortSignal): unknown {
+	return signal.reason;
 }
 
 function releaseManagedResource(key: string, managed: ManagedResource): void {

@@ -1,9 +1,10 @@
 import { readRepositoryRoute } from "~/lib/repository-route-lifecycle";
 import {
 	canonicalEntitySplat,
-	findLixEntity,
 	parseEntityUrlSplat,
+	resolveLixEntityForRoute,
 } from "~/lib/entity-url";
+import { EntityRoutePending } from "~/components/entity-route-pending";
 import { repositoryHead } from "~/lib/page-head";
 import { createFileRoute, notFound, useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
@@ -14,6 +15,7 @@ import {
 	useRepositoryActiveBranchId,
 	useRepositoryDefaultBranchId,
 	useRepositoryAtelierInstance,
+	useRepositoryEntityRouteLookupPolicy,
 } from "~/components/repository-atelier";
 import { ATELIER_BUILTIN_EXTENSION_IDS } from "@opral/atelier";
 import {
@@ -36,6 +38,7 @@ export const Route = createFileRoute("/@{$namespace}/$repository/folder/$")({
  */
 function RepositoryFolderRoute() {
 	const atelier = useRepositoryAtelierInstance();
+	const lookupPolicy = useRepositoryEntityRouteLookupPolicy();
 	const markRouteSynced = useMarkRepositoryRouteSynced();
 	const beginRouteNavigation = useBeginRepositoryRouteNavigation();
 	const consumeShellNavigation = useConsumeShellEntityNavigation();
@@ -59,6 +62,10 @@ function RepositoryFolderRoute() {
 		/** The URL the path was resolved for. */
 		splat: string | undefined;
 	} | null>(null);
+	const [pendingEntity, setPendingEntity] = useState<
+		"waiting" | "retry" | null
+	>(null);
+	const [lookupRetry, setLookupRetry] = useState(0);
 
 	// A descriptive path replacement is still the same folder navigation.
 	// Keep it separate from the effect that owns the pending view command.
@@ -102,12 +109,33 @@ function RepositoryFolderRoute() {
 		}
 		const controller = beginRouteNavigation();
 		const resolvingSplat = dirSplatRef.current;
+		let waitingForMetadata = false;
+		setPendingEntity(null);
 		void readRepositoryRoute(controller.signal, () =>
-			findLixEntity(atelier.lix, "directory", { id: entityId }),
+			resolveLixEntityForRoute(
+				atelier.lix,
+				"directory",
+				{ id: entityId },
+				{
+					policy: lookupPolicy,
+					signal: controller.signal,
+					onWaiting: () => {
+						waitingForMetadata = true;
+						setPendingEntity("waiting");
+					},
+				},
+			),
 		)
-			.then((entity) => {
+			.then((resolution) => {
 				if (controller.signal.aborted) return;
-				if (!entity) {
+				waitingForMetadata = false;
+				if (resolution.kind === "pending") {
+					controller.abort();
+					setPendingEntity("retry");
+					return;
+				}
+				setPendingEntity(null);
+				if (resolution.kind === "missing") {
 					markRouteSynced();
 					void navigate({
 						to: "/@{$namespace}/$repository",
@@ -117,6 +145,7 @@ function RepositoryFolderRoute() {
 					});
 					return;
 				}
+				const entity = resolution.entity;
 				// lixrayHomeDirState canonicalizes a trailing slash supplied by the URL
 				// to lix_directory's persisted path contract.
 				const dirPath = entity.path;
@@ -184,6 +213,14 @@ function RepositoryFolderRoute() {
 				attempt(5);
 			})
 			.catch((error: unknown) => {
+				if (controller.signal.aborted) return;
+				if (waitingForMetadata && lookupPolicy === "partial_replica") {
+					controller.abort();
+					setPendingEntity("retry");
+					console.error("Unable to resolve requested repository folder", error);
+					return;
+				}
+				setPendingEntity(null);
 				if (!controller.signal.aborted) {
 					console.error("Unable to resolve directory", error);
 					markRouteSynced();
@@ -200,11 +237,27 @@ function RepositoryFolderRoute() {
 		consumeShellNavigation,
 		entityId,
 		defaultBranchId,
+		lookupPolicy,
+		lookupRetry,
 		namespace,
 		repository,
 		navigate,
 		markRouteSynced,
 	]);
 
-	return null;
+	if (!pendingEntity) return null;
+	return (
+		<EntityRoutePending
+			kind="directory"
+			retryable={pendingEntity === "retry"}
+			onRetry={() => setLookupRetry((attempt) => attempt + 1)}
+			onReturnHome={() => {
+				void navigate({
+					to: "/@{$namespace}/$repository",
+					params: { namespace, repository },
+					search: branch ? { branch } : {},
+				});
+			}}
+		/>
+	);
 }

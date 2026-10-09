@@ -1,57 +1,15 @@
 import { spawnSync } from "node:child_process";
 import { randomInt } from "node:crypto";
-import { cp, mkdir } from "node:fs/promises";
+import { cp, mkdir, rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkPinnedLixCi } from "./check-pinned-lix-ci.mjs";
+import { createIsolatedSupabaseWorkdir } from "./local-supabase.mjs";
 import { resolveLixServerImage } from "./resolve-lix-server.mjs";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const project = `lixray-ci-local-${process.pid}`;
-const databaseLeasePort = 55432;
-const databasePort = 54322;
-const databaseWaitMs = 10 * 60 * 1000;
-const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function bindLocalPort(selected) {
-	const server = createServer();
-	await new Promise((resolve, reject) => {
-		server.once("error", reject);
-		server.listen(selected, "127.0.0.1", resolve);
-	});
-	return server;
-}
-
-async function acquireDatabaseLease() {
-	const deadline = Date.now() + databaseWaitMs;
-	while (true) {
-		try {
-			return await bindLocalPort(databaseLeasePort);
-		} catch (error) {
-			if (error.code !== "EADDRINUSE" || Date.now() >= deadline) {
-				throw new Error("Could not reserve the local CI database lease.", { cause: error });
-			}
-			await pause(2000);
-		}
-	}
-}
-
-async function waitForDatabasePort() {
-	const deadline = Date.now() + databaseWaitMs;
-	while (true) {
-		try {
-			const server = await bindLocalPort(databasePort);
-			await new Promise((resolve) => server.close(resolve));
-			return;
-		} catch (error) {
-			if (error.code !== "EADDRINUSE" || Date.now() >= deadline) {
-				throw new Error("Local CI database port 54322 did not become available.", { cause: error });
-			}
-			await pause(2000);
-		}
-	}
-}
 
 async function port() {
 	for (let attempt = 0; attempt < 20; attempt++) {
@@ -130,27 +88,40 @@ run("Published file browser tests", "pnpm", ["--dir", "web-app", "test:published
 run("Recovery and directory browser tests", "pnpm", ["--dir", "web-app", "exec", "playwright", "test", "--config", "playwright.file-component.config.ts", "recovery.spec.ts", "directory.spec.ts", "home-history.spec.ts"],
 	{ ...localEnv, LIXRAY_COMPONENT_PORT: await uniquePort() });
 
-const databaseLease = await acquireDatabaseLease();
+const isolatedDatabase = await createIsolatedSupabaseWorkdir();
+const databaseEnv = {
+	...localEnv,
+	LIXRAY_SUPABASE_WORKDIR: isolatedDatabase.workdir,
+	LIXRAY_SUPABASE_PROJECT_ID: isolatedDatabase.projectId,
+	LIXRAY_SUPABASE_API_URL: isolatedDatabase.apiUrl,
+	LIXRAY_SUPABASE_DISCARD_DATA: "1",
+};
 try {
-	await waitForDatabasePort();
-	run("Start local database", "pnpm", ["--dir", "database", "start:ci"]);
-	try {
-		run("Database policies and functions", "pnpm", ["--dir", "database", "test"]);
-		run("Database OAuth lifecycle", "pnpm", ["--dir", "database", "test:oauth"]);
-	} finally {
-		run("Stop local database", "pnpm", ["--dir", "database", "stop"]);
-	}
+	run("Start isolated local database", "pnpm", ["--dir", "database", "start:ci"], databaseEnv);
+	run("Database policies and functions", "pnpm", ["--dir", "database", "test"], databaseEnv);
+	run("Database OAuth lifecycle", "pnpm", ["--dir", "database", "test:oauth"], databaseEnv);
 } finally {
-	await new Promise((resolve) => databaseLease.close(resolve));
+	run("Stop isolated local database", "node", ["scripts/local-supabase.mjs", "stop"], databaseEnv);
+	await rm(isolatedDatabase.workdir, { recursive: true, force: true });
 }
 
 const { image: serverImage } = await resolveLixServerImage({ mode: "local", allowBuild: true });
 if (!serverImage) throw new Error("Pinned Lix server image could not be resolved or built locally.");
-const e2eEnv = await stackEnv(project);
+const e2eStackEnv = await stackEnv(project);
+const e2eDatabase = await createIsolatedSupabaseWorkdir();
+const e2eEnv = {
+	...e2eStackEnv,
+	LIXRAY_SUPABASE_WORKDIR: e2eDatabase.workdir,
+	LIXRAY_SUPABASE_PROJECT_ID: e2eDatabase.projectId,
+	LIXRAY_SUPABASE_API_URL: e2eDatabase.apiUrl,
+	LIXRAY_SUPABASE_DISCARD_DATA: "1",
+};
 try {
 	run("Authenticated Compose E2E", "pnpm", ["test:e2e"], { ...e2eEnv, LIXRAY_SERVER_IMAGE: serverImage });
 } finally {
 	run("Stop authenticated E2E services", "node", ["scripts/dev.mjs", "--down"], e2eEnv);
+	run("Remove authenticated E2E containers and volumes", "docker", ["compose", "down", "--volumes", "--remove-orphans"], e2eEnv);
+	await rm(e2eDatabase.workdir, { recursive: true, force: true });
 }
 
 const prepared = join(root, ".lixray-ci", "vendored-lix-sdk");
@@ -161,10 +132,11 @@ await cp(join(root, "vendor/lix/packages/storage-opfs/dist"), join(prepared, "st
 const revision = spawnSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).stdout.trim();
 const webImage = `lixray-web:ci-local-${revision.slice(0, 12)}`;
 run("Build deployable web image", "docker", ["build", "-f", "web-app/Dockerfile", "-t", webImage,
+	...(process.env.LIXRAY_DOCKER_BUILD_NETWORK ? ["--network", process.env.LIXRAY_DOCKER_BUILD_NETWORK] : []),
 	"--build-arg", "VITE_SUPABASE_URL=https://example.invalid",
 	"--build-arg", "VITE_SUPABASE_KEY=ci-public-placeholder",
 	"--build-arg", `RAILWAY_GIT_COMMIT_SHA=${revision}`, "."]);
-for (const scenario of ["navigation", "editing", "history", "conflicts"]) {
+for (const scenario of ["navigation", "editing", "history", "conflicts", "batching"]) {
 	// Chromium can lose loopback requests when Docker changes the host network.
 	// Retry with fresh repository state so a partial first run cannot affect it.
 	for (let attempt = 0; attempt < 2; attempt++) {
