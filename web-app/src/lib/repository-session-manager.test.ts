@@ -111,6 +111,25 @@ void test("aborts a pending open only after its last waiter leaves", async () =>
 	assert.equal(sharedSignal?.aborted, true);
 });
 
+void test("preserves the caller's exact abort reason for a pending acquisition", async () => {
+	const controller = new AbortController();
+	let finishOpen!: (resource: { close: () => Promise<void> }) => void;
+	const acquisition = acquireManagedRepositoryResource(
+		"repository-abort-reason",
+		async (): Promise<{ close: () => Promise<void> }> =>
+			new Promise((resolve) => {
+				finishOpen = resolve;
+			}),
+		{ signal: controller.signal },
+	);
+	const reason = "cancelled by caller";
+	controller.abort(reason);
+
+	await assert.rejects(acquisition, (error: unknown) => error === reason);
+	finishOpen({ close: async () => {} });
+	await new Promise((resolve) => setTimeout(resolve, 10));
+});
+
 function abortError(signal: AbortSignal): Error {
 	return signal.reason instanceof Error
 		? signal.reason

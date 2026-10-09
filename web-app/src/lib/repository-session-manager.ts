@@ -100,10 +100,8 @@ function waitForResource<T>(
 	});
 }
 
-function abortError(signal: AbortSignal): Error {
-	return signal.reason instanceof Error
-		? signal.reason
-		: new DOMException("The operation was aborted.", "AbortError");
+function abortError(signal: AbortSignal): unknown {
+	return signal.reason;
 }
 
 function releaseManagedResource(key: string, managed: ManagedResource): void {
