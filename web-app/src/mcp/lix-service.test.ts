@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-	BATCH_CHECKPOINT_WARNING,
 	CONTEXT_REOPEN_HINT,
 	LixService,
 	OPEN_LIX_FILE_MANIFEST_SQL,
@@ -108,7 +107,7 @@ class FakeRuntime implements LixRuntimeClient {
 			};
 		}
 		if (
-			request.sql === "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)"
+			request.sql.startsWith("SELECT commit_id FROM lix_create_checkpoint(")
 		) {
 			this.commit += 1;
 			return {
@@ -119,6 +118,40 @@ class FakeRuntime implements LixRuntimeClient {
 				commit: null,
 			};
 		}
+		if (
+			request.sql ===
+			"SELECT commit_id, working_base_commit_id FROM lix_branch WHERE id = lix_active_branch_id()"
+		)
+			return {
+				columns: ["commit_id", "working_base_commit_id"],
+				rows: [
+					[
+						{ kind: "text" as const, value: `commit-${this.commit}` },
+						{ kind: "text" as const, value: "commit-0" },
+					],
+				],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+		if (request.sql.startsWith("SELECT conversation_id FROM lix_log"))
+			return {
+				columns: ["conversation_id"],
+				rows: [[{ kind: "text" as const, value: "conversation-1" }]],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+
+		if (request.sql.startsWith("SELECT id FROM lix_conversation WHERE target"))
+			return {
+				columns: ["id"],
+				rows: [[{ kind: "text" as const, value: "conversation-1" }]],
+				rowsAffected: 0,
+				notices: [],
+				commit: null,
+			};
+
 		if (request.sql.includes("lix_active_branch_commit_id")) {
 			return {
 				columns: ["commit_id"],
@@ -530,17 +563,20 @@ void test("checkpoint uses the canonical SQL function on the context branch", as
 	const opened = await service.openLix(LIX_ID, "draft");
 	runtime.calls.length = 0;
 
-	const checkpoint = await service.createCheckpoint(opened.context);
+	const checkpoint = await service.createCheckpoint(opened.context, {
+		title: "Finish draft",
+		scope: { type: "all" },
+	});
 
 	assert.equal(checkpoint.commitId, "commit-1");
-	assert.deepEqual(runtime.calls, [
-		{
-			lixId: LIX_ID,
-			branchId: "draft",
-			sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)",
-			params: undefined,
-		},
-	]);
+	assert.ok(
+		runtime.calls.some(
+			(call) =>
+				call.branchId === "draft" &&
+				call.sql === "SELECT commit_id FROM lix_create_checkpoint($1, $2)",
+		),
+	);
+	assert.equal(checkpoint.title, "Finish draft");
 });
 
 void test("restore returns the newly created commit rather than the source", async () => {
@@ -1173,7 +1209,7 @@ for (const failCheckpoint of [false, true]) {
 			) {
 				if (
 					request.sql ===
-						"SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)" &&
+						"SELECT commit_id FROM lix_create_checkpoint($1, $2)" &&
 					failCheckpoint
 				)
 					throw new Error("checkpoint failed");
@@ -1186,13 +1222,16 @@ for (const failCheckpoint of [false, true]) {
 		runtime.commit = 1;
 		const written = await service.executeBatch(opened.context, {
 			statements: [upsert("/saved.md", "saved")],
-			checkpoint: true,
+			checkpoint: { title: "Finish batch", scope: { type: "all" } },
 		});
 		assert.deepEqual(written.commit, { before: "commit-0", after: "commit-1" });
-		assert.equal(runtime.batches, 1);
+		assert.ok(runtime.batches >= 2);
 		if (failCheckpoint) {
 			assert.equal(written.checkpointCommitId, undefined);
-			assert.equal(written.warning, BATCH_CHECKPOINT_WARNING);
+			assert.match(
+				written.warning ?? "",
+				/Saved; checkpoint unavailable.*checkpoint failed/,
+			);
 		} else {
 			assert.equal(written.checkpointCommitId, "commit-2");
 			assert.equal(written.warning, undefined);

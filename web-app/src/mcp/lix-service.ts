@@ -1,3 +1,11 @@
+import {
+	checkpointInTransaction,
+	completeCheckpointReceipt,
+	updateCheckpointInTransaction,
+	validateCheckpoint,
+	type CheckpointInput,
+	type CheckpointReceipt,
+} from "./checkpoints.ts";
 import { withSpan } from "../telemetry.ts";
 import { entityRouteBase, entityRoutePath } from "../lib/entity-url.ts";
 import { FILE_CHANGES_SQL } from "./file-diff-query.ts";
@@ -549,24 +557,31 @@ export class LixService {
 	 * Unrelated changes never block. A concurrent commit replays the whole
 	 * transaction, guard included, so the check and the write are one step.
 	 *
-	 * `checkpoint` marks the head once the batch has committed; failing to is
-	 * a warning on a batch that is already saved, never an error.
+	 * `checkpoint` marks only the batch affected rows unless all scope is explicit.
+	 * The head guard refuses intervening writes; checkpoint failure is a warning
+	 * on a batch that is already saved, never a reason to repeat its writes.
 	 */
 	async executeBatch(
 		contextToken: string,
 		request: ExecuteBatchRequest & {
 			lastSeenCommitId?: string;
-			checkpoint?: boolean;
+			checkpoint?: Omit<CheckpointInput, "scope"> & { scope?: { type: "all" } };
 		},
 	): Promise<
 		ExecuteScriptResponse & {
 			context: string;
 			checkpointCommitId?: string;
+			checkpointReceipt?: CheckpointReceipt;
 			warning?: string;
 		}
 	> {
 		const context = await this.readContext(contextToken);
 		const { lastSeenCommitId, checkpoint, ...batch } = request;
+		if (checkpoint)
+			validateCheckpoint({
+				...checkpoint,
+				scope: checkpoint.scope ?? { type: "all" },
+			});
 		let executed: ExecuteScriptResponse & { warning?: string };
 		try {
 			executed =
@@ -582,19 +597,54 @@ export class LixService {
 		}
 		let warning = executed.warning;
 		let checkpointCommitId: string | undefined;
+		let checkpointReceipt: CheckpointReceipt | undefined;
 		if (checkpoint) {
 			try {
-				checkpointCommitId = (await this.createCheckpoint(contextToken))
-					.commitId;
-			} catch {
-				warning = [warning, BATCH_CHECKPOINT_WARNING].filter(Boolean).join(" ");
+				if (!executed.commit && checkpoint.scope?.type !== "all")
+					throw createLixError(
+						"invalid_request",
+						"The batch has no tracked changes to checkpoint.",
+					);
+				const created = await this.client.transaction(
+					context.lixId,
+					context.branchId,
+					(tx) =>
+						checkpointInTransaction(
+							tx,
+							{
+								...checkpoint,
+								scope: checkpoint.scope ?? { type: "selected", selections: [] },
+								expected_head_commit_id:
+									checkpoint.expected_head_commit_id ?? executed.commit?.after,
+							},
+							checkpoint.scope?.type === "all" ? undefined : executed.commit!,
+						),
+				);
+				checkpointReceipt = await this.completeCheckpoint(
+					context,
+					created.value,
+					created.commit?.after ?? created.value.commit_id,
+				);
+				checkpointCommitId = checkpointReceipt.commit_id;
+				if (checkpointReceipt.warning)
+					warning = [warning, checkpointReceipt.warning]
+						.filter(Boolean)
+						.join(" ");
+			} catch (error) {
+				warning = [
+					warning,
+					BATCH_CHECKPOINT_WARNING,
+					error instanceof Error ? error.message : undefined,
+				]
+					.filter(Boolean)
+					.join(" ");
 			}
 		}
 		return {
 			context: contextToken,
 			results: executed.results,
 			commit: executed.commit,
-			...(checkpointCommitId ? { checkpointCommitId } : {}),
+			...(checkpointCommitId ? { checkpointCommitId, checkpointReceipt } : {}),
 			...(warning ? { warning } : {}),
 		};
 	}
@@ -1012,23 +1062,56 @@ export class LixService {
 		});
 	}
 
-	async createCheckpoint(contextToken: string) {
+	async createCheckpoint(contextToken: string, input: CheckpointInput) {
 		return withSpan("lix.checkpoint", async () => {
+			validateCheckpoint(input);
 			const context = await this.readContext(contextToken);
-			const response = await this.client.execute(
+			const result = await this.client.transaction(
 				context.lixId,
 				context.branchId,
-				{ sql: "SELECT commit_id FROM lix_create_checkpoint(NULL, NULL)" },
+				(tx) => checkpointInTransaction(tx, input),
 			);
-			const commitId = response.rows[0]?.[0];
-			if (!commitId || commitId.kind !== "text") {
-				throw createLixError(
-					"upstream_error",
-					"Lix did not return a checkpoint commit id.",
-				);
-			}
-			return { context: contextToken, commitId: commitId.value };
+			const receipt = await this.completeCheckpoint(
+				context,
+				result.value,
+				result.commit?.after ?? result.value.commit_id,
+			);
+			return { context: contextToken, commitId: receipt.commit_id, ...receipt };
 		});
+	}
+
+	private async completeCheckpoint(
+		context: LixContext,
+		receipt: CheckpointReceipt,
+		actualHead: string,
+	): Promise<CheckpointReceipt> {
+		try {
+			return (
+				await this.client.transaction(context.lixId, context.branchId, (tx) =>
+					completeCheckpointReceipt(tx, receipt, actualHead),
+				)
+			).value;
+		} catch (error) {
+			return {
+				...receipt,
+				head_commit_id: actualHead,
+				warning: `Checkpoint and metadata saved; scope receipt unavailable. Do not repeat checkpoint creation. ${error instanceof Error ? error.message : ""}`,
+			};
+		}
+	}
+
+	async updateCheckpoint(
+		contextToken: string,
+		commitId: string,
+		input: { title?: string; description?: string | null },
+	) {
+		const context = await this.readContext(contextToken);
+		const result = await this.client.transaction(
+			context.lixId,
+			context.branchId,
+			(tx) => updateCheckpointInTransaction(tx, commitId, input),
+		);
+		return { context: contextToken, ...result.value };
 	}
 
 	async restore(contextToken: string, commitId: string) {
