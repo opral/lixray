@@ -60,6 +60,7 @@ test("local preflight stops before expensive checks when the pinned producer fai
 			api,
 			git: () => `160000 commit ${revision}\tvendor/lix`,
 			log: () => {},
+			waitMs: 0,
 		}),
 		/no browser artifact from completed successful CI/,
 	);
