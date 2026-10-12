@@ -10,7 +10,7 @@ for (const width of [1440, 390, 320]) {
 			await expect(
 				page.getByRole("heading", {
 					level: 1,
-					name: "Shared repository for every AI agent you use.",
+					name: "Shared repository for you and every AI agent you use.",
 				}),
 			).toBeVisible();
 			await expect(page.getByRole("banner")).toBeVisible();
