@@ -227,7 +227,14 @@ export function LandingPage() {
 								"Files and SQL tables in one open-source repo. Claude, ChatGPT, Codex, and your scripts read and write the same data."
 							}
 						</p>
-						<div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+						<div
+							style={{
+								display: "flex",
+								flexWrap: "wrap",
+								alignItems: "center",
+								gap: "20px",
+							}}
+						>
 							<a
 								href={repositoryTo}
 								style={{
