@@ -15,8 +15,8 @@ export const secondaryButton =
  * link colors and the narrow-screen layout, keyed on data-lr markers.
  */
 const landingCss = `
-[data-lr="root"] a { color: #1C1917; }
-[data-lr="root"] a:hover { color: #E8590C; }
+[data-lr="root"] a { color: var(--atelier-fg); }
+[data-lr="root"] a:hover { color: var(--atelier-accent); }
 @media (max-width: 860px) {
 	[data-lr="root"] { padding: 40px 20px 56px !important; gap: 56px !important; }
 	[data-lr="root"] h1 { font-size: 40px !important; }
@@ -78,11 +78,11 @@ function CompareMark({ value }: { value: CompareCell }) {
 	if (value === true) {
 		return (
 			<svg width="18" height="18" viewBox="0 0 22 22" aria-label="Yes">
-				<circle cx="11" cy="11" r="11" fill="#2F8F57" />
+				<circle cx="11" cy="11" r="11" fill="var(--atelier-success)" />
 				<path
 					d="M6.6 11.3 l3 3 l5.8 -6.3"
 					fill="none"
-					stroke="#FFFFFF"
+					stroke="var(--atelier-panel)"
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -94,13 +94,21 @@ function CompareMark({ value }: { value: CompareCell }) {
 		return (
 			<span
 				aria-label="No"
-				style={{ color: "#A8A29E", fontSize: "18px", lineHeight: "1" }}
+				style={{
+					color: "var(--atelier-fg-faint)",
+					fontSize: "18px",
+					lineHeight: "1",
+				}}
 			>
 				{"\u2013"}
 			</span>
 		);
 	}
-	return <span style={{ fontSize: "13.5px", color: "#78716C" }}>{value}</span>;
+	return (
+		<span style={{ fontSize: "13.5px", color: "var(--atelier-fg-subtle)" }}>
+			{value}
+		</span>
+	);
 }
 
 function CompareTable() {
@@ -108,8 +116,8 @@ function CompareTable() {
 		<div
 			data-lr="cmp"
 			style={{
-				background: "#FFFFFF",
-				border: "1px solid #E2DCD3",
+				background: "var(--atelier-panel)",
+				border: "1px solid var(--atelier-border)",
 				borderRadius: "14px",
 				overflow: "hidden",
 			}}
@@ -121,10 +129,10 @@ function CompareTable() {
 					gridTemplateColumns: compareGrid,
 					gap: "12px",
 					padding: "14px 20px",
-					background: "#FAF9F7",
+					background: "var(--atelier-bg-subtle)",
 					fontSize: "14.5px",
 					fontWeight: "600",
-					color: "#44403C",
+					color: "var(--atelier-fg-muted)",
 				}}
 			>
 				<span />
@@ -153,7 +161,7 @@ function CompareTable() {
 						gridTemplateColumns: compareGrid,
 						gap: "12px",
 						padding: "13px 20px",
-						borderTop: "1px solid #EDEAE6",
+						borderTop: "1px solid var(--atelier-border-subtle)",
 						fontSize: "15px",
 						alignItems: "center",
 					}}
@@ -178,20 +186,26 @@ export function LandingPage() {
 	const ctaLabel = user ? "Open LixRay" : "Create a repository";
 
 	return (
-		<div style={{ minHeight: "100vh", background: "#F3F1ED" }}>
+		<div
+			style={{
+				minHeight: "100vh",
+				colorScheme: "light",
+				background: "var(--atelier-bg)",
+			}}
+		>
 			<style>{landingCss}</style>
 			<SiteHeader />
 			<main>
 				<div
 					data-lr="root"
 					style={{
-						background: "#F3F1ED",
+						background: "var(--atelier-bg)",
 						maxWidth: "1040px",
 						margin: "0 auto",
 						boxSizing: "border-box",
 						fontFamily:
 							"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-						color: "#1C1917",
+						color: "var(--atelier-fg)",
 						padding: "80px 64px 72px",
 						display: "flex",
 						flexDirection: "column",
@@ -218,7 +232,7 @@ export function LandingPage() {
 								margin: "0",
 								fontSize: "19px",
 								lineHeight: "1.6",
-								color: "#44403C",
+								color: "var(--atelier-fg-muted)",
 								textWrap: "pretty",
 								maxWidth: "680px",
 							}}
@@ -240,11 +254,9 @@ export function LandingPage() {
 								style={{
 									fontSize: "17px",
 									fontWeight: "700",
-									color: "#FFFFFF",
-									background:
-										"linear-gradient(180deg, #F97316 0%, #E8590C 100%)",
-									boxShadow:
-										"0 8px 20px rgba(232,89,12,.3), inset 0 1px 0 rgba(255,255,255,.25)",
+									color: "var(--atelier-panel)",
+									background: "var(--atelier-accent-gradient)",
+									boxShadow: "var(--atelier-shadow-accent)",
 									textDecoration: "none",
 									padding: "14px 24px",
 									borderRadius: "10px",
@@ -264,10 +276,11 @@ export function LandingPage() {
 					</div>
 					<div
 						style={{
-							background: "#FFFFFF",
-							border: "1px solid #E2DCD3",
+							background: "var(--atelier-panel)",
+							border: "1px solid var(--atelier-border)",
 							borderRadius: "16px",
-							boxShadow: "0 12px 32px rgba(28,25,23,0.07)",
+							boxShadow:
+								"0 12px 32px color-mix(in srgb, var(--atelier-fg) 7%, transparent)",
 							overflow: "hidden",
 						}}
 					>
@@ -277,8 +290,8 @@ export function LandingPage() {
 								alignItems: "center",
 								gap: "8px",
 								padding: "12px 16px",
-								background: "#FAF9F7",
-								borderBottom: "1px solid #EDEAE6",
+								background: "var(--atelier-bg-subtle)",
+								borderBottom: "1px solid var(--atelier-border-subtle)",
 							}}
 						>
 							<span
@@ -286,7 +299,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--atelier-border)",
 								}}
 							></span>
 							<span
@@ -294,7 +307,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--atelier-border)",
 								}}
 							></span>
 							<span
@@ -302,7 +315,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--atelier-border)",
 									marginRight: "8px",
 								}}
 							></span>
@@ -310,7 +323,7 @@ export function LandingPage() {
 								style={{
 									fontFamily: "ui-monospace, Menlo, monospace",
 									fontSize: "13.5px",
-									color: "#78716C",
+									color: "var(--atelier-fg-subtle)",
 								}}
 							>
 								{"lixray.com"}
@@ -326,7 +339,7 @@ export function LandingPage() {
 							<div
 								style={{
 									padding: "16px 10px",
-									borderRight: "1px solid #EDEAE6",
+									borderRight: "1px solid var(--atelier-border-subtle)",
 									display: "flex",
 									flexDirection: "column",
 									gap: "2px",
@@ -357,7 +370,7 @@ export function LandingPage() {
 										gap: "10px",
 										padding: "7px 10px",
 										borderRadius: "8px",
-										background: "#F3F1ED",
+										background: "var(--atelier-bg)",
 										fontWeight: "600",
 									}}
 								>
@@ -366,7 +379,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#1C1917"
+										stroke="var(--atelier-fg)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="1.5" width="5" height="5" rx="1" />
@@ -382,7 +395,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--atelier-fg-muted)",
 									}}
 								>
 									<svg
@@ -390,7 +403,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--atelier-fg-subtle)"
 										strokeWidth="1.3"
 										strokeLinejoin="round"
 									>
@@ -404,7 +417,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--atelier-fg-muted)",
 									}}
 								>
 									<svg
@@ -412,7 +425,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--atelier-fg-subtle)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -426,7 +439,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--atelier-fg-muted)",
 									}}
 								>
 									<svg
@@ -434,7 +447,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--atelier-fg-subtle)"
 										strokeWidth="1.3"
 										strokeLinecap="round"
 									>
@@ -448,7 +461,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "#78716C",
+										color: "var(--atelier-fg-subtle)",
 									}}
 								>
 									{"SOURCES"}
@@ -457,8 +470,8 @@ export function LandingPage() {
 											marginLeft: "8px",
 											padding: "1px 7px",
 											borderRadius: "99px",
-											background: "#FFF4EC",
-											color: "#C2410C",
+											background: "var(--atelier-accent-subtle)",
+											color: "var(--atelier-accent)",
 											fontSize: "10.5px",
 											letterSpacing: "0.04em",
 										}}
@@ -475,9 +488,18 @@ export function LandingPage() {
 									}}
 								>
 									<svg width="16" height="16" viewBox="0 0 16 16">
-										<path d="M5.5 1.5h5l4.5 8h-5z" fill="#FBBC04" />
-										<path d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z" fill="#0F9D58" />
-										<path d="M3.5 13.8h9.5l2-4.3H5.8z" fill="#4285F4" />
+										<path
+											d="M5.5 1.5h5l4.5 8h-5z"
+											fill="#FBBC04" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+											fill="#0F9D58" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M3.5 13.8h9.5l2-4.3H5.8z"
+											fill="#4285F4" /* token-literal: Google Drive brand mark */
+										/>
 									</svg>
 									{"Google Drive"}
 								</span>
@@ -496,14 +518,14 @@ export function LandingPage() {
 											width="13"
 											height="13"
 											rx="2.5"
-											fill="#FFFFFF"
-											stroke="#1C1917"
+											fill="var(--atelier-panel)"
+											stroke="var(--atelier-fg)"
 											strokeWidth="1.3"
 										/>
 										<path
 											d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 											fill="none"
-											stroke="#1C1917"
+											stroke="var(--atelier-fg)"
 											strokeWidth="1.4"
 											strokeLinejoin="round"
 										/>
@@ -516,7 +538,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#78716C",
+										color: "var(--atelier-fg-subtle)",
 									}}
 								>
 									<span
@@ -537,7 +559,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "#78716C",
+										color: "var(--atelier-fg-subtle)",
 									}}
 								>
 									{"AGENTS"}
@@ -600,8 +622,8 @@ export function LandingPage() {
 									</span>
 									<span
 										style={{
-											background: "#1C1917",
-											color: "#FFFFFF",
+											background: "var(--atelier-fg)",
+											color: "var(--atelier-panel)",
 											fontSize: "14px",
 											fontWeight: "600",
 											padding: "8px 16px",
@@ -616,9 +638,9 @@ export function LandingPage() {
 										display: "flex",
 										justifyContent: "space-between",
 										padding: "8px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 										fontSize: "13.5px",
-										color: "#78716C",
+										color: "var(--atelier-fg-subtle)",
 									}}
 								>
 									<span>{"Name"}</span>
@@ -630,7 +652,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 									}}
 								>
 									<span
@@ -645,7 +667,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--atelier-fg-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -669,7 +691,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 									}}
 								>
 									<span
@@ -684,7 +706,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--atelier-fg-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -708,7 +730,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 									}}
 								>
 									<span
@@ -741,7 +763,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 									}}
 								>
 									<span
@@ -774,7 +796,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
 									}}
 								>
 									<span
@@ -791,7 +813,7 @@ export function LandingPage() {
 												width="11"
 												height="14"
 												rx="1.6"
-												fill="#21A366"
+												fill="#21A366" /* token-literal: Excel brand mark */
 											/>
 											<rect
 												x="1"
@@ -799,18 +821,20 @@ export function LandingPage() {
 												width="9"
 												height="8"
 												rx="1.3"
-												fill="#107C41"
+												fill="#107C41" /* token-literal: Excel brand mark */
 											/>
 											<path
 												d="M3.3 6 l4 4 M7.3 6 l-4 4"
-												stroke="#FFFFFF"
+												stroke="var(--atelier-panel)"
 												strokeWidth="1.2"
 												strokeLinecap="round"
 											/>
 										</svg>
 										{"budget.xlsx"}
 									</span>
-									<span style={{ color: "#44403C" }}>{"You"}</span>
+									<span style={{ color: "var(--atelier-fg-muted)" }}>
+										{"You"}
+									</span>
 								</div>
 								<div
 									style={{
@@ -834,14 +858,16 @@ export function LandingPage() {
 										/>
 										{"pitch-deck.pdf"}
 									</span>
-									<span style={{ color: "#44403C" }}>{"You"}</span>
+									<span style={{ color: "var(--atelier-fg-muted)" }}>
+										{"You"}
+									</span>
 								</div>
 								<div
 									style={{
 										marginTop: "6px",
-										border: "1px solid #E2DCD3",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "14px",
-										background: "#FAF9F7",
+										background: "var(--atelier-bg-subtle)",
 										padding: "14px 16px",
 										display: "flex",
 										alignItems: "center",
@@ -866,7 +892,7 @@ export function LandingPage() {
 										style={{
 											flex: "1",
 											minWidth: "150px",
-											background: "#FFFFFF",
+											background: "var(--atelier-panel)",
 											borderRadius: "8px",
 											padding: "6px 12px",
 											fontFamily: "ui-monospace, Menlo, monospace",
@@ -877,9 +903,9 @@ export function LandingPage() {
 											style={{
 												display: "flex",
 												gap: "40px",
-												color: "#78716C",
+												color: "var(--atelier-fg-subtle)",
 												paddingBottom: "4px",
-												borderBottom: "1px solid #EDEAE6",
+												borderBottom: "1px solid var(--atelier-border-subtle)",
 											}}
 										>
 											<span style={{ width: "50px" }}>{"name"}</span>
@@ -896,8 +922,8 @@ export function LandingPage() {
 											<span>
 												<span
 													style={{
-														background: "#FDECEC",
-														color: "#B42318",
+														background: "var(--atelier-danger-subtle)",
+														color: "var(--atelier-danger)",
 														textDecoration: "line-through",
 														padding: "0 4px",
 														borderRadius: "3px",
@@ -907,8 +933,8 @@ export function LandingPage() {
 												</span>{" "}
 												<span
 													style={{
-														background: "#E7F3EB",
-														color: "#1F6B40",
+														background: "var(--atelier-success-subtle)",
+														color: "var(--atelier-success-border)",
 														padding: "0 4px",
 														borderRadius: "3px",
 													}}
@@ -921,8 +947,8 @@ export function LandingPage() {
 									<span style={{ display: "flex", gap: "8px" }}>
 										<span
 											style={{
-												background: "#1C1917",
-												color: "#FFFFFF",
+												background: "var(--atelier-fg)",
+												color: "var(--atelier-panel)",
 												fontSize: "14px",
 												fontWeight: "600",
 												padding: "8px 16px",
@@ -933,8 +959,8 @@ export function LandingPage() {
 										</span>
 										<span
 											style={{
-												border: "1px solid #E2DCD3",
-												background: "#FFFFFF",
+												border: "1px solid var(--atelier-border)",
+												background: "var(--atelier-panel)",
 												fontSize: "14px",
 												padding: "8px 16px",
 												borderRadius: "8px",
@@ -968,7 +994,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--atelier-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -980,7 +1006,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1000,7 +1026,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--atelier-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1012,7 +1038,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1032,7 +1058,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--atelier-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1045,7 +1071,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1067,7 +1093,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--atelier-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1082,7 +1108,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1106,9 +1132,18 @@ export function LandingPage() {
 								}}
 							>
 								<svg width="22" height="22" viewBox="0 0 16 16">
-									<path d="M5.5 1.5h5l4.5 8h-5z" fill="#FBBC04" />
-									<path d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z" fill="#0F9D58" />
-									<path d="M3.5 13.8h9.5l2-4.3H5.8z" fill="#4285F4" />
+									<path
+										d="M5.5 1.5h5l4.5 8h-5z"
+										fill="#FBBC04" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+										fill="#0F9D58" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M3.5 13.8h9.5l2-4.3H5.8z"
+										fill="#4285F4" /* token-literal: Google Drive brand mark */
+									/>
 								</svg>
 								<svg width="22" height="22" viewBox="0 0 16 16">
 									<rect
@@ -1117,14 +1152,14 @@ export function LandingPage() {
 										width="13"
 										height="13"
 										rx="2.5"
-										fill="#FFFFFF"
-										stroke="#1C1917"
+										fill="var(--atelier-panel)"
+										stroke="var(--atelier-fg)"
 										strokeWidth="1.3"
 									/>
 									<path
 										d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 										fill="none"
-										stroke="#1C1917"
+										stroke="var(--atelier-fg)"
 										strokeWidth="1.4"
 										strokeLinejoin="round"
 									/>
@@ -1139,7 +1174,12 @@ export function LandingPage() {
 										flexShrink: "0",
 									}}
 								/>
-								<span style={{ fontSize: "14px", color: "#78716C" }}>
+								<span
+									style={{
+										fontSize: "14px",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
 									{"and more"}
 								</span>
 							</span>
@@ -1156,8 +1196,8 @@ export function LandingPage() {
 									style={{
 										fontSize: "11.5px",
 										fontWeight: "700",
-										color: "#B54708",
-										background: "#FDEBD3",
+										color: "var(--atelier-tag-orange-fg)",
+										background: "var(--atelier-tag-orange)",
 										padding: "2px 8px",
 										borderRadius: "99px",
 									}}
@@ -1169,7 +1209,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1185,7 +1225,7 @@ export function LandingPage() {
 							flexDirection: "column",
 							gap: "28px",
 							paddingTop: "56px",
-							borderTop: "1px solid #D6CFC6",
+							borderTop: "1px solid var(--atelier-border-strong)",
 						}}
 					>
 						<div
@@ -1206,7 +1246,7 @@ export function LandingPage() {
 									margin: "0",
 									fontSize: "18px",
 									lineHeight: "1.65",
-									color: "#44403C",
+									color: "var(--atelier-fg-muted)",
 									textWrap: "pretty",
 									maxWidth: "740px",
 								}}
@@ -1226,19 +1266,19 @@ export function LandingPage() {
 									>
 										<path
 											d="M14.7618 5.74842L16.9208 9.85984L22.3675 0.358398H25.7133L19.0723 11.6284L22.5712 17.5085H19.2407L16.9208 13.443L14.6393 17.5085H11.2705L14.7618 11.6284L11.393 5.74842H14.7618Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M6.16211 17.5081V5.74805H9.42368V17.5081H6.16211Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M3.52112 0.393555V17.6416H0.287109V0.393555H3.52112Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M6.21582 0.393555H14.8399V3.08856H6.21582V0.393555Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 									</svg>
 								</a>
@@ -1258,10 +1298,12 @@ export function LandingPage() {
 						>
 							<div
 								style={{
-									background: "#1C1917",
+									colorScheme: "dark",
+									background: "var(--atelier-panel)",
 									borderRadius: "14px",
 									overflow: "hidden",
-									boxShadow: "0 16px 36px rgba(28,25,23,0.16)",
+									boxShadow:
+										"0 16px 36px color-mix(in srgb, var(--atelier-fg) 16%, transparent)",
 								}}
 							>
 								<div
@@ -1271,26 +1313,28 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										gap: "12px",
 										padding: "14px 20px",
-										background: "#292524",
-										borderBottom: "1px solid #3A3531",
+										background: "var(--atelier-bg-hover)",
+										borderBottom: "1px solid var(--atelier-border)",
 									}}
 								>
 									<span
 										style={{
 											fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
 											fontSize: "16px",
-											color: "#F3F1ED",
+											color: "var(--atelier-fg)",
 										}}
 									>
-										<span style={{ color: "#8A8178" }}>{"$ "}</span>
+										<span style={{ color: "var(--atelier-fg-subtle)" }}>
+											{"$ "}
+										</span>
 										{"npm install @lix-js/sdk"}
 									</span>
 									<span
 										style={{
 											fontSize: "13px",
 											fontWeight: "600",
-											color: "#1C1917",
-											background: "#F3F1ED",
+											color: "var(--atelier-panel)",
+											background: "var(--atelier-fg)",
 											padding: "5px 12px",
 											borderRadius: "7px",
 										}}
@@ -1306,7 +1350,7 @@ export function LandingPage() {
 										fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
 										fontSize: "13px",
 										lineHeight: "1.8",
-										color: "#F3F1ED",
+										color: "var(--atelier-fg)",
 									}}
 								>
 									<code>{`import { openLix } from "@lix-js/sdk";
@@ -1331,7 +1375,7 @@ await lix.close();`}</code>
 								height="24"
 								viewBox="0 0 44 24"
 								fill="none"
-								stroke="#E8590C"
+								stroke="var(--atelier-accent)"
 								strokeWidth="2"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1348,11 +1392,12 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "14px",
 										overflow: "hidden",
-										boxShadow: "0 12px 28px rgba(28,25,23,0.06)",
+										boxShadow:
+											"0 12px 28px color-mix(in srgb, var(--atelier-fg) 6%, transparent)",
 									}}
 								>
 									<div
@@ -1361,8 +1406,8 @@ await lix.close();`}</code>
 											alignItems: "center",
 											gap: "8px",
 											padding: "10px 14px",
-											background: "#FAF9F7",
-											borderBottom: "1px solid #EDEAE6",
+											background: "var(--atelier-bg-subtle)",
+											borderBottom: "1px solid var(--atelier-border-subtle)",
 										}}
 									>
 										<span
@@ -1370,7 +1415,7 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--atelier-border)",
 											}}
 										></span>
 										<span
@@ -1378,7 +1423,7 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--atelier-border)",
 											}}
 										></span>
 										<span
@@ -1386,7 +1431,7 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--atelier-border)",
 												marginRight: "6px",
 											}}
 										></span>
@@ -1394,7 +1439,7 @@ await lix.close();`}</code>
 											style={{
 												fontFamily: "ui-monospace, Menlo, monospace",
 												fontSize: "12.5px",
-												color: "#78716C",
+												color: "var(--atelier-fg-subtle)",
 											}}
 										>
 											{"lixray.com/acme/home"}
@@ -1415,7 +1460,7 @@ await lix.close();`}</code>
 											height="16"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--atelier-fg-subtle)"
 											strokeWidth="1.3"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -1429,9 +1474,9 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "8px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											fontSize: "12.5px",
-											color: "#8A8178",
+											color: "var(--atelier-fg-subtle)",
 										}}
 									>
 										<span>{"name"}</span>
@@ -1444,18 +1489,20 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											fontSize: "14px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Acme"}</span>
-										<span style={{ color: "#57534E" }}>{"Hamburg"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Hamburg"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#E7F3EB",
-												color: "#1F6B40",
+												background: "var(--atelier-success-subtle)",
+												color: "var(--atelier-success-border)",
 												padding: "1px 10px",
 												borderRadius: "99px",
 												fontSize: "12.5px",
@@ -1470,18 +1517,20 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											fontSize: "14px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Bluebird Caf\u00e9"}</span>
-										<span style={{ color: "#57534E" }}>{"Lisbon"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Lisbon"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#FDEBD3",
-												color: "#B54708",
+												background: "var(--atelier-tag-orange)",
+												color: "var(--atelier-tag-orange-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
 												fontSize: "12.5px",
@@ -1496,18 +1545,20 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											fontSize: "14px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Northwind"}</span>
-										<span style={{ color: "#57534E" }}>{"Berlin"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Berlin"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#E7F3EB",
-												color: "#1F6B40",
+												background: "var(--atelier-success-subtle)",
+												color: "var(--atelier-success-border)",
 												padding: "1px 10px",
 												borderRadius: "99px",
 												fontSize: "12.5px",
@@ -1533,7 +1584,7 @@ await lix.close();`}</code>
 									fontSize: "13px",
 									fontWeight: "700",
 									letterSpacing: "0.1em",
-									color: "#78716C",
+									color: "var(--atelier-fg-subtle)",
 								}}
 							>
 								{"EXAMPLES"}
@@ -1548,8 +1599,8 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -1558,7 +1609,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#FFF1EA",
+											background: "var(--atelier-accent-subtle)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -1577,25 +1628,32 @@ await lix.close();`}</code>
 										>
 											<span style={{ display: "flex", gap: "4px" }}>
 												<svg width="24" height="24" viewBox="0 0 28 28">
-													<rect width="28" height="28" rx="7" fill="#FC4C02" />
+													<rect
+														width="28"
+														height="28"
+														rx="7"
+														fill="#FC4C02" /* token-literal: Lix brand mark */
+													/>
 													<path
 														d="M11.5 6 L6.5 16 h3.2 l1.8 -3.6 l1.8 3.6 h3.2 z"
-														fill="#FFFFFF"
+														fill="var(--atelier-panel)"
 													/>
 													<path
 														d="M16.5 16 l-1.6 3.2 l-1.6 -3.2 h-2 l3.6 7 l3.6 -7 z"
-														fill="#FFC4A8"
+														fill="var(--atelier-tag-orange)"
 													/>
 												</svg>
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -1607,7 +1665,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#78716C"
+													stroke="var(--atelier-fg-subtle)"
 													strokeWidth="1.3"
 												>
 													<rect
@@ -1642,266 +1700,266 @@ await lix.close();`}</code>
 													y="0"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="0"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="36"
 													y="0"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="24"
 													y="6"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="6"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="36"
 													y="6"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="12"
 													width="6"
 													height="6"
-													fill="#E8B48A"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="18"
 													y="18"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="24"
 													y="18"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="30"
 													y="18"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="36"
 													y="18"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="12"
 													y="24"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="24"
 													y="24"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="30"
 													y="24"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="36"
 													y="24"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="48"
 													y="24"
 													width="6"
 													height="6"
-													fill="#E8B48A"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="6"
 													y="30"
 													width="6"
 													height="6"
-													fill="#E8B48A"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="24"
 													y="30"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="30"
 													y="30"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="36"
 													y="30"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="24"
 													y="36"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="30"
 													y="36"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="36"
 													y="36"
 													width="6"
 													height="6"
-													fill="#FC4C02"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
 												/>
 												<rect
 													x="24"
 													y="42"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="42"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="36"
 													y="42"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="42"
 													y="42"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="18"
 													y="48"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="24"
 													y="48"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="42"
 													y="48"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="48"
 													y="48"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="12"
 													y="54"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="18"
 													y="54"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="48"
 													y="54"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="6"
 													y="60"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="12"
 													y="60"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="48"
 													y="60"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="54"
 													y="60"
 													width="6"
 													height="6"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 											</svg>
 											<div
@@ -1941,7 +1999,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -1949,7 +2007,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -1957,7 +2015,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 													</div>
@@ -1965,7 +2023,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Mon"}
@@ -1999,7 +2057,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2007,7 +2065,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2015,7 +2073,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2023,7 +2081,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 													</div>
@@ -2031,7 +2089,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Wed"}
@@ -2065,7 +2123,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2073,7 +2131,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2081,7 +2139,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2089,7 +2147,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2097,7 +2155,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2105,7 +2163,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2113,7 +2171,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 														<span
@@ -2121,7 +2179,7 @@ await lix.close();`}</code>
 																display: "block",
 																width: "16px",
 																height: "6px",
-																background: "#FC4C02",
+																background: "#FC4C02", // token-literal: Lix brand mark
 															}}
 														></span>
 													</div>
@@ -2129,7 +2187,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Sat"}
@@ -2144,7 +2202,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -2153,7 +2211,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -2165,8 +2223,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -2175,7 +2233,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#EEF4F9",
+											background: "var(--atelier-tag-blue)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -2196,8 +2254,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -2210,7 +2268,7 @@ await lix.close();`}</code>
 													height="14"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#57534E"
+													stroke="var(--atelier-fg-muted)"
 													strokeWidth="1.3"
 												>
 													<circle cx="8" cy="8" r="6.2" />
@@ -2222,8 +2280,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -2233,14 +2291,16 @@ await lix.close();`}</code>
 											>
 												{"listings"}
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -2253,7 +2313,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#78716C"
+													stroke="var(--atelier-fg-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -2290,855 +2350,855 @@ await lix.close();`}</code>
 													y="0"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="0"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="20"
 													y="5"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="25"
 													y="5"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="30"
 													y="5"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="35"
 													y="5"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="45"
 													y="5"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="50"
 													y="5"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="15"
 													y="10"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="20"
 													y="10"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="25"
 													y="10"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="30"
 													y="10"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="35"
 													y="10"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="40"
 													y="10"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="45"
 													y="10"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="50"
 													y="10"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="15"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="15"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="20"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="25"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="30"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="35"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="40"
 													y="15"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="45"
 													y="15"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="50"
 													y="15"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="20"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="15"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="20"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="25"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="30"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="35"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="40"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="45"
 													y="20"
 													width="5"
 													height="5"
-													fill="#D9534F"
+													fill="var(--atelier-danger)"
 												/>
 												<rect
 													x="50"
 													y="20"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="0"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="15"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="20"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="25"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="35"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="40"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="45"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="50"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="55"
 													y="25"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="30"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="15"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="20"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="25"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="30"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="35"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="40"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="45"
 													y="30"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="50"
 													y="30"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="35"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="35"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="15"
 													y="35"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="20"
 													y="35"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="25"
 													y="35"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="30"
 													y="35"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="35"
 													y="35"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="40"
 													y="35"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="45"
 													y="35"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="50"
 													y="35"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="40"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="40"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="15"
 													y="40"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="20"
 													y="40"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="25"
 													y="40"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="30"
 													y="40"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="35"
 													y="40"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="40"
 													y="40"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="45"
 													y="40"
 													width="5"
 													height="5"
-													fill="#7FB3E6"
+													fill="var(--atelier-tag-blue)"
 												/>
 												<rect
 													x="50"
 													y="40"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="45"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="45"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="15"
 													y="45"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="20"
 													y="45"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="25"
 													y="45"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="45"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="35"
 													y="45"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="40"
 													y="45"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="45"
 													y="45"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="50"
 													y="45"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="50"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="15"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="20"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="25"
 													y="50"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="50"
 													width="5"
 													height="5"
-													fill="#F2C94C"
+													fill="var(--atelier-tag-yellow)"
 												/>
 												<rect
 													x="35"
 													y="50"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="40"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="45"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="50"
 													y="50"
 													width="5"
 													height="5"
-													fill="#E8D9C0"
+													fill="var(--atelier-tag-brown)"
 												/>
 												<rect
 													x="55"
 													y="50"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="5"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="10"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="15"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="20"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="25"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="30"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="35"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="40"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="45"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="50"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="55"
 													y="55"
 													width="5"
 													height="5"
-													fill="#1C1917"
+													fill="var(--atelier-fg)"
 												/>
 												<rect
 													x="0"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="5"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="10"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="15"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="20"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="25"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="30"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="35"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="40"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="45"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="50"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 												<rect
 													x="55"
 													y="60"
 													width="5"
 													height="5"
-													fill="#3E9B6A"
+													fill="var(--atelier-success)"
 												/>
 											</svg>
 											<div
 												style={{
 													flex: "1",
 													minWidth: "0",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "9px",
 													overflow: "hidden",
 												}}
@@ -3158,8 +3218,8 @@ await lix.close();`}</code>
 													<span>{"2BR \u00b7 18 min"}</span>
 													<span
 														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3175,7 +3235,7 @@ await lix.close();`}</code>
 														alignItems: "center",
 														gap: "8px",
 														padding: "5px 10px",
-														borderTop: "1px solid #EDEAE6",
+														borderTop: "1px solid var(--atelier-border-subtle)",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
 														whiteSpace: "nowrap",
@@ -3184,8 +3244,8 @@ await lix.close();`}</code>
 													<span>{"1BR \u00b7 25 min"}</span>
 													<span
 														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3201,7 +3261,7 @@ await lix.close();`}</code>
 														alignItems: "center",
 														gap: "8px",
 														padding: "5px 10px",
-														borderTop: "1px solid #EDEAE6",
+														borderTop: "1px solid var(--atelier-border-subtle)",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
 														whiteSpace: "nowrap",
@@ -3210,8 +3270,8 @@ await lix.close();`}</code>
 													<span>{"3BR \u00b7 41 min"}</span>
 													<span
 														style={{
-															background: "#EDEAE6",
-															color: "#57534E",
+															background: "var(--atelier-border-subtle)",
+															color: "var(--atelier-fg-muted)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3229,7 +3289,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -3238,7 +3298,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3250,8 +3310,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3260,7 +3320,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#F1F0EC",
+											background: "var(--atelier-bg-subtle)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -3281,8 +3341,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -3301,8 +3361,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3317,14 +3377,16 @@ await lix.close();`}</code>
 												/>
 												{"scripts"}
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3337,7 +3399,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#78716C"
+													stroke="var(--atelier-fg-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3373,8 +3435,8 @@ await lix.close();`}</code>
 											>
 												<div
 													style={{
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "9px",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
@@ -3394,8 +3456,8 @@ await lix.close();`}</code>
 														<span>{"digest.ts"}</span>
 														<span
 															style={{
-																background: "#E7F3EB",
-																color: "#1F6B40",
+																background: "var(--atelier-success-subtle)",
+																color: "var(--atelier-success-border)",
 																padding: "0 8px",
 																borderRadius: "99px",
 															}}
@@ -3410,14 +3472,15 @@ await lix.close();`}</code>
 															alignItems: "center",
 															gap: "8px",
 															padding: "7px 10px",
-															borderTop: "1px solid #EDEAE6",
+															borderTop:
+																"1px solid var(--atelier-border-subtle)",
 														}}
 													>
 														<span>{"cleanup.ts"}</span>
 														<span
 															style={{
-																background: "#E7F3EB",
-																color: "#1F6B40",
+																background: "var(--atelier-success-subtle)",
+																color: "var(--atelier-success-border)",
 																padding: "0 8px",
 																borderRadius: "99px",
 															}}
@@ -3435,7 +3498,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -3446,8 +3509,8 @@ await lix.close();`}</code>
 													marginLeft: "8px",
 													padding: "1px 7px",
 													borderRadius: "99px",
-													background: "#FFF4EC",
-													color: "#C2410C",
+													background: "var(--atelier-accent-subtle)",
+													color: "var(--atelier-accent)",
 													fontSize: "11px",
 													fontWeight: "600",
 													verticalAlign: "middle",
@@ -3460,7 +3523,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3481,8 +3544,8 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3491,7 +3554,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#FFF4E8",
+											background: "var(--atelier-tag-orange)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -3512,8 +3575,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -3532,8 +3595,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3546,7 +3609,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#78716C"
+													stroke="var(--atelier-fg-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3561,14 +3624,16 @@ await lix.close();`}</code>
 												</svg>
 												{"posts"}
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3593,8 +3658,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3609,15 +3674,15 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Mon"}
 													</span>
 													<span
 														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
 															borderRadius: "4px",
 															padding: "3px 4px",
 															fontSize: "10.5px",
@@ -3634,8 +3699,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3650,7 +3715,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Tue"}
@@ -3659,8 +3724,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3675,15 +3740,15 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Wed"}
 													</span>
 													<span
 														style={{
-															background: "#FDEBD3",
-															color: "#B54708",
+															background: "var(--atelier-tag-orange)",
+															color: "var(--atelier-tag-orange-fg)",
 															borderRadius: "4px",
 															padding: "3px 4px",
 															fontSize: "10.5px",
@@ -3700,8 +3765,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3716,15 +3781,15 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "#78716C",
+															color: "var(--atelier-fg-subtle)",
 														}}
 													>
 														{"Thu"}
 													</span>
 													<span
 														style={{
-															background: "#EDF0FA",
-															color: "#2F5DA8",
+															background: "var(--atelier-tag-purple)",
+															color: "var(--atelier-tag-blue-fg)",
 															borderRadius: "4px",
 															padding: "3px 4px",
 															fontSize: "10.5px",
@@ -3747,7 +3812,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -3756,7 +3821,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3768,8 +3833,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3778,7 +3843,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#FDF0EA",
+											background: "var(--atelier-tag-red)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -3809,8 +3874,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3823,7 +3888,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="#78716C"
+													stroke="var(--atelier-fg-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3838,14 +3903,16 @@ await lix.close();`}</code>
 												</svg>
 												{"meetings"}
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3865,7 +3932,7 @@ await lix.close();`}</code>
 														width="11"
 														height="14"
 														rx="1.6"
-														fill="#ED6C47"
+														fill="var(--atelier-accent)"
 													/>
 													<rect
 														x="1"
@@ -3873,7 +3940,7 @@ await lix.close();`}</code>
 														width="9"
 														height="8"
 														rx="1.3"
-														fill="#C43E1C"
+														fill="var(--atelier-tag-red-fg)"
 													/>
 												</svg>
 												{"decks"}
@@ -3901,10 +3968,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
 														transform: "rotate(-8deg)",
 														transformOrigin: "bottom center",
 														zIndex: "1",
@@ -3914,7 +3982,10 @@ await lix.close();`}</code>
 													}}
 												>
 													<div
-														style={{ height: "14px", background: "#ED6C47" }}
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
 													></div>
 													<div
 														style={{
@@ -3937,21 +4008,21 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "9px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "15px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "#ED6C47",
+																	background: "var(--atelier-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -3959,7 +4030,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "#E2DCD3",
+																	background: "var(--atelier-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -3973,10 +4044,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
 														transform: "rotate(8deg)",
 														transformOrigin: "bottom center",
 														zIndex: "1",
@@ -3986,7 +4058,10 @@ await lix.close();`}</code>
 													}}
 												>
 													<div
-														style={{ height: "14px", background: "#ED6C47" }}
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
 													></div>
 													<div
 														style={{
@@ -4016,21 +4091,21 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "9px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "15px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "#ED6C47",
+																	background: "var(--atelier-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -4038,7 +4113,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "#E2DCD3",
+																	background: "var(--atelier-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -4052,10 +4127,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
 														transform: "rotate(0deg)",
 														transformOrigin: "bottom center",
 														zIndex: "2",
@@ -4065,7 +4141,10 @@ await lix.close();`}</code>
 													}}
 												>
 													<div
-														style={{ height: "14px", background: "#ED6C47" }}
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
 													></div>
 													<div
 														style={{
@@ -4088,21 +4167,21 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "9px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "15px",
-																	background: "#F4B9A6",
+																	background: "var(--atelier-tag-red)",
 																}}
 															></span>
 															<span
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "#ED6C47",
+																	background: "var(--atelier-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -4110,7 +4189,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "#E2DCD3",
+																	background: "var(--atelier-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -4126,7 +4205,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -4137,7 +4216,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -4149,8 +4228,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -4159,7 +4238,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "#F1F5EE",
+											background: "var(--atelier-tag-green)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -4180,8 +4259,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -4196,14 +4275,16 @@ await lix.close();`}</code>
 												/>
 												{"skills"}
 											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
 											<span
 												style={{
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -4231,15 +4312,16 @@ await lix.close();`}</code>
 											>
 												<div
 													style={{
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
 														borderRadius: "8px",
 														width: "108px",
 														padding: "9px 10px",
 														display: "flex",
 														flexDirection: "column",
 														gap: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.08)",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 8%, transparent)",
 													}}
 												>
 													<span
@@ -4266,21 +4348,21 @@ await lix.close();`}</code>
 													<span
 														style={{
 															height: "3px",
-															background: "#E2DCD3",
+															background: "var(--atelier-border)",
 															width: "90%",
 														}}
 													></span>
 													<span
 														style={{
 															height: "3px",
-															background: "#E2DCD3",
+															background: "var(--atelier-border)",
 															width: "70%",
 														}}
 													></span>
 													<span
 														style={{
 															height: "3px",
-															background: "#E2DCD3",
+															background: "var(--atelier-border)",
 															width: "80%",
 														}}
 													></span>
@@ -4290,7 +4372,7 @@ await lix.close();`}</code>
 													height="92"
 													viewBox="0 0 56 92"
 													fill="none"
-													stroke="#A8A29E"
+													stroke="var(--atelier-fg-faint)"
 													strokeWidth="1.5"
 												>
 													<path d="M0 46 C28 46 28 12 56 12" />
@@ -4309,8 +4391,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4329,8 +4411,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4349,8 +4431,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4374,7 +4456,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--atelier-border-subtle)",
 											flex: "1",
 										}}
 									>
@@ -4383,7 +4465,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "#57534E",
+												color: "var(--atelier-fg-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -4402,7 +4484,7 @@ await lix.close();`}</code>
 							flexDirection: "column",
 							gap: "20px",
 							paddingTop: "56px",
-							borderTop: "1px solid #D6CFC6",
+							borderTop: "1px solid var(--atelier-border-strong)",
 						}}
 					>
 						<h3
