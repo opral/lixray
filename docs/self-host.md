@@ -1,20 +1,33 @@
-# Self-host
+# Self-hosting
 
-LixRay is two open-source parts:
+## Host your repositories with the Lix server
 
-- **[Lix server](https://github.com/opral/lix/tree/main/packages/server)**: stores repositories and their history. It runs as one binary (or Docker image) on top of S3-compatible object storage.
-- **[Atelier](https://github.com/opral/atelier)**: the web UI for files, tables, and changes.
+You can run the [Lix server](https://github.com/opral/lix/tree/main/packages/server)
+on your own infrastructure and connect through the Lix SDK or server protocol.
+It stores repositories and their version history in S3-compatible object storage.
+Lix is MIT licensed. See the server README for configuration and deployment.
 
-Run the Lix server and point Atelier at it. You get storage and the web UI. Both are MIT licensed. Sign-in, sharing, and the MCP server are not included.
+Lix repositories carry their files, tables, configuration, and history. The
+LixRay control plane is not required to use the Lix server. The server does not
+include LixRay's account management, sharing, or MCP endpoint. Supply your own
+access controls and authentication gateway when exposing it to clients.
 
-```
-browser (Atelier) ──┐
-                    ├──► Lix server ──► S3-compatible storage
-agents (MCP, SDK) ──┘
-```
+[Atelier](https://github.com/opral/atelier) is the MIT-licensed repository UI.
+Developers can integrate it with their own Lix setup; that requires wiring a Lix
+session and authentication rather than installing a complete LixRay service.
 
-The Lix server has no login, permissions, or billing built in. Put it behind your own gateway that handles authentication. See the [server README](https://github.com/opral/lix/tree/main/packages/server) for configuration.
+## Host the LixRay control plane
 
-## The LixRay repository
+LixRay adds accounts, organizations, access management, repository discovery,
+sharing, and MCP access around the Lix server. Its control plane uses Supabase
+and the web application in this repository.
 
-We plan to open source the LixRay repository itself (hosting, sign-in, sharing, and the MCP server). There is no date yet. For early access, email [hello@opral.com](mailto:hello@opral.com).
+A supported self-hosted deployment of the full control plane is **TBD, pending
+demonstrated interest**. We have not committed to deployment packaging,
+upgrade support, or a timeline. Running the contributor development stack is
+not a supported production deployment.
+
+If you need the control plane as well as repository hosting, tell us your use
+case in [the demand-gathering issue](https://github.com/opral/lixray/issues/610) or email
+[hello@opral.com](mailto:hello@opral.com). This helps us decide whether to invest
+in it. For control of repository storage and SDK access, start with the Lix server.

@@ -53,4 +53,4 @@ cache script resolves its immutable baseline commit and records candidate Git
 state. Timing varies with host load; result shape, exact parity, invalidation,
 and retained-entry bounds are correctness gates independent of these timings.
 
-Raw samples for this revision are retained in `profile-activity-samples.json`.
+Historical raw captures are omitted from the source repository; the scripts above generate fresh samples.

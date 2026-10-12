@@ -653,12 +653,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"Claude"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -697,12 +692,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/brand-openai.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"ChatGPT"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -735,12 +725,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"Claude"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -773,12 +758,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/brand-openai.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"ChatGPT"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -1002,7 +982,7 @@ export function LandingPage() {
 									textWrap: "pretty",
 								}}
 							>
-								{"Self-host it, or embed Lix in your product."}
+								{"Self-host the Lix server, or embed Lix in your product."}
 							</span>
 						</div>
 						<div
@@ -1313,209 +1293,36 @@ export function LandingPage() {
 											borderRadius: "7px",
 										}}
 									>
-										{"Copy"}
+										{"Node.js"}
 									</span>
 								</div>
-								<div
+								<pre
 									style={{
-										padding: "18px 20px 20px 8px",
+										margin: 0,
+										padding: "18px 20px",
+										overflowX: "auto",
 										fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-										fontSize: "14px",
+										fontSize: "13px",
 										lineHeight: "1.8",
 										color: "#F3F1ED",
 									}}
 								>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"1"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"import"}</span>
-											{" { openLix } "}
-											<span style={{ color: "#93C5FD" }}>{"from"}</span>{" "}
-											<span style={{ color: "#A8D8B9" }}>
-												{'"@lix-js/sdk"'}
-											</span>
-											{";"}
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"2"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}></span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"3"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"const"}</span>
-											{" lix = "}
-											<span style={{ color: "#93C5FD" }}>{"await"}</span>
-											{" openLix({"}
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"4"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												{"url: "}
-												<span style={{ color: "#A8D8B9" }}>
-													{'"https://lixray.com/acme/home"'}
-												</span>
-												{","}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"5"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>{"});"}</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"6"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}></span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"7"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"const"}</span>
-											{" rows = "}
-											<span style={{ color: "#93C5FD" }}>{"await"}</span>
-											{" lix.execute("}
-											<span style={{ color: "#A8D8B9" }}>{"`"}</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"8"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"SELECT"}</span>
-												{" name, city, plan"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-											background: "rgba(249,115,22,0.14)",
-											boxShadow: "inset 2px 0 0 #F97316",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"9"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"FROM"}</span>
-												{" customers"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"10"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"ORDER BY"}</span>
-												{" name"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"11"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#A8D8B9" }}>{"`"}</span>
-											{");"}
-										</span>
-									</div>
-								</div>
+									<code>{`import { openLix } from "@lix-js/sdk";
+
+const lix = await openLix({
+  server: {
+    url: process.env.LIXRAY_REPOSITORY_URL,
+    headers: {
+      Authorization: "Bearer " + process.env.LIXRAY_API_TOKEN,
+    },
+  },
+});
+
+const rows = await lix.execute(
+  "SELECT name, city, plan FROM customers ORDER BY name",
+);
+await lix.close();`}</code>
+								</pre>
 							</div>
 							<svg
 								width="44"

@@ -15,10 +15,15 @@ filesystem, browser OPFS, or S3.
 
 ## Is it open source?
 
-[Lix](https://github.com/opral/lix) is MIT licensed. You can
-[self-host](./self-host.md) the Lix server and the Atelier UI today. The
-LixRay repository, with sign-in, sharing, and the MCP server, is being open
-sourced.
+[Lix](https://github.com/opral/lix) and [Atelier](https://github.com/opral/atelier)
+are MIT licensed. LixRay is also MIT licensed; its control-plane source is being prepared for public release.
+
+## Can I self-host it?
+
+You can self-host the Lix server to store and access your repositories without
+LixRay's control plane. A supported deployment of the full LixRay control plane
+is TBD, pending demonstrated interest. See [self-hosting](./self-host.md) and
+[the demand-gathering issue](https://github.com/opral/lixray/issues/610).
 
 ## How are changes diffed?
 
@@ -48,8 +53,10 @@ connect writes as you.
 
 ## Can I limit what an agent or token can access?
 
-Not yet. Tokens and agent connections have your full account permissions.
-There are no read-only or per-repository scopes.
+Repository API tokens are scoped to one repository and inherit the creator's
+current access there. Account tokens and MCP connections use your account's
+permissions. Read-only or path-level token scopes are not available. See
+[access tokens](./access-tokens.md).
 
 ## Can I get my data out?
 
@@ -58,4 +65,4 @@ Lix is MIT licensed.
 
 ## What does it cost?
 
-See [Pricing](/pricing).
+See [Pricing](https://lixray.com/pricing).
