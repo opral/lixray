@@ -850,13 +850,8 @@ export function LandingPage() {
 											fontSize: "14.5px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "16px", height: "16px" }}
-										/>
 										<span>
-											<b>{"Claude"}</b>
+											<b>{"You"}</b>
 											{" changed 1 row in customers"}
 										</span>
 									</span>

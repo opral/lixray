@@ -16,7 +16,8 @@ filesystem, browser OPFS, or S3.
 ## Is it open source?
 
 [Lix](https://github.com/opral/lix) and [Atelier](https://github.com/opral/atelier)
-are MIT licensed. LixRay is also MIT licensed; its control-plane source is being prepared for public release.
+are MIT licensed. LixRay is also MIT licensed; its control-plane source is being
+prepared for public release.
 
 ## Can I self-host it?
 
