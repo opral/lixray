@@ -1,7 +1,8 @@
 {
 	"Platform": [
 		{ "path": "what-is-lixray.md", "label": "What is LixRay?" },
-		{ "path": "mcp.md", "label": "MCP" }
+		{ "path": "mcp.md", "label": "MCP" },
+		{ "path": "faq.md", "label": "FAQ" }
 	],
 	"Guides": [
 		{ "path": "getting-started.md", "label": "Get started" },

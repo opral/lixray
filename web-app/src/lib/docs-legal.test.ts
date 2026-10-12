@@ -69,6 +69,7 @@ void test("legal docs name Opral US Inc. and Delaware law", () => {
 		[
 			"what-is-lixray.md",
 			"mcp.md",
+			"faq.md",
 			"getting-started.md",
 			"internal-apps.md",
 			"access-tokens.md",
