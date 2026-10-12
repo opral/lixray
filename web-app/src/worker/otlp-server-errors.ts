@@ -286,6 +286,23 @@ export async function serverErrorEvents(
 	const httpStatus = safeHttpStatus(context["http.response.status_code"]);
 	const candidateCode = context["lix.error.code"] ?? context["error.type"];
 	const failureCode = safeLixErrorCode(candidateCode);
+	const events = [...(span.events ?? [])];
+	const hasErrorEvent = events.some((event) => {
+		const fields = attributes(event.attributes);
+		return fields.level === "ERROR" || event.name === "exception";
+	});
+	// These responses ask the client to join the same healthy opener. Keep the
+	// raw OTLP span for latency/progress analysis without creating an exception
+	// for every poll. Independent stalled/failed opener reports remain errors.
+	if (
+		!hasErrorEvent &&
+		httpStatus === 503 &&
+		context["lix.error.retryable"] === "true" &&
+		(!context["error.type"] || context["error.type"] === failureCode) &&
+		(failureCode === "LIX_REPOSITORY_OPENING" ||
+			failureCode === "LIX_OPEN_DEADLINE_EXCEEDED")
+	)
+		return [];
 	const migrationCause = repositoryOpenDiagnostics({
 		details: {
 			failureReason: context["lix.migration.failure_reason"],
@@ -302,11 +319,6 @@ export async function serverErrorEvents(
 	const snapshotMessage = snapshotStage
 		? `Remote snapshot download failed (${snapshotStage}${snapshotStatus ? `, HTTP ${snapshotStatus}` : ""})`
 		: undefined;
-	const events = [...(span.events ?? [])];
-	const hasErrorEvent = events.some((event) => {
-		const fields = attributes(event.attributes);
-		return fields.level === "ERROR" || event.name === "exception";
-	});
 	// Engine and HTTP failures use standard ERROR status without logging an
 	// exception event. Preserve these failures rather than silently dropping them.
 	if (!hasErrorEvent && span.status?.code === 2) {
