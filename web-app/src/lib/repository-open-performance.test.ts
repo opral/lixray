@@ -233,6 +233,40 @@ void test("SDK host profile exports fixed timings and never charges historical w
 	);
 });
 
+void test("failed migration retains planned formats without a successful open report", () => {
+	const f = fixture();
+	f.controller.begin("repository");
+	const recorder = f.controller.recorder("repo-id")!;
+	recorder.progress({
+		phase: "migrating",
+		scope: "local",
+		fromFormat: 86,
+		toFormat: 87,
+	});
+	recorder.progress({
+		phase: "validating",
+		scope: "local",
+		fromFormat: 86,
+		toFormat: 87,
+	});
+	f.controller.finish("failed");
+	const root = f.exporter
+		.getFinishedSpans()
+		.find((s) => s.name === "lixray.repository.open")!;
+	assert.equal(
+		root.attributes["lixray.repository.open.native.local.from_format"],
+		86,
+	);
+	assert.equal(
+		root.attributes["lixray.repository.open.native.local.to_format"],
+		87,
+	);
+	assert.equal(
+		root.attributes["lixray.repository.open.storage_format"],
+		undefined,
+	);
+});
+
 void test("native progress excludes retry waits and records repeated attempts and pending RPCs", () => {
 	const f = fixture();
 	f.controller.begin("repository");
