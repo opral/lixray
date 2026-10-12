@@ -4,6 +4,24 @@ Keep the repository private until the owner has resolved the findings from the
 release audit and completed the external steps below. Merging a cleanup PR does
 not erase earlier commits or GitHub-hosted records.
 
+## Readiness update — October 12, 2026
+
+PR [#609](https://github.com/opral/lixray/pull/609) adds an MIT license, a concise
+README, contributor/operations docs, and explicit self-hosting scope. It removes
+70 temporary plans, handoffs, experiment prototypes, and captured reports from
+the current tree. Historical versions remain in Git; this is not a history rewrite.
+
+The issue review closed 19 reports whose fixes are in merged Lix/LixRay code and
+retained unresolved reports. Control-plane self-hosting demand is tracked in
+[#610](https://github.com/opral/lixray/issues/610), without a delivery commitment.
+
+A fresh GitHub settings read still shows default Actions token permissions set
+to **write**, Actions permitted to approve pull requests, only `CI` required on
+`main`, zero required approving reviews, and no `production` environment protection
+or branch restrictions. The external release steps below remain outstanding.
+Repository visibility is still private. The following audit is historical evidence,
+not a certification of commits, logs, artifacts, or credentials added since September 22.
+
 ## Review scope
 
 The 2026-09-22 review starts from `9cc2ccc` on `main`. It separates tracked source,

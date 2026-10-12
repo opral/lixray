@@ -15,7 +15,7 @@ export function useRepositoryCta() {
 
 /**
  * The marketing-surface navbar shared by the landing, pricing, and docs pages:
- * "LixRay | Docs Pricing Self-host" on the left, auth / CTA on the right.
+ * "LixRay | Docs Pricing" on the left, auth / CTA on the right.
  * Every page uses the same bar (same height and 1024px column, matching the
  * docs layout), so moving between the landing page and the docs doesn't
  * shift it; `sticky` only adds the border and background.
@@ -68,13 +68,6 @@ export function SiteHeader({
 							>
 								Pricing
 							</Link>
-							<Link
-								className="rounded-md px-2.5 py-2 text-fg no-underline hover:bg-bg-hover"
-								to="/docs/$slug"
-								params={{ slug: "self-host" }}
-							>
-								Self-host
-							</Link>
 							<a
 								className="rounded-md px-2.5 py-2 text-fg no-underline hover:bg-bg-hover"
 								href="https://github.com/opral/lix"
@@ -112,13 +105,6 @@ export function SiteHeader({
 						to="/pricing"
 					>
 						Pricing
-					</Link>
-					<Link
-						className="hidden text-[15px] font-semibold text-fg-muted no-underline hover:text-fg sm:block"
-						to="/docs/$slug"
-						params={{ slug: "self-host" }}
-					>
-						Self-host
 					</Link>
 				</div>
 				<nav

@@ -10,7 +10,7 @@ for (const width of [1440, 390, 320]) {
 			await expect(
 				page.getByRole("heading", {
 					level: 1,
-					name: /Shared repository for you and your AI\sagents/,
+					name: "Shared repository for every AI agent you use.",
 				}),
 			).toBeVisible();
 			await expect(page.getByRole("banner")).toBeVisible();
@@ -23,12 +23,11 @@ for (const width of [1440, 390, 320]) {
 					name: "Privacy",
 				}),
 			).toHaveAttribute("href", "/privacy");
+			await expect(page.locator('[data-lr="mock"]')).toBeVisible();
+			await expect(page.locator('[data-lr="hooks"]')).toContainText("Soon");
 			await expect(
-				page.locator('section[aria-label="Product preview"] figure'),
-			).toBeVisible();
-			await expect(
-				page.getByRole("img", { name: /flow into LixRay/ }),
-			).toHaveCount(1);
+				page.getByRole("banner").getByRole("link", { name: "Self-host" }),
+			).toHaveCount(0);
 
 			const hasHorizontalOverflow = await page.evaluate(
 				() => document.documentElement.scrollWidth > window.innerWidth,

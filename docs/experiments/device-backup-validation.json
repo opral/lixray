@@ -1,9 +1,0 @@
-{
-  "passed": true,
-  "actualOpfs": true,
-  "blockedFences": 2,
-  "sourceBytesUnchanged": true,
-  "archivedBytesExact": true,
-  "archiveBytes": 732,
-  "durationMs": 1.8999996185302734
-}

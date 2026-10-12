@@ -28,8 +28,8 @@ export function PricingPage() {
 							Free
 						</p>
 						<p className="m-0 flex-1 text-[16px] leading-[1.6] text-fg-muted">
-							Run the Lix server and the Atelier front end on your own
-							infrastructure. Both are open source (MIT).
+							Run the MIT-licensed Lix server on your own infrastructure.
+							Control-plane self-hosting is TBD, pending interest.
 						</p>
 						<Link
 							className={secondaryButton + " self-start"}

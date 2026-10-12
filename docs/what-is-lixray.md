@@ -19,7 +19,8 @@ you (browser)      agents (MCP)
 
 [Lix](https://lix.dev/) is an open-source (MIT) version control system for files
 and SQL tables. LixRay hosts Lix repositories and adds a web UI, sharing, and
-MCP access for agents.
+MCP access for agents. LixRay's [control plane](https://github.com/opral/lixray)
+is also open source and MIT licensed.
 
 ## What you get
 
@@ -33,8 +34,9 @@ MCP access for agents.
   You can restore any version.
 - **Sharing.** Every file has a URL. Read-only by default, edit by invite.
 - **No lock-in.** Files stay in their own formats. You can
-  [self-host](./self-host.md) the storage server and the web UI. Sign-in,
-  sharing, and the MCP server are not open source yet.
+  [self-host the Lix server](./self-host.md), the fastest way to host your own
+  repositories without deploying LixRay's control plane.
+  Supported control-plane self-hosting is TBD, pending demonstrated interest.
 
 ## Planned
 
@@ -63,4 +65,4 @@ data shares the repository's version history.
 - [Get started](./getting-started.md): create a repository, add files, and
   connect an agent.
 - [MCP](./mcp.md): the LixRay MCP server in depth.
-- [Self-host](./self-host.md): run LixRay on your own infrastructure.
+- [Self-host](./self-host.md): host the Lix server; understand the control-plane roadmap.

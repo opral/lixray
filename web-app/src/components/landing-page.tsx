@@ -1,361 +1,182 @@
-import { Link } from "@tanstack/react-router";
-import {
-	FileText,
-	History,
-	LayoutGrid,
-	Plus,
-	Table2,
-	Upload,
-	Waypoints,
-} from "lucide-react";
-import type { ReactNode } from "react";
 import {
 	SiteFooter,
 	SiteHeader,
 	useRepositoryCta,
 } from "~/components/site-header";
 
-const iconPath = (name: string) => "/landing/" + name;
-
 export const primaryButton =
 	"inline-flex min-h-[48px] items-center justify-center rounded-[10px] bg-[image:var(--atelier-accent-gradient)] px-6 text-[16px] font-bold whitespace-nowrap text-accent-on no-underline shadow-accent transition hover:brightness-105 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 export const secondaryButton =
 	"inline-flex min-h-[48px] items-center justify-center gap-2 rounded-[10px] border border-fg/15 bg-panel px-5 text-[16px] font-semibold whitespace-nowrap text-fg no-underline transition hover:border-fg/30 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 
-const sectionTitle =
-	"m-0 flex flex-wrap items-center gap-3 text-[28px] leading-[1.2] font-bold tracking-[-.02em] text-balance";
-const sectionText = "m-0 text-[17px] leading-[1.65] text-fg-muted";
-
-/** Public tracking issue for source connectors; the "Soon" badge links here. */
-const sourcesIssueHref = "https://github.com/opral/lix/issues/1934";
-
-export function SoonBadge({ href }: { href?: string }) {
-	const className =
-		"rounded-full border border-accent-border bg-accent-subtle px-2.5 py-0.5 text-[12px] font-bold tracking-[.02em] text-accent no-underline";
-	return href ? (
-		<a className={className} href={href} target="_blank" rel="noreferrer">
-			Soon
-		</a>
-	) : (
-		<span className={className}>Soon</span>
-	);
+/**
+ * The landing body mirrors the "LixRay Landing" design export one to one, so
+ * its layout is inline styles. These rules only add what inline styles can't:
+ * link colors and the narrow-screen layout, keyed on data-lr markers.
+ */
+const landingCss = `
+[data-lr="root"] a { color: var(--atelier-fg); }
+[data-lr="root"] a:hover { color: var(--atelier-accent); }
+@media (max-width: 860px) {
+	[data-lr="root"] { padding: 40px 20px 56px !important; gap: 56px !important; }
+	[data-lr="root"] h1 { font-size: 40px !important; }
+	[data-lr="root"] > :first-child a { white-space: nowrap; }
+	[data-lr="mock"] { grid-template-columns: minmax(0, 1fr) !important; }
+	[data-lr="mock"] > :first-child { display: none !important; }
+	[data-lr="hooks"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+	[data-lr="hooks"] > * { grid-column: auto !important; }
+	[data-lr="hooks"] > :last-child { grid-column: 1 / -1 !important; }
+	[data-lr="hack"] { grid-template-columns: minmax(0, 1fr) !important; }
+	[data-lr="hack"] > :nth-child(2) { justify-self: center; transform: rotate(90deg); }
+	[data-lr="hack"] > :first-child { overflow-x: auto !important; }
+	[data-lr="hack"] > :first-child > :first-child > :first-child { white-space: nowrap; font-size: 14px !important; }
+	[data-lr="cases"] { grid-template-columns: minmax(0, 1fr) !important; }
+	[data-lr="cmp"] { overflow-x: auto !important; }
+	[data-lr="cmp-row"] { min-width: 760px; }
 }
+`;
 
-function BrandIcon({ name, alt = "" }: { name: string; alt?: string }) {
+type CompareCell = true | false | string;
+
+const compareColumns = [
+	"Notion",
+	"Google Drive",
+	"ChatGPT / Claude Projects",
+	"git + SQLite",
+];
+
+// Cells are claims about other products. Keep them conservative.
+const compareRows: { label: string; cells: CompareCell[] }[] = [
+	{ label: "Open source", cells: [false, false, false, true] },
+	{
+		label: "Files in any format",
+		cells: ["Attachments", true, "Uploads", true],
+	},
+	{
+		label: "Tables you can query with SQL",
+		cells: ["API, no SQL", "Sheets, no SQL", false, true],
+	},
+	{
+		label: "Version control for files and rows",
+		cells: ["Page history", "File versions", false, "Files, not rows"],
+	},
+	{
+		label: "Same data for every agent",
+		cells: ["MCP + API", "Via connectors", "One vendor", "Local files"],
+	},
+];
+
+const compareGrid = "minmax(0,1.6fr) repeat(5, minmax(0,1fr))";
+const compareCell = {
+	display: "flex",
+	alignItems: "center",
+	justifyContent: "center",
+	textAlign: "center",
+} as const;
+
+function CompareMark({ value }: { value: CompareCell }) {
+	if (value === true) {
+		return (
+			<svg width="18" height="18" viewBox="0 0 22 22" aria-label="Yes">
+				<circle cx="11" cy="11" r="11" fill="var(--atelier-success)" />
+				<path
+					d="M6.6 11.3 l3 3 l5.8 -6.3"
+					fill="none"
+					stroke="var(--atelier-panel)"
+					strokeWidth="2"
+					strokeLinecap="round"
+					strokeLinejoin="round"
+				/>
+			</svg>
+		);
+	}
+	if (value === false) {
+		return (
+			<span
+				aria-label="No"
+				style={{
+					color: "var(--atelier-fg-faint)",
+					fontSize: "18px",
+					lineHeight: "1",
+				}}
+			>
+				{"\u2013"}
+			</span>
+		);
+	}
 	return (
-		<img
-			className="size-4 shrink-0 object-contain"
-			src={iconPath(name)}
-			alt={alt}
-		/>
+		<span style={{ fontSize: "13.5px", color: "var(--atelier-fg-subtle)" }}>
+			{value}
+		</span>
 	);
 }
 
-function NavItem({
-	icon,
-	children,
-	active = false,
-	muted = false,
-}: {
-	icon: ReactNode;
-	children: ReactNode;
-	active?: boolean;
-	muted?: boolean;
-}) {
+function CompareTable() {
 	return (
 		<div
-			className={
-				"flex items-center gap-2.5 rounded-lg px-2.5 py-1.5 " +
-				(active
-					? "bg-bg-hover font-semibold text-fg"
-					: muted
-						? "text-fg-subtle"
-						: "text-fg-muted")
-			}
+			data-lr="cmp"
+			style={{
+				background: "var(--atelier-panel)",
+				border: "1px solid var(--atelier-border)",
+				borderRadius: "14px",
+				overflow: "hidden",
+			}}
 		>
-			{icon}
-			{children}
-		</div>
-	);
-}
-
-const navIcon = "size-[15px] shrink-0";
-
-const previewRows = [
-	{
-		name: "customers",
-		table: true,
-		author: "Claude",
-		authorIcon: "claude-spark.svg",
-	},
-	{
-		name: "orders",
-		table: true,
-		author: "ChatGPT",
-		authorIcon: "brand-openai.svg",
-	},
-	{
-		name: "research",
-		icon: "icon-folder.svg",
-		author: "Claude",
-		authorIcon: "claude-spark.svg",
-	},
-	{
-		name: "roadmap.md",
-		icon: "icon-sq-md.svg",
-		author: "ChatGPT",
-		authorIcon: "brand-openai.svg",
-	},
-	{ name: "budget.xlsx", icon: "icon-sq-xlsx.svg", author: "You" },
-	{ name: "pitch-deck.pdf", icon: "icon-sq-pdf.svg", author: "You" },
-] as const;
-
-/** Simplified app window: a repository with tables and files, plus one agent change to review. */
-function ProductPreview() {
-	return (
-		<figure
-			className="m-0 overflow-hidden rounded-[14px] border border-border bg-panel text-left shadow-lg"
-			aria-label="LixRay app showing a repository with tables and files. Claude changed one row in the customers table and the change waits for Keep or Undo."
-		>
-			<div className="flex items-center gap-3 border-b border-border-subtle bg-bg-subtle px-3.5 py-2.5 font-mono text-[12.5px] text-fg-subtle">
-				<span className="flex gap-1.5" aria-hidden="true">
-					<i className="size-2.5 rounded-full bg-fg/12" />
-					<i className="size-2.5 rounded-full bg-fg/12" />
-					<i className="size-2.5 rounded-full bg-fg/12" />
+			<div
+				data-lr="cmp-row"
+				style={{
+					display: "grid",
+					gridTemplateColumns: compareGrid,
+					gap: "12px",
+					padding: "14px 20px",
+					background: "var(--atelier-bg-subtle)",
+					fontSize: "14.5px",
+					fontWeight: "600",
+					color: "var(--atelier-fg-muted)",
+				}}
+			>
+				<span />
+				<span style={compareCell}>
+					<b style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+						<img
+							src="/lixray-mark.svg"
+							alt=""
+							style={{ width: "16px", height: "16px" }}
+						/>
+						LixRay
+					</b>
 				</span>
-				lixray.com
-			</div>
-			<div className="grid grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)]">
-				<aside className="hidden flex-col gap-0.5 border-r border-border-subtle px-2.5 py-4 text-[14px] md:flex">
-					<div className="flex items-center gap-2 px-2.5 pb-3 text-[15px] font-bold">
-						<img className="size-[18px]" src="/lixray-mark.svg" alt="" />
-						home
-					</div>
-					<NavItem
-						active
-						icon={<LayoutGrid className={navIcon} strokeWidth={1.7} />}
-					>
-						All
-					</NavItem>
-					<NavItem icon={<FileText className={navIcon} strokeWidth={1.7} />}>
-						Documents
-					</NavItem>
-					<NavItem icon={<Table2 className={navIcon} strokeWidth={1.7} />}>
-						Tables
-					</NavItem>
-					<NavItem icon={<History className={navIcon} strokeWidth={1.7} />}>
-						History
-					</NavItem>
-					<SidebarLabel>Sources</SidebarLabel>
-					<NavItem icon={<BrandIcon name="brand-google-drive.svg" />}>
-						Google Drive
-					</NavItem>
-					<NavItem icon={<BrandIcon name="brand-notion.svg" />}>Notion</NavItem>
-					<NavItem muted icon={<Plus className={navIcon} strokeWidth={1.7} />}>
-						Connect source
-					</NavItem>
-					<SidebarLabel>Agents</SidebarLabel>
-					<NavItem icon={<BrandIcon name="claude-spark.svg" />}>Claude</NavItem>
-					<NavItem icon={<BrandIcon name="brand-openai.svg" />}>
-						ChatGPT
-					</NavItem>
-				</aside>
-				<div className="flex min-w-0 flex-col gap-2.5 px-5 pt-5 pb-6 sm:px-6">
-					<div className="flex items-center justify-between gap-3">
-						<strong className="text-[22px] font-semibold tracking-[-.01em]">
-							All
-						</strong>
-						<span className="rounded-full bg-fg px-3.5 py-1 text-[13px] font-semibold text-panel">
-							New ▾
-						</span>
-					</div>
-					<div className="text-[14.5px]">
-						<div className="flex justify-between border-b border-border py-1.5 text-[12.5px] text-fg-subtle">
-							<span>Name</span>
-							<span>Changed by</span>
-						</div>
-						{previewRows.map((row) => (
-							<div
-								key={row.name}
-								className="flex items-center justify-between gap-3 border-b border-border-subtle py-2"
-							>
-								<span className="flex min-w-0 items-center gap-2.5 font-medium">
-									{"table" in row ? (
-										<Table2
-											className="size-[22px] shrink-0 text-fg-subtle"
-											strokeWidth={1.4}
-											aria-hidden="true"
-										/>
-									) : (
-										<img
-											className="size-[22px] shrink-0"
-											src={iconPath(row.icon)}
-											alt=""
-										/>
-									)}
-									<span className="truncate">{row.name}</span>
-								</span>
-								<span className="inline-flex shrink-0 items-center gap-1.5 text-[14px] text-fg-muted">
-									{"authorIcon" in row && <BrandIcon name={row.authorIcon} />}
-									{row.author}
-								</span>
-							</div>
-						))}
-					</div>
-					<div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2.5 rounded-[10px] border border-border bg-bg-subtle px-3.5 py-3 text-[14px]">
-						<span className="inline-flex items-center gap-1.5 text-fg-muted">
-							<BrandIcon name="claude-spark.svg" />
-							<strong className="text-fg">Claude</strong> changed 1 row in
-							customers
-						</span>
-						<table className="min-w-[160px] flex-1 border-collapse overflow-hidden rounded-lg border border-border-subtle bg-panel font-mono text-[13px]">
-							<thead>
-								<tr className="text-left text-fg-subtle">
-									<th className="border-b border-border px-2.5 py-1 font-normal">
-										name
-									</th>
-									<th className="border-b border-border px-2.5 py-1 font-normal">
-										plan
-									</th>
-								</tr>
-							</thead>
-							<tbody>
-								<tr>
-									<td className="px-2.5 py-1">Acme</td>
-									<td className="px-2.5 py-1">
-										<del className="mr-1.5 rounded bg-danger-subtle px-1 text-danger">
-											trial
-										</del>
-										<ins className="rounded bg-success-subtle px-1 text-success no-underline">
-											paid
-										</ins>
-									</td>
-								</tr>
-							</tbody>
-						</table>
-						<span className="ml-auto flex gap-2">
-							<span className="rounded-lg bg-fg px-3.5 py-1.5 font-semibold text-panel">
-								Keep
-							</span>
-							<span className="rounded-lg border border-border bg-panel px-3.5 py-1.5 font-semibold">
-								Undo
-							</span>
-						</span>
-					</div>
-				</div>
-			</div>
-		</figure>
-	);
-}
-
-function SidebarLabel({ children }: { children: ReactNode }) {
-	return (
-		<div className="mx-2.5 mt-4 mb-1 text-[11.5px] font-semibold tracking-[.06em] text-fg-subtle uppercase">
-			{children}
-		</div>
-	);
-}
-
-const sources = [
-	{ label: "Google Drive", icon: <BrandIcon name="brand-google-drive.svg" /> },
-	{ label: "Notion", icon: <BrandIcon name="brand-notion.svg" /> },
-	{ label: "GitHub", icon: <BrandIcon name="brand-github.svg" /> },
-	{ label: "Granola", icon: <BrandIcon name="brand-granola.png" /> },
-	{
-		label: "Upload",
-		icon: (
-			<Upload
-				className="size-4 shrink-0"
-				strokeWidth={1.7}
-				aria-hidden="true"
-			/>
-		),
-	},
-];
-
-const agents = [
-	{ label: "Claude", icon: <BrandIcon name="claude-spark.svg" /> },
-	{ label: "ChatGPT", icon: <BrandIcon name="brand-openai.svg" /> },
-	{ label: "Gemini", icon: <BrandIcon name="brand-gemini.svg" /> },
-	{
-		label: "Any MCP agent",
-		icon: (
-			<Waypoints
-				className="size-4 shrink-0"
-				strokeWidth={1.7}
-				aria-hidden="true"
-			/>
-		),
-	},
-];
-
-/** Connector lines fanning from evenly spaced rows into one centre point. */
-function Wires({ count, flip = false }: { count: number; flip?: boolean }) {
-	const d = Array.from({ length: count }, (_, i) => {
-		const y = ((i + 0.5) / count) * 100;
-		return flip ? `M64 ${y}C32 ${y} 32 50 0 50` : `M0 ${y}C32 ${y} 32 50 64 50`;
-	}).join("");
-	return (
-		<svg
-			className="hidden h-full w-full overflow-visible text-fg/25 sm:block"
-			viewBox="0 0 64 100"
-			preserveAspectRatio="none"
-			aria-hidden="true"
-		>
-			<path
-				d={d}
-				fill="none"
-				stroke="currentColor"
-				strokeWidth="1.5"
-				vectorEffect="non-scaling-stroke"
-			/>
-		</svg>
-	);
-}
-
-function ChipStack({
-	items,
-	rowsClassName,
-}: {
-	items: { label: string; icon: ReactNode }[];
-	/** Equal-height rows on wide screens, so the wires meet each chip's centre. */
-	rowsClassName: string;
-}) {
-	return (
-		<div
-			className={
-				"grid grid-cols-2 gap-2 sm:grid-cols-1 sm:gap-0 " + rowsClassName
-			}
-		>
-			{items.map(({ label, icon }) => (
-				<div key={label} className="flex items-center sm:py-[5px]">
-					<span className="flex flex-1 items-center gap-2.5 rounded-[9px] border border-border bg-panel px-3 py-2 text-[14px] font-semibold">
-						{icon}
-						{label}
+				{compareColumns.map((column) => (
+					<span key={column} style={compareCell}>
+						{column}
 					</span>
+				))}
+			</div>
+			{compareRows.map((row) => (
+				<div
+					key={row.label}
+					data-lr="cmp-row"
+					style={{
+						display: "grid",
+						gridTemplateColumns: compareGrid,
+						gap: "12px",
+						padding: "13px 20px",
+						borderTop: "1px solid var(--atelier-border-subtle)",
+						fontSize: "15px",
+						alignItems: "center",
+					}}
+				>
+					<span>{row.label}</span>
+					<span style={compareCell}>
+						<CompareMark value />
+					</span>
+					{row.cells.map((cell, index) => (
+						<span key={compareColumns[index]} style={compareCell}>
+							<CompareMark value={cell} />
+						</span>
+					))}
 				</div>
 			))}
-		</div>
-	);
-}
-
-const sourceMarkGlow = "size-14 drop-shadow-[0_8px_14px_rgba(232,89,12,.28)]"; // token-literal: fixed LixRay brand-mark glow.
-
-function SourcesDiagram() {
-	return (
-		<div
-			className="mt-2 grid grid-cols-1 items-stretch gap-3 sm:grid-cols-[minmax(0,1fr)_64px_auto_64px_minmax(0,1fr)] sm:gap-0"
-			role="img"
-			aria-label="Google Drive, Notion, GitHub, Granola and uploads flow into LixRay. Claude, ChatGPT, Gemini and any MCP agent read and edit it."
-		>
-			<ChipStack items={sources} rowsClassName="sm:grid-rows-5" />
-			<Wires count={sources.length} />
-			<div className="flex flex-col items-center justify-center gap-2 py-2 text-[15px] font-bold">
-				<img className={sourceMarkGlow} src="/lixray-mark.svg" alt="" />
-				LixRay
-			</div>
-			<Wires count={agents.length} flip />
-			<ChipStack items={agents} rowsClassName="sm:grid-rows-4" />
 		</div>
 	);
 }
@@ -365,205 +186,4319 @@ export function LandingPage() {
 	const ctaLabel = user ? "Open LixRay" : "Create a repository";
 
 	return (
-		<div className="min-h-screen bg-bg font-sans text-fg antialiased">
+		<div
+			style={{
+				minHeight: "100vh",
+				colorScheme: "light",
+				background: "var(--atelier-bg)",
+			}}
+		>
+			<style>{landingCss}</style>
 			<SiteHeader />
 			<main>
-				<section
-					className="flex flex-col items-center gap-[22px] px-6 pt-14 text-center sm:pt-16"
-					aria-labelledby="landing-title"
+				<div
+					data-lr="root"
+					style={{
+						background: "var(--atelier-bg)",
+						maxWidth: "1040px",
+						margin: "0 auto",
+						boxSizing: "border-box",
+						fontFamily:
+							"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+						color: "var(--atelier-fg)",
+						padding: "80px 64px 72px",
+						display: "flex",
+						flexDirection: "column",
+						gap: "72px",
+					}}
 				>
-					<h1
-						id="landing-title"
-						className="m-0 max-w-[16ch] text-[clamp(2.4rem,6.4vw,4rem)] leading-[1.05] font-bold tracking-[-.035em] text-balance"
+					<div
+						style={{ display: "flex", flexDirection: "column", gap: "26px" }}
 					>
-						Shared repository for you and your{" "}
-						<span className="text-accent">AI&nbsp;agents</span>
-					</h1>
-					<p className="m-0 max-w-[600px] text-[18px] leading-[1.6] text-fg-muted text-pretty">
-						LixRay connects all your data in one place. Claude, ChatGPT, or any
-						MCP agent reads and edits the same data, with full version control.
-					</p>
-					<div className="flex flex-wrap justify-center gap-3">
-						<a className={primaryButton} href={repositoryTo}>
-							{ctaLabel}
-						</a>
-						<a
-							className={secondaryButton}
-							href="https://github.com/opral/lix"
-							target="_blank"
-							rel="noreferrer"
+						<h1
+							style={{
+								margin: "0",
+								fontSize: "58px",
+								fontWeight: "700",
+								letterSpacing: "-0.04em",
+								lineHeight: "1.05",
+								textWrap: "balance",
+							}}
 						>
-							<img
-								className="size-4"
-								src={iconPath("brand-github.svg")}
-								alt=""
-							/>
-							Star on GitHub
-						</a>
-					</div>
-					<div className="flex flex-wrap items-center justify-center gap-2.5 text-[14px] text-fg-muted">
-						<span>Works with</span>
-						<span
-							className="inline-flex items-center gap-[9px]"
-							aria-label="Claude, ChatGPT, and Gemini"
+							{"Shared repository for every AI agent you use."}
+						</h1>
+						<p
+							style={{
+								margin: "0",
+								fontSize: "19px",
+								lineHeight: "1.6",
+								color: "var(--atelier-fg-muted)",
+								textWrap: "pretty",
+								maxWidth: "680px",
+							}}
 						>
-							<img
-								className="size-4"
-								src={iconPath("claude-spark.svg")}
-								alt=""
-							/>
-							<img
-								className="size-4"
-								src={iconPath("brand-openai.svg")}
-								alt=""
-							/>
-							<img
-								className="size-4"
-								src={iconPath("brand-gemini.svg")}
-								alt=""
-							/>
-						</span>
-						<span>and any MCP agent</span>
-					</div>
-				</section>
-
-				<section
-					className="mx-auto mt-12 w-full max-w-[1000px] px-4 sm:px-6"
-					aria-label="Product preview"
-				>
-					<ProductPreview />
-				</section>
-
-				<div className="mx-auto flex w-full max-w-[680px] flex-col px-6 pb-[120px]">
-					<section
-						className="flex flex-col gap-[18px] pt-24"
-						aria-labelledby="sources-title"
-					>
-						<h2 id="sources-title" className={sectionTitle}>
-							Connect your sources <SoonBadge href={sourcesIssueHref} />
-						</h2>
-						<p className={sectionText}>
-							Pull in files from Google Drive, Notion, GitHub, and Granola, or
-							upload them. Agents read from one place instead of each tool's
-							API.
+							{
+								"Files and SQL tables in one open-source repo. Claude, ChatGPT, Codex, and your scripts read and write the same data."
+							}
 						</p>
-						<SourcesDiagram />
-					</section>
-
-					<section
-						className="flex flex-col gap-[18px] pt-24"
-						aria-labelledby="why-title"
-					>
-						<h2 id="why-title" className={sectionTitle}>
-							Why LixRay
-						</h2>
-						<ul className="m-0 flex list-disc flex-col gap-3.5 pl-5 text-[17px] leading-[1.6] text-fg-muted">
-							<li>
-								<strong className="text-fg">
-									All data for agents in one place.
-								</strong>{" "}
-								Documents, files, and database tables live in one repository.
-							</li>
-							<li>
-								<strong className="text-fg">No vendor lock-in.</strong>
-								<ul className="mt-1.5 flex list-[circle] flex-col gap-1 pl-5">
-									<li>Works with Claude, ChatGPT, Gemini, or any MCP agent.</li>
-									<li>
-										Built on{" "}
-										<a
-											className="text-fg-muted underline underline-offset-2"
-											href="https://github.com/opral/lix"
-											target="_blank"
-											rel="noreferrer"
-										>
-											Lix
-										</a>
-										, open-source (MIT) infrastructure.{" "}
-										<Link
-											className="text-fg-muted underline underline-offset-2"
-											to="/docs/$slug"
-											params={{ slug: "self-host" }}
-										>
-											Self-host it
-										</Link>{" "}
-										if you want.
-									</li>
-									<li>
-										Open formats first: Markdown, CSV, Excel, and plain SQL
-										tables.
-									</li>
-								</ul>
-							</li>
-							<li>
-								<strong className="text-fg">Version control.</strong>
-								<ul className="mt-1.5 flex list-[circle] flex-col gap-1 pl-5">
-									<li>
-										Change proposals: agents propose changes without breaking
-										your work.
-									</li>
-									<li>
-										History: agents learn from past changes, and you can trace
-										who changed what.
-									</li>
-									<li>
-										<span className="inline-flex items-center gap-2">
-											Automations <SoonBadge />
-										</span>
-									</li>
-								</ul>
-							</li>
-						</ul>
-					</section>
-
-					<section
-						className="flex flex-col gap-[18px] pt-24"
-						aria-labelledby="comparison-title"
-					>
-						<h2 id="comparison-title" className={sectionTitle}>
-							Compared to
-						</h2>
-						<div className="flex flex-col gap-3.5 text-[17px] leading-[1.6] text-fg-muted">
-							<p className="m-0 flex items-start gap-3">
-								<span className="mt-[5px]">
-									<BrandIcon name="brand-openai.svg" />
-								</span>
-								<span>
-									<strong className="text-fg">ChatGPT Space</strong> only works
-									with ChatGPT.
-								</span>
-							</p>
-							<p className="m-0 flex items-start gap-3">
-								<span className="mt-[5px]">
-									<BrandIcon name="claude-spark.svg" />
-								</span>
-								<span>
-									<strong className="text-fg">Anthropic Artifacts</strong> only
-									work with Claude.
-								</span>
-							</p>
-						</div>
-						<p className="m-0 text-[15px] text-fg-subtle">
-							Notion, Google Drive, and GitHub are not alternatives. LixRay
-							connects to them as sources.
-						</p>
-					</section>
-
-					<section
-						className="flex flex-col items-center gap-[18px] pt-24 text-center"
-						aria-labelledby="cta-title"
-					>
-						<h2 id="cta-title" className={sectionTitle}>
-							Create your first repository
-						</h2>
-						<div className="flex flex-wrap justify-center gap-3">
-							<a className={primaryButton} href={repositoryTo}>
+						<div
+							style={{
+								display: "flex",
+								flexWrap: "wrap",
+								alignItems: "center",
+								gap: "20px",
+							}}
+						>
+							<a
+								href={repositoryTo}
+								style={{
+									fontSize: "17px",
+									fontWeight: "700",
+									color: "var(--atelier-panel)",
+									background: "var(--atelier-accent-gradient)",
+									boxShadow: "var(--atelier-shadow-accent)",
+									textDecoration: "none",
+									padding: "14px 24px",
+									borderRadius: "10px",
+								}}
+							>
 								{ctaLabel}
 							</a>
-							<Link className={secondaryButton} to="/docs">
-								Read the docs
-							</Link>
+							<a
+								href="https://github.com/opral/lix"
+								target="_blank"
+								rel="noreferrer"
+								style={{ fontSize: "16px", fontWeight: "600" }}
+							>
+								{"View on GitHub"}
+							</a>
 						</div>
-					</section>
+					</div>
+					<div
+						style={{
+							background: "var(--atelier-panel)",
+							border: "1px solid var(--atelier-border)",
+							borderRadius: "16px",
+							boxShadow:
+								"0 12px 32px color-mix(in srgb, var(--atelier-fg) 7%, transparent)",
+							overflow: "hidden",
+						}}
+					>
+						<div
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "8px",
+								padding: "12px 16px",
+								background: "var(--atelier-bg-subtle)",
+								borderBottom: "1px solid var(--atelier-border-subtle)",
+							}}
+						>
+							<span
+								style={{
+									width: "11px",
+									height: "11px",
+									borderRadius: "50%",
+									background: "var(--atelier-border)",
+								}}
+							></span>
+							<span
+								style={{
+									width: "11px",
+									height: "11px",
+									borderRadius: "50%",
+									background: "var(--atelier-border)",
+								}}
+							></span>
+							<span
+								style={{
+									width: "11px",
+									height: "11px",
+									borderRadius: "50%",
+									background: "var(--atelier-border)",
+									marginRight: "8px",
+								}}
+							></span>
+							<span
+								style={{
+									fontFamily: "ui-monospace, Menlo, monospace",
+									fontSize: "13.5px",
+									color: "var(--atelier-fg-subtle)",
+								}}
+							>
+								{"lixray.com"}
+							</span>
+						</div>
+						<div
+							data-lr="mock"
+							style={{
+								display: "grid",
+								gridTemplateColumns: "210px minmax(0,1fr)",
+							}}
+						>
+							<div
+								style={{
+									padding: "16px 10px",
+									borderRight: "1px solid var(--atelier-border-subtle)",
+									display: "flex",
+									flexDirection: "column",
+									gap: "2px",
+									fontSize: "14.5px",
+								}}
+							>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "9px",
+										padding: "4px 10px 12px",
+										fontSize: "18px",
+										fontWeight: "700",
+									}}
+								>
+									<img
+										src="/lixray-mark.svg"
+										alt=""
+										style={{ width: "20px", height: "20px" }}
+									/>
+									{"home"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+										borderRadius: "8px",
+										background: "var(--atelier-bg)",
+										fontWeight: "600",
+									}}
+								>
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="var(--atelier-fg)"
+										strokeWidth="1.3"
+									>
+										<rect x="1.5" y="1.5" width="5" height="5" rx="1" />
+										<rect x="9.5" y="1.5" width="5" height="5" rx="1" />
+										<rect x="1.5" y="9.5" width="5" height="5" rx="1" />
+										<rect x="9.5" y="9.5" width="5" height="5" rx="1" />
+									</svg>
+									{"All"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+										color: "var(--atelier-fg-muted)",
+									}}
+								>
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="var(--atelier-fg-subtle)"
+										strokeWidth="1.3"
+										strokeLinejoin="round"
+									>
+										<path d="M3.5 1.5 h6 l3 3 v10 h-9 z M5.5 8 h5 M5.5 10.5 h5" />
+									</svg>
+									{"Documents"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+										color: "var(--atelier-fg-muted)",
+									}}
+								>
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="var(--atelier-fg-subtle)"
+										strokeWidth="1.3"
+									>
+										<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+										<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+									</svg>
+									{"Tables"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+										color: "var(--atelier-fg-muted)",
+									}}
+								>
+									<svg
+										width="16"
+										height="16"
+										viewBox="0 0 16 16"
+										fill="none"
+										stroke="var(--atelier-fg-subtle)"
+										strokeWidth="1.3"
+										strokeLinecap="round"
+									>
+										<path d="M2 8 a6 6 0 1 0 1.8 -4.3 M2 2.5 v3 h3 M8 4.8 v3.4 l2 1.3" />
+									</svg>
+									{"History"}
+								</span>
+								<span
+									style={{
+										padding: "18px 10px 6px",
+										fontSize: "12px",
+										fontWeight: "700",
+										letterSpacing: "0.1em",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
+									{"SOURCES"}
+									<span
+										style={{
+											marginLeft: "8px",
+											padding: "1px 7px",
+											borderRadius: "99px",
+											background: "var(--atelier-accent-subtle)",
+											color: "var(--atelier-accent)",
+											fontSize: "10.5px",
+											letterSpacing: "0.04em",
+										}}
+									>
+										{"SOON"}
+									</span>
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+									}}
+								>
+									<svg width="16" height="16" viewBox="0 0 16 16">
+										<path
+											d="M5.5 1.5h5l4.5 8h-5z"
+											fill="#FBBC04" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+											fill="#0F9D58" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M3.5 13.8h9.5l2-4.3H5.8z"
+											fill="#4285F4" /* token-literal: Google Drive brand mark */
+										/>
+									</svg>
+									{"Google Drive"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+									}}
+								>
+									<svg width="16" height="16" viewBox="0 0 16 16">
+										<rect
+											x="1.5"
+											y="1.5"
+											width="13"
+											height="13"
+											rx="2.5"
+											fill="var(--atelier-panel)"
+											stroke="var(--atelier-fg)"
+											strokeWidth="1.3"
+										/>
+										<path
+											d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
+											fill="none"
+											stroke="var(--atelier-fg)"
+											strokeWidth="1.4"
+											strokeLinejoin="round"
+										/>
+									</svg>
+									{"Notion"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
+									<span
+										style={{
+											width: "16px",
+											textAlign: "center",
+											fontSize: "18px",
+											lineHeight: "1",
+										}}
+									>
+										{"+"}
+									</span>
+									{"Connect source"}
+								</span>
+								<span
+									style={{
+										padding: "18px 10px 6px",
+										fontSize: "12px",
+										fontWeight: "700",
+										letterSpacing: "0.1em",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
+									{"AGENTS"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+									}}
+								>
+									<img
+										src="/landing/claude-spark.svg"
+										alt=""
+										style={{ width: "16px", height: "16px" }}
+									/>
+									{"Claude"}
+								</span>
+								<span
+									style={{
+										display: "flex",
+										alignItems: "center",
+										gap: "10px",
+										padding: "7px 10px",
+									}}
+								>
+									<img
+										src="/landing/brand-openai.svg"
+										alt=""
+										style={{ width: "16px", height: "16px" }}
+									/>
+									{"ChatGPT"}
+								</span>
+							</div>
+							<div
+								style={{
+									padding: "24px 28px",
+									display: "flex",
+									flexDirection: "column",
+									gap: "14px",
+									fontSize: "15px",
+								}}
+							>
+								<div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+									}}
+								>
+									<span
+										style={{
+											fontSize: "26px",
+											fontWeight: "700",
+											letterSpacing: "-0.02em",
+										}}
+									>
+										{"All"}
+									</span>
+									<span
+										style={{
+											background: "var(--atelier-fg)",
+											color: "var(--atelier-panel)",
+											fontSize: "14px",
+											fontWeight: "600",
+											padding: "8px 16px",
+											borderRadius: "99px",
+										}}
+									>
+										{"New \u25be"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										padding: "8px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+										fontSize: "13.5px",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
+									<span>{"Name"}</span>
+									<span>{"Changed by"}</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<svg
+											width="20"
+											height="20"
+											viewBox="0 0 16 16"
+											fill="none"
+											stroke="var(--atelier-fg-subtle)"
+											strokeWidth="1.1"
+										>
+											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+											<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+										</svg>
+										{"customers"}
+									</span>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "7px",
+										}}
+									>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<svg
+											width="20"
+											height="20"
+											viewBox="0 0 16 16"
+											fill="none"
+											stroke="var(--atelier-fg-subtle)"
+											strokeWidth="1.1"
+										>
+											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+											<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+										</svg>
+										{"orders"}
+									</span>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "7px",
+										}}
+									>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<img
+											src="/landing/icon-folder.svg"
+											alt=""
+											style={{ width: "20px", height: "20px" }}
+										/>
+										{"research"}
+									</span>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "7px",
+										}}
+									>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<img
+											src="/landing/icon-sq-md.svg"
+											alt=""
+											style={{ width: "20px", height: "20px" }}
+										/>
+										{"roadmap.md"}
+									</span>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "7px",
+										}}
+									>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+										borderBottom: "1px solid var(--atelier-border-subtle)",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<svg width="20" height="20" viewBox="0 0 16 16">
+											<rect
+												x="4"
+												y="1"
+												width="11"
+												height="14"
+												rx="1.6"
+												fill="#21A366" /* token-literal: Excel brand mark */
+											/>
+											<rect
+												x="1"
+												y="4"
+												width="9"
+												height="8"
+												rx="1.3"
+												fill="#107C41" /* token-literal: Excel brand mark */
+											/>
+											<path
+												d="M3.3 6 l4 4 M7.3 6 l-4 4"
+												stroke="var(--atelier-panel)"
+												strokeWidth="1.2"
+												strokeLinecap="round"
+											/>
+										</svg>
+										{"budget.xlsx"}
+									</span>
+									<span style={{ color: "var(--atelier-fg-muted)" }}>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										display: "flex",
+										justifyContent: "space-between",
+										alignItems: "center",
+										padding: "7px 0",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "12px",
+										}}
+									>
+										<img
+											src="/landing/icon-sq-pdf.svg"
+											alt=""
+											style={{ width: "20px", height: "20px" }}
+										/>
+										{"pitch-deck.pdf"}
+									</span>
+									<span style={{ color: "var(--atelier-fg-muted)" }}>
+										{"You"}
+									</span>
+								</div>
+								<div
+									style={{
+										marginTop: "6px",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "14px",
+										background: "var(--atelier-bg-subtle)",
+										padding: "14px 16px",
+										display: "flex",
+										alignItems: "center",
+										gap: "14px",
+										flexWrap: "wrap",
+									}}
+								>
+									<span
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "8px",
+											fontSize: "14.5px",
+										}}
+									>
+										<span>
+											<b>{"You"}</b>
+											{" changed 1 row in customers"}
+										</span>
+									</span>
+									<div
+										style={{
+											flex: "1",
+											minWidth: "150px",
+											background: "var(--atelier-panel)",
+											borderRadius: "8px",
+											padding: "6px 12px",
+											fontFamily: "ui-monospace, Menlo, monospace",
+											fontSize: "13px",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												gap: "40px",
+												color: "var(--atelier-fg-subtle)",
+												paddingBottom: "4px",
+												borderBottom: "1px solid var(--atelier-border-subtle)",
+											}}
+										>
+											<span style={{ width: "50px" }}>{"name"}</span>
+											<span>{"plan"}</span>
+										</div>
+										<div
+											style={{
+												display: "flex",
+												gap: "40px",
+												paddingTop: "5px",
+											}}
+										>
+											<span style={{ width: "50px" }}>{"Acme"}</span>
+											<span>
+												<span
+													style={{
+														background: "var(--atelier-danger-subtle)",
+														color: "var(--atelier-danger)",
+														textDecoration: "line-through",
+														padding: "0 4px",
+														borderRadius: "3px",
+													}}
+												>
+													{"trial"}
+												</span>{" "}
+												<span
+													style={{
+														background: "var(--atelier-success-subtle)",
+														color: "var(--atelier-success-border)",
+														padding: "0 4px",
+														borderRadius: "3px",
+													}}
+												>
+													{"paid"}
+												</span>
+											</span>
+										</div>
+									</div>
+									<span style={{ display: "flex", gap: "8px" }}>
+										<span
+											style={{
+												background: "var(--atelier-fg)",
+												color: "var(--atelier-panel)",
+												fontSize: "14px",
+												fontWeight: "600",
+												padding: "8px 16px",
+												borderRadius: "8px",
+											}}
+										>
+											{"Keep"}
+										</span>
+										<span
+											style={{
+												border: "1px solid var(--atelier-border)",
+												background: "var(--atelier-panel)",
+												fontSize: "14px",
+												padding: "8px 16px",
+												borderRadius: "8px",
+											}}
+										>
+											{"Undo"}
+										</span>
+									</span>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div
+						data-lr="hooks"
+						style={{
+							display: "grid",
+							gridTemplateColumns: "repeat(6, minmax(0,1fr))",
+							gap: "36px 32px",
+						}}
+					>
+						<div
+							style={{
+								gridColumn: "span 2",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<svg
+								width="24"
+								height="24"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="var(--atelier-fg)"
+								strokeWidth="1.6"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<path d="M7 6 L3 10 L7 14 M13 6 L17 10 L13 14" />
+							</svg>
+							<b style={{ fontSize: "17px" }}>{"Open source"}</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+								}}
+							>
+								{"Self-host the Lix server, or embed Lix in your product."}
+							</span>
+						</div>
+						<div
+							style={{
+								gridColumn: "span 2",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<svg
+								width="24"
+								height="24"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="var(--atelier-fg)"
+								strokeWidth="1.6"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<path d="M5 2.5 h6 l4 4 v11 h-10 z M11 2.5 v4 h4" />
+							</svg>
+							<b style={{ fontSize: "17px" }}>{"Files"}</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+								}}
+							>
+								{"Store any file as is. Markdown and CSV diff row by row."}
+							</span>
+						</div>
+						<div
+							style={{
+								gridColumn: "span 2",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<svg
+								width="24"
+								height="24"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="var(--atelier-fg)"
+								strokeWidth="1.6"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+								<path d="M2.5 8 h15 M7.5 8 v8.5" />
+							</svg>
+							<b style={{ fontSize: "17px" }}>{"Database tables"}</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+								}}
+							>
+								{
+									"Store customers, orders, or any other rows. Query them with SQL."
+								}
+							</span>
+						</div>
+						<div
+							style={{
+								gridColumn: "span 2",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<svg
+								width="24"
+								height="24"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="var(--atelier-fg)"
+								strokeWidth="1.6"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<circle cx="5" cy="4.5" r="2" />
+								<circle cx="5" cy="15.5" r="2" />
+								<circle cx="15" cy="7" r="2" />
+								<path d="M5 6.5 v7 M15 9 c0 3.5 -10 2.5 -10 4.5" />
+							</svg>
+							<b style={{ fontSize: "17px" }}>{"Version control"}</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+								}}
+							>
+								{"Branch, diff, and roll back files and rows."}
+							</span>
+						</div>
+						<div
+							style={{
+								gridColumn: "span 4",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<span
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: "10px",
+									height: "24px",
+								}}
+							>
+								<svg width="22" height="22" viewBox="0 0 16 16">
+									<path
+										d="M5.5 1.5h5l4.5 8h-5z"
+										fill="#FBBC04" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+										fill="#0F9D58" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M3.5 13.8h9.5l2-4.3H5.8z"
+										fill="#4285F4" /* token-literal: Google Drive brand mark */
+									/>
+								</svg>
+								<svg width="22" height="22" viewBox="0 0 16 16">
+									<rect
+										x="1.5"
+										y="1.5"
+										width="13"
+										height="13"
+										rx="2.5"
+										fill="var(--atelier-panel)"
+										stroke="var(--atelier-fg)"
+										strokeWidth="1.3"
+									/>
+									<path
+										d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
+										fill="none"
+										stroke="var(--atelier-fg)"
+										strokeWidth="1.4"
+										strokeLinejoin="round"
+									/>
+								</svg>
+								<img
+									src="/landing/brand-granola.svg"
+									alt="Granola"
+									style={{
+										width: "22px",
+										height: "22px",
+										display: "block",
+										flexShrink: "0",
+									}}
+								/>
+								<span
+									style={{
+										fontSize: "14px",
+										color: "var(--atelier-fg-subtle)",
+									}}
+								>
+									{"and more"}
+								</span>
+							</span>
+							<b
+								style={{
+									fontSize: "17px",
+									display: "flex",
+									alignItems: "center",
+									gap: "8px",
+								}}
+							>
+								{"Mount your sources"}
+								<span
+									style={{
+										fontSize: "11.5px",
+										fontWeight: "700",
+										color: "var(--atelier-tag-orange-fg)",
+										background: "var(--atelier-tag-orange)",
+										padding: "2px 8px",
+										borderRadius: "99px",
+									}}
+								>
+									{"Soon"}
+								</span>
+							</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+								}}
+							>
+								{
+									"Mount Drive, Notion, and Granola in the repo. Agents then work from one place."
+								}
+							</span>
+						</div>
+					</div>
+					<div
+						style={{
+							display: "flex",
+							flexDirection: "column",
+							gap: "28px",
+							paddingTop: "56px",
+							borderTop: "1px solid var(--atelier-border-strong)",
+						}}
+					>
+						<div
+							style={{ display: "flex", flexDirection: "column", gap: "12px" }}
+						>
+							<h3
+								style={{
+									margin: "0",
+									fontSize: "34px",
+									fontWeight: "700",
+									letterSpacing: "-0.02em",
+								}}
+							>
+								{"Hackable"}
+							</h3>
+							<p
+								style={{
+									margin: "0",
+									fontSize: "18px",
+									lineHeight: "1.65",
+									color: "var(--atelier-fg-muted)",
+									textWrap: "pretty",
+									maxWidth: "740px",
+								}}
+							>
+								{"LixRay is built on "}
+								<a
+									href="https://lix.dev"
+									aria-label="Lix"
+									style={{ display: "inline-block", padding: "0 2px" }}
+								>
+									<svg
+										width="23"
+										height="16"
+										viewBox="0 0 26 18"
+										fill="none"
+										style={{ display: "inline-block", verticalAlign: "-2px" }}
+									>
+										<path
+											d="M14.7618 5.74842L16.9208 9.85984L22.3675 0.358398H25.7133L19.0723 11.6284L22.5712 17.5085H19.2407L16.9208 13.443L14.6393 17.5085H11.2705L14.7618 11.6284L11.393 5.74842H14.7618Z"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
+										/>
+										<path
+											d="M6.16211 17.5081V5.74805H9.42368V17.5081H6.16211Z"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
+										/>
+										<path
+											d="M3.52112 0.393555V17.6416H0.287109V0.393555H3.52112Z"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
+										/>
+										<path
+											d="M6.21582 0.393555H14.8399V3.08856H6.21582V0.393555Z"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
+										/>
+									</svg>
+								</a>
+								{
+									", an open-source engine for files, tables, and version control. You query it with SQL. Agents and your own code use the same API."
+								}
+							</p>
+						</div>
+						<div
+							data-lr="hack"
+							style={{
+								display: "grid",
+								gridTemplateColumns: "minmax(0,1.25fr) 44px minmax(0,1fr)",
+								gap: "14px",
+								alignItems: "center",
+							}}
+						>
+							<div
+								style={{
+									colorScheme: "dark",
+									background: "var(--atelier-panel)",
+									borderRadius: "14px",
+									overflow: "hidden",
+									boxShadow:
+										"0 16px 36px color-mix(in srgb, var(--atelier-fg) 16%, transparent)",
+								}}
+							>
+								<div
+									style={{
+										display: "flex",
+										alignItems: "center",
+										justifyContent: "space-between",
+										gap: "12px",
+										padding: "14px 20px",
+										background: "var(--atelier-bg-hover)",
+										borderBottom: "1px solid var(--atelier-border)",
+									}}
+								>
+									<span
+										style={{
+											fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+											fontSize: "16px",
+											color: "var(--atelier-fg)",
+										}}
+									>
+										<span style={{ color: "var(--atelier-fg-subtle)" }}>
+											{"$ "}
+										</span>
+										{"npm install @lix-js/sdk"}
+									</span>
+									<span
+										style={{
+											fontSize: "13px",
+											fontWeight: "600",
+											color: "var(--atelier-panel)",
+											background: "var(--atelier-fg)",
+											padding: "5px 12px",
+											borderRadius: "7px",
+										}}
+									>
+										{"Node.js"}
+									</span>
+								</div>
+								<pre
+									style={{
+										margin: 0,
+										padding: "18px 20px",
+										overflowX: "auto",
+										fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
+										fontSize: "13px",
+										lineHeight: "1.8",
+										color: "var(--atelier-fg)",
+									}}
+								>
+									<code>{`import { openLix } from "@lix-js/sdk";
+
+const lix = await openLix({
+  server: {
+    url: process.env.LIXRAY_REPOSITORY_URL,
+    headers: {
+      Authorization: "Bearer " + process.env.LIXRAY_API_TOKEN,
+    },
+  },
+});
+
+const rows = await lix.execute(
+  "SELECT name, city, plan FROM customers ORDER BY name",
+);
+await lix.close();`}</code>
+								</pre>
+							</div>
+							<svg
+								width="44"
+								height="24"
+								viewBox="0 0 44 24"
+								fill="none"
+								stroke="var(--atelier-accent)"
+								strokeWidth="2"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+								style={{ flexShrink: "0", alignSelf: "center" }}
+							>
+								<path d="M2 12 H40 M32 4 L40 12 L32 20" />
+							</svg>
+							<div
+								style={{
+									display: "flex",
+									flexDirection: "column",
+									gap: "10px",
+								}}
+							>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "14px",
+										overflow: "hidden",
+										boxShadow:
+											"0 12px 28px color-mix(in srgb, var(--atelier-fg) 6%, transparent)",
+									}}
+								>
+									<div
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "8px",
+											padding: "10px 14px",
+											background: "var(--atelier-bg-subtle)",
+											borderBottom: "1px solid var(--atelier-border-subtle)",
+										}}
+									>
+										<span
+											style={{
+												width: "9px",
+												height: "9px",
+												borderRadius: "50%",
+												background: "var(--atelier-border)",
+											}}
+										></span>
+										<span
+											style={{
+												width: "9px",
+												height: "9px",
+												borderRadius: "50%",
+												background: "var(--atelier-border)",
+											}}
+										></span>
+										<span
+											style={{
+												width: "9px",
+												height: "9px",
+												borderRadius: "50%",
+												background: "var(--atelier-border)",
+												marginRight: "6px",
+											}}
+										></span>
+										<span
+											style={{
+												fontFamily: "ui-monospace, Menlo, monospace",
+												fontSize: "12.5px",
+												color: "var(--atelier-fg-subtle)",
+											}}
+										>
+											{"lixray.com/acme/home"}
+										</span>
+									</div>
+									<div
+										style={{
+											display: "flex",
+											alignItems: "center",
+											gap: "9px",
+											padding: "14px 16px 10px",
+											fontSize: "17px",
+											fontWeight: "700",
+										}}
+									>
+										<svg
+											width="16"
+											height="16"
+											viewBox="0 0 16 16"
+											fill="none"
+											stroke="var(--atelier-fg-subtle)"
+											strokeWidth="1.3"
+										>
+											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+											<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+										</svg>
+										{"customers"}
+									</div>
+									<div
+										style={{
+											display: "grid",
+											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
+											gap: "10px",
+											padding: "8px 16px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											fontSize: "12.5px",
+											color: "var(--atelier-fg-subtle)",
+										}}
+									>
+										<span>{"name"}</span>
+										<span>{"city"}</span>
+										<span>{"plan"}</span>
+									</div>
+									<div
+										style={{
+											display: "grid",
+											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
+											gap: "10px",
+											padding: "10px 16px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											fontSize: "14px",
+											alignItems: "center",
+										}}
+									>
+										<span>{"Acme"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Hamburg"}
+										</span>
+										<span
+											style={{
+												justifySelf: "start",
+												background: "var(--atelier-success-subtle)",
+												color: "var(--atelier-success-border)",
+												padding: "1px 10px",
+												borderRadius: "99px",
+												fontSize: "12.5px",
+											}}
+										>
+											{"paid"}
+										</span>
+									</div>
+									<div
+										style={{
+											display: "grid",
+											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
+											gap: "10px",
+											padding: "10px 16px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											fontSize: "14px",
+											alignItems: "center",
+										}}
+									>
+										<span>{"Bluebird Caf\u00e9"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Lisbon"}
+										</span>
+										<span
+											style={{
+												justifySelf: "start",
+												background: "var(--atelier-tag-orange)",
+												color: "var(--atelier-tag-orange-fg)",
+												padding: "1px 10px",
+												borderRadius: "99px",
+												fontSize: "12.5px",
+											}}
+										>
+											{"trial"}
+										</span>
+									</div>
+									<div
+										style={{
+											display: "grid",
+											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
+											gap: "10px",
+											padding: "10px 16px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											fontSize: "14px",
+											alignItems: "center",
+										}}
+									>
+										<span>{"Northwind"}</span>
+										<span style={{ color: "var(--atelier-fg-muted)" }}>
+											{"Berlin"}
+										</span>
+										<span
+											style={{
+												justifySelf: "start",
+												background: "var(--atelier-success-subtle)",
+												color: "var(--atelier-success-border)",
+												padding: "1px 10px",
+												borderRadius: "99px",
+												fontSize: "12.5px",
+											}}
+										>
+											{"paid"}
+										</span>
+									</div>
+								</div>
+							</div>
+						</div>
+						<div
+							style={{
+								display: "flex",
+								flexDirection: "column",
+								gap: "16px",
+								paddingTop: "28px",
+							}}
+						>
+							<span
+								style={{
+									fontFamily: "ui-monospace, Menlo, monospace",
+									fontSize: "13px",
+									fontWeight: "700",
+									letterSpacing: "0.1em",
+									color: "var(--atelier-fg-subtle)",
+								}}
+							>
+								{"EXAMPLES"}
+							</span>
+							<div
+								data-lr="cases"
+								style={{
+									display: "grid",
+									gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+									gap: "16px",
+								}}
+							>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-accent-subtle)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "7px",
+												flexWrap: "wrap",
+											}}
+										>
+											<span style={{ display: "flex", gap: "4px" }}>
+												<svg width="24" height="24" viewBox="0 0 28 28">
+													<rect
+														width="28"
+														height="28"
+														rx="7"
+														fill="#FC4C02" /* token-literal: Lix brand mark */
+													/>
+													<path
+														d="M11.5 6 L6.5 16 h3.2 l1.8 -3.6 l1.8 3.6 h3.2 z"
+														fill="var(--atelier-panel)"
+													/>
+													<path
+														d="M16.5 16 l-1.6 3.2 l-1.6 -3.2 h-2 l3.6 7 l3.6 -7 z"
+														fill="var(--atelier-tag-orange)"
+													/>
+												</svg>
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-subtle)"
+													strokeWidth="1.3"
+												>
+													<rect
+														x="1.5"
+														y="2.5"
+														width="13"
+														height="11"
+														rx="1.8"
+													/>
+													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+												</svg>
+												{"runs"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												gap: "14px",
+											}}
+										>
+											<svg
+												width="72"
+												height="66"
+												viewBox="0 0 72 66"
+												shapeRendering="crispEdges"
+												style={{ display: "block", flexShrink: "0" }}
+											>
+												<rect
+													x="24"
+													y="0"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="0"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="36"
+													y="0"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="24"
+													y="6"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="6"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="36"
+													y="6"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="12"
+													width="6"
+													height="6"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="18"
+													y="18"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="24"
+													y="18"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="30"
+													y="18"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="36"
+													y="18"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="12"
+													y="24"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="24"
+													y="24"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="30"
+													y="24"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="36"
+													y="24"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="48"
+													y="24"
+													width="6"
+													height="6"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="6"
+													y="30"
+													width="6"
+													height="6"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="24"
+													y="30"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="30"
+													y="30"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="36"
+													y="30"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="24"
+													y="36"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="30"
+													y="36"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="36"
+													y="36"
+													width="6"
+													height="6"
+													fill="#FC4C02" /* token-literal: Lix brand mark */
+												/>
+												<rect
+													x="24"
+													y="42"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="42"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="36"
+													y="42"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="42"
+													y="42"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="18"
+													y="48"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="24"
+													y="48"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="42"
+													y="48"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="48"
+													y="48"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="12"
+													y="54"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="18"
+													y="54"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="48"
+													y="54"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="6"
+													y="60"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="12"
+													y="60"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="48"
+													y="60"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="54"
+													y="60"
+													width="6"
+													height="6"
+													fill="var(--atelier-fg)"
+												/>
+											</svg>
+											<div
+												style={{
+													flex: "1",
+													display: "flex",
+													alignItems: "flex-end",
+													justifyContent: "center",
+													gap: "10px",
+												}}
+											>
+												<div
+													style={{
+														display: "flex",
+														flexDirection: "column",
+														alignItems: "center",
+														gap: "4px",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "11px",
+														}}
+													>
+														{"8.2"}
+													</span>
+													<div
+														style={{
+															display: "flex",
+															flexDirection: "column",
+															gap: "2px",
+														}}
+													>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+													</div>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Mon"}
+													</span>
+												</div>
+												<div
+													style={{
+														display: "flex",
+														flexDirection: "column",
+														alignItems: "center",
+														gap: "4px",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "11px",
+														}}
+													>
+														{"10.1"}
+													</span>
+													<div
+														style={{
+															display: "flex",
+															flexDirection: "column",
+															gap: "2px",
+														}}
+													>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+													</div>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Wed"}
+													</span>
+												</div>
+												<div
+													style={{
+														display: "flex",
+														flexDirection: "column",
+														alignItems: "center",
+														gap: "4px",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "11px",
+														}}
+													>
+														{"21.0"}
+													</span>
+													<div
+														style={{
+															display: "flex",
+															flexDirection: "column",
+															gap: "2px",
+														}}
+													>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+														<span
+															style={{
+																display: "block",
+																width: "16px",
+																height: "6px",
+																background: "#FC4C02", // token-literal: Lix brand mark
+															}}
+														></span>
+													</div>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Sat"}
+													</span>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>{"Run log"}</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"Your Strava runs in a table. Ask an agent how training is going."
+											}
+										</span>
+									</div>
+								</div>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-tag-blue)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "6px",
+											}}
+										>
+											<span
+												style={{
+													width: "24px",
+													height: "24px",
+													borderRadius: "6px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													display: "flex",
+													alignItems: "center",
+													justifyContent: "center",
+													boxSizing: "border-box",
+													flexShrink: "0",
+												}}
+											>
+												<svg
+													width="14"
+													height="14"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-muted)"
+													strokeWidth="1.3"
+												>
+													<circle cx="8" cy="8" r="6.2" />
+													<path d="M1.8 8 h12.4 M8 1.8 c-2.8 3 -2.8 9.4 0 12.4 M8 1.8 c2.8 3 2.8 9.4 0 12.4" />
+												</svg>
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												{"listings"}
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-subtle)"
+													strokeWidth="1.3"
+													style={{ flexShrink: "0" }}
+												>
+													<rect
+														x="1.5"
+														y="2.5"
+														width="13"
+														height="11"
+														rx="1.8"
+													/>
+													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+												</svg>
+												{"apartments"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												justifyContent: "flex-start",
+												gap: "14px",
+											}}
+										>
+											<svg
+												width="60"
+												height="65"
+												viewBox="0 0 60 65"
+												shapeRendering="crispEdges"
+												style={{ display: "block", flexShrink: "0" }}
+											>
+												<rect
+													x="25"
+													y="0"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="0"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="20"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="25"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="30"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="35"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="45"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="50"
+													y="5"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="15"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="20"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="25"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="30"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="35"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="40"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="45"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="50"
+													y="10"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="15"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="20"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="25"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="30"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="35"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="40"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="45"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="50"
+													y="15"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="15"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="20"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="25"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="30"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="35"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="40"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="45"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-danger)"
+												/>
+												<rect
+													x="50"
+													y="20"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="0"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="15"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="20"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="25"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="35"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="40"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="45"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="50"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="55"
+													y="25"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="15"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="20"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="25"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="30"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="35"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="40"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="45"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="50"
+													y="30"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="15"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="20"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="25"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="30"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="35"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="40"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="45"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="50"
+													y="35"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="15"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="20"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="25"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="30"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="35"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="40"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="45"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-blue)"
+												/>
+												<rect
+													x="50"
+													y="40"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="15"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="20"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="25"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="35"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="40"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="45"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="50"
+													y="45"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="15"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="20"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="25"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-yellow)"
+												/>
+												<rect
+													x="35"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="40"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="45"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="50"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-tag-brown)"
+												/>
+												<rect
+													x="55"
+													y="50"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="5"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="10"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="15"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="20"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="25"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="30"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="35"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="40"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="45"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="50"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="55"
+													y="55"
+													width="5"
+													height="5"
+													fill="var(--atelier-fg)"
+												/>
+												<rect
+													x="0"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="5"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="10"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="15"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="20"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="25"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="30"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="35"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="40"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="45"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="50"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+												<rect
+													x="55"
+													y="60"
+													width="5"
+													height="5"
+													fill="var(--atelier-success)"
+												/>
+											</svg>
+											<div
+												style={{
+													flex: "1",
+													minWidth: "0",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "9px",
+													overflow: "hidden",
+												}}
+											>
+												<div
+													style={{
+														display: "flex",
+														justifyContent: "space-between",
+														alignItems: "center",
+														gap: "8px",
+														padding: "5px 10px",
+														fontFamily: "ui-monospace, Menlo, monospace",
+														fontSize: "12px",
+														whiteSpace: "nowrap",
+													}}
+												>
+													<span>{"2BR \u00b7 18 min"}</span>
+													<span
+														style={{
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
+															padding: "0 8px",
+															borderRadius: "99px",
+															fontSize: "11.5px",
+														}}
+													>
+														{"new"}
+													</span>
+												</div>
+												<div
+													style={{
+														display: "flex",
+														justifyContent: "space-between",
+														alignItems: "center",
+														gap: "8px",
+														padding: "5px 10px",
+														borderTop: "1px solid var(--atelier-border-subtle)",
+														fontFamily: "ui-monospace, Menlo, monospace",
+														fontSize: "12px",
+														whiteSpace: "nowrap",
+													}}
+												>
+													<span>{"1BR \u00b7 25 min"}</span>
+													<span
+														style={{
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
+															padding: "0 8px",
+															borderRadius: "99px",
+															fontSize: "11.5px",
+														}}
+													>
+														{"new"}
+													</span>
+												</div>
+												<div
+													style={{
+														display: "flex",
+														justifyContent: "space-between",
+														alignItems: "center",
+														gap: "8px",
+														padding: "5px 10px",
+														borderTop: "1px solid var(--atelier-border-subtle)",
+														fontFamily: "ui-monospace, Menlo, monospace",
+														fontSize: "12px",
+														whiteSpace: "nowrap",
+													}}
+												>
+													<span>{"3BR \u00b7 41 min"}</span>
+													<span
+														style={{
+															background: "var(--atelier-border-subtle)",
+															color: "var(--atelier-fg-muted)",
+															padding: "0 8px",
+															borderRadius: "99px",
+															fontSize: "11.5px",
+														}}
+													>
+														{"far"}
+													</span>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>{"Apartment hunt"}</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"A script adds new listings with your commute time. An agent flags the good ones."
+											}
+										</span>
+									</div>
+								</div>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-bg-subtle)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "6px",
+											}}
+										>
+											<span
+												style={{
+													width: "24px",
+													height: "24px",
+													borderRadius: "6px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													display: "flex",
+													alignItems: "center",
+													justifyContent: "center",
+													boxSizing: "border-box",
+													flexShrink: "0",
+												}}
+											>
+												<img
+													src="/landing/claude-spark.svg"
+													alt=""
+													style={{ width: "14px", height: "14px" }}
+												/>
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<img
+													src="/landing/icon-folder.svg"
+													alt=""
+													style={{ width: "12px", height: "12px" }}
+												/>
+												{"scripts"}
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-subtle)"
+													strokeWidth="1.3"
+													style={{ flexShrink: "0" }}
+												>
+													<rect
+														x="1.5"
+														y="2.5"
+														width="13"
+														height="11"
+														rx="1.8"
+													/>
+													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+												</svg>
+												{"any table"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												justifyContent: "flex-start",
+												gap: "14px",
+											}}
+										>
+											<div
+												style={{
+													flex: "1",
+													minWidth: "0",
+													display: "flex",
+													flexDirection: "column",
+													gap: "8px",
+												}}
+											>
+												<div
+													style={{
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "9px",
+														fontFamily: "ui-monospace, Menlo, monospace",
+														fontSize: "12px",
+														whiteSpace: "nowrap",
+													}}
+												>
+													<div
+														style={{
+															display: "flex",
+															justifyContent: "space-between",
+															alignItems: "center",
+															gap: "8px",
+															padding: "7px 10px",
+															borderTop: "none",
+														}}
+													>
+														<span>{"digest.ts"}</span>
+														<span
+															style={{
+																background: "var(--atelier-success-subtle)",
+																color: "var(--atelier-success-border)",
+																padding: "0 8px",
+																borderRadius: "99px",
+															}}
+														>
+															{"Mon 9:00"}
+														</span>
+													</div>
+													<div
+														style={{
+															display: "flex",
+															justifyContent: "space-between",
+															alignItems: "center",
+															gap: "8px",
+															padding: "7px 10px",
+															borderTop:
+																"1px solid var(--atelier-border-subtle)",
+														}}
+													>
+														<span>{"cleanup.ts"}</span>
+														<span
+															style={{
+																background: "var(--atelier-success-subtle)",
+																color: "var(--atelier-success-border)",
+																padding: "0 8px",
+																borderRadius: "99px",
+															}}
+														>
+															{"daily"}
+														</span>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>
+											{"Automations"}
+											<span
+												style={{
+													marginLeft: "8px",
+													padding: "1px 7px",
+													borderRadius: "99px",
+													background: "var(--atelier-accent-subtle)",
+													color: "var(--atelier-accent)",
+													fontSize: "11px",
+													fontWeight: "600",
+													verticalAlign: "middle",
+												}}
+											>
+												{"Soon"}
+											</span>
+										</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"Keep scripts next to your data. Scheduled runs are coming soon."
+											}
+										</span>
+									</div>
+								</div>
+							</div>
+							<div
+								data-lr="cases"
+								style={{
+									display: "grid",
+									gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+									gap: "16px",
+								}}
+							>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-tag-orange)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "6px",
+											}}
+										>
+											<span
+												style={{
+													width: "24px",
+													height: "24px",
+													borderRadius: "6px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													display: "flex",
+													alignItems: "center",
+													justifyContent: "center",
+													boxSizing: "border-box",
+													flexShrink: "0",
+												}}
+											>
+												<img
+													src="/lixray-mark.svg"
+													alt=""
+													style={{ width: "14px", height: "14px" }}
+												/>
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-subtle)"
+													strokeWidth="1.3"
+													style={{ flexShrink: "0" }}
+												>
+													<rect
+														x="1.5"
+														y="2.5"
+														width="13"
+														height="11"
+														rx="1.8"
+													/>
+													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+												</svg>
+												{"posts"}
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												{"this week"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												justifyContent: "center",
+											}}
+										>
+											<div
+												style={{ display: "flex", gap: "5px", width: "100%" }}
+											>
+												<div
+													style={{
+														flex: "1",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "8px",
+														height: "92px",
+														padding: "6px 5px",
+														display: "flex",
+														flexDirection: "column",
+														gap: "6px",
+														boxSizing: "border-box",
+														minWidth: "0",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Mon"}
+													</span>
+													<span
+														style={{
+															background: "var(--atelier-success-subtle)",
+															color: "var(--atelier-success-border)",
+															borderRadius: "4px",
+															padding: "3px 4px",
+															fontSize: "10.5px",
+															fontWeight: "600",
+															lineHeight: "1.2",
+															overflow: "hidden",
+															whiteSpace: "nowrap",
+															textOverflow: "ellipsis",
+														}}
+													>
+														{"\u2713 Blog"}
+													</span>
+												</div>
+												<div
+													style={{
+														flex: "1",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "8px",
+														height: "92px",
+														padding: "6px 5px",
+														display: "flex",
+														flexDirection: "column",
+														gap: "6px",
+														boxSizing: "border-box",
+														minWidth: "0",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Tue"}
+													</span>
+												</div>
+												<div
+													style={{
+														flex: "1",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "8px",
+														height: "92px",
+														padding: "6px 5px",
+														display: "flex",
+														flexDirection: "column",
+														gap: "6px",
+														boxSizing: "border-box",
+														minWidth: "0",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Wed"}
+													</span>
+													<span
+														style={{
+															background: "var(--atelier-tag-orange)",
+															color: "var(--atelier-tag-orange-fg)",
+															borderRadius: "4px",
+															padding: "3px 4px",
+															fontSize: "10.5px",
+															fontWeight: "600",
+															lineHeight: "1.2",
+															overflow: "hidden",
+															whiteSpace: "nowrap",
+															textOverflow: "ellipsis",
+														}}
+													>
+														{"Launch"}
+													</span>
+												</div>
+												<div
+													style={{
+														flex: "1",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "8px",
+														height: "92px",
+														padding: "6px 5px",
+														display: "flex",
+														flexDirection: "column",
+														gap: "6px",
+														boxSizing: "border-box",
+														minWidth: "0",
+													}}
+												>
+													<span
+														style={{
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "10.5px",
+															color: "var(--atelier-fg-subtle)",
+														}}
+													>
+														{"Thu"}
+													</span>
+													<span
+														style={{
+															background: "var(--atelier-tag-purple)",
+															color: "var(--atelier-tag-blue-fg)",
+															borderRadius: "4px",
+															padding: "3px 4px",
+															fontSize: "10.5px",
+															fontWeight: "600",
+															lineHeight: "1.2",
+															overflow: "hidden",
+															whiteSpace: "nowrap",
+															textOverflow: "ellipsis",
+														}}
+													>
+														{"News"}
+													</span>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>{"Content calendar"}</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"See this week's posts. Ask an agent to mark them as published."
+											}
+										</span>
+									</div>
+								</div>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-tag-red)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "6px",
+											}}
+										>
+											<img
+												src="/landing/brand-granola.svg"
+												alt="Granola"
+												style={{
+													width: "24px",
+													height: "24px",
+													display: "block",
+													flexShrink: "0",
+												}}
+											/>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													fill="none"
+													stroke="var(--atelier-fg-subtle)"
+													strokeWidth="1.3"
+													style={{ flexShrink: "0" }}
+												>
+													<rect
+														x="1.5"
+														y="2.5"
+														width="13"
+														height="11"
+														rx="1.8"
+													/>
+													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+												</svg>
+												{"meetings"}
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<svg
+													width="12"
+													height="12"
+													viewBox="0 0 16 16"
+													style={{ flexShrink: "0" }}
+												>
+													<rect
+														x="4"
+														y="1"
+														width="11"
+														height="14"
+														rx="1.6"
+														fill="var(--atelier-accent)"
+													/>
+													<rect
+														x="1"
+														y="4"
+														width="9"
+														height="8"
+														rx="1.3"
+														fill="var(--atelier-tag-red-fg)"
+													/>
+												</svg>
+												{"decks"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												justifyContent: "center",
+											}}
+										>
+											<div
+												style={{
+													position: "relative",
+													width: "236px",
+													height: "92px",
+												}}
+											>
+												<div
+													style={{
+														position: "absolute",
+														left: "6px",
+														bottom: "0",
+														width: "108px",
+														height: "72px",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "6px",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+														transform: "rotate(-8deg)",
+														transformOrigin: "bottom center",
+														zIndex: "1",
+														overflow: "hidden",
+														display: "flex",
+														flexDirection: "column",
+													}}
+												>
+													<div
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
+													></div>
+													<div
+														style={{
+															padding: "6px 8px",
+															display: "flex",
+															flexDirection: "column",
+															gap: "4px",
+														}}
+													>
+														<b style={{ fontSize: "11px" }}>{"Globex"}</b>
+														<div
+															style={{
+																display: "flex",
+																alignItems: "flex-end",
+																gap: "3px",
+																height: "22px",
+															}}
+														>
+															<span
+																style={{
+																	width: "8px",
+																	height: "9px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "15px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "22px",
+																	background: "var(--atelier-accent)",
+																}}
+															></span>
+															<span style={{ flex: "1" }}></span>
+															<span
+																style={{
+																	width: "30px",
+																	height: "3px",
+																	background: "var(--atelier-border)",
+																	alignSelf: "center",
+																}}
+															></span>
+														</div>
+													</div>
+												</div>
+												<div
+													style={{
+														position: "absolute",
+														left: "122px",
+														bottom: "0",
+														width: "108px",
+														height: "72px",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "6px",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+														transform: "rotate(8deg)",
+														transformOrigin: "bottom center",
+														zIndex: "1",
+														overflow: "hidden",
+														display: "flex",
+														flexDirection: "column",
+													}}
+												>
+													<div
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
+													></div>
+													<div
+														style={{
+															padding: "6px 8px",
+															display: "flex",
+															flexDirection: "column",
+															gap: "4px",
+														}}
+													>
+														<b
+															style={{
+																fontSize: "11px",
+																alignSelf: "flex-end",
+															}}
+														>
+															{"Nexa"}
+														</b>
+														<div
+															style={{
+																display: "flex",
+																alignItems: "flex-end",
+																gap: "3px",
+																height: "22px",
+															}}
+														>
+															<span
+																style={{
+																	width: "8px",
+																	height: "9px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "15px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "22px",
+																	background: "var(--atelier-accent)",
+																}}
+															></span>
+															<span style={{ flex: "1" }}></span>
+															<span
+																style={{
+																	width: "30px",
+																	height: "3px",
+																	background: "var(--atelier-border)",
+																	alignSelf: "center",
+																}}
+															></span>
+														</div>
+													</div>
+												</div>
+												<div
+													style={{
+														position: "absolute",
+														left: "64px",
+														bottom: "0",
+														width: "108px",
+														height: "72px",
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "6px",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+														transform: "rotate(0deg)",
+														transformOrigin: "bottom center",
+														zIndex: "2",
+														overflow: "hidden",
+														display: "flex",
+														flexDirection: "column",
+													}}
+												>
+													<div
+														style={{
+															height: "14px",
+															background: "var(--atelier-accent)",
+														}}
+													></div>
+													<div
+														style={{
+															padding: "6px 8px",
+															display: "flex",
+															flexDirection: "column",
+															gap: "4px",
+														}}
+													>
+														<b style={{ fontSize: "11px" }}>{"Acme"}</b>
+														<div
+															style={{
+																display: "flex",
+																alignItems: "flex-end",
+																gap: "3px",
+																height: "22px",
+															}}
+														>
+															<span
+																style={{
+																	width: "8px",
+																	height: "9px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "15px",
+																	background: "var(--atelier-tag-red)",
+																}}
+															></span>
+															<span
+																style={{
+																	width: "8px",
+																	height: "22px",
+																	background: "var(--atelier-accent)",
+																}}
+															></span>
+															<span style={{ flex: "1" }}></span>
+															<span
+																style={{
+																	width: "30px",
+																	height: "3px",
+																	background: "var(--atelier-border)",
+																	alignSelf: "center",
+																}}
+															></span>
+														</div>
+													</div>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>
+											{"Per-customer pitch decks"}
+										</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"Ask an agent to build a deck from a customer's meeting notes."
+											}
+										</span>
+									</div>
+								</div>
+								<div
+									style={{
+										background: "var(--atelier-panel)",
+										border: "1px solid var(--atelier-border)",
+										borderRadius: "16px",
+										overflow: "hidden",
+										display: "flex",
+										flexDirection: "column",
+									}}
+								>
+									<div
+										style={{
+											background: "var(--atelier-tag-green)",
+											padding: "16px 16px 18px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "14px",
+											height: "190px",
+											boxSizing: "border-box",
+										}}
+									>
+										<div
+											style={{
+												display: "flex",
+												alignItems: "center",
+												gap: "6px",
+											}}
+										>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												<img
+													src="/landing/icon-folder.svg"
+													alt=""
+													style={{ width: "12px", height: "12px" }}
+												/>
+												{"skills"}
+											</span>
+											<span style={{ color: "var(--atelier-fg-faint)" }}>
+												{"\u2192"}
+											</span>
+											<span
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "5px",
+													background: "var(--atelier-panel)",
+													border: "1px solid var(--atelier-border)",
+													borderRadius: "99px",
+													padding: "2px 9px",
+													fontFamily: "ui-monospace, Menlo, monospace",
+													fontSize: "12px",
+													whiteSpace: "nowrap",
+												}}
+											>
+												{"every agent"}
+											</span>
+										</div>
+										<div
+											style={{
+												flex: "1",
+												display: "flex",
+												alignItems: "flex-end",
+												justifyContent: "center",
+											}}
+										>
+											<div
+												style={{
+													display: "flex",
+													alignItems: "center",
+													gap: "0",
+												}}
+											>
+												<div
+													style={{
+														background: "var(--atelier-panel)",
+														border: "1px solid var(--atelier-border)",
+														borderRadius: "8px",
+														width: "108px",
+														padding: "9px 10px",
+														display: "flex",
+														flexDirection: "column",
+														gap: "6px",
+														boxShadow:
+															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 8%, transparent)",
+													}}
+												>
+													<span
+														style={{
+															display: "flex",
+															alignItems: "center",
+															gap: "5px",
+															fontFamily: "ui-monospace, Menlo, monospace",
+															fontSize: "11.5px",
+															fontWeight: "600",
+														}}
+													>
+														<img
+															src="/landing/icon-sq-md.svg"
+															alt=""
+															style={{
+																width: "12px",
+																height: "12px",
+																flexShrink: "0",
+															}}
+														/>
+														{"tone.md"}
+													</span>
+													<span
+														style={{
+															height: "3px",
+															background: "var(--atelier-border)",
+															width: "90%",
+														}}
+													></span>
+													<span
+														style={{
+															height: "3px",
+															background: "var(--atelier-border)",
+															width: "70%",
+														}}
+													></span>
+													<span
+														style={{
+															height: "3px",
+															background: "var(--atelier-border)",
+															width: "80%",
+														}}
+													></span>
+												</div>
+												<svg
+													width="56"
+													height="92"
+													viewBox="0 0 56 92"
+													fill="none"
+													stroke="var(--atelier-fg-faint)"
+													strokeWidth="1.5"
+												>
+													<path d="M0 46 C28 46 28 12 56 12" />
+													<path d="M0 46 H56" />
+													<path d="M0 46 C28 46 28 80 56 80" />
+												</svg>
+												<div
+													style={{
+														display: "flex",
+														flexDirection: "column",
+														gap: "10px",
+													}}
+												>
+													<span
+														style={{
+															width: "24px",
+															height: "24px",
+															borderRadius: "6px",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
+															display: "flex",
+															alignItems: "center",
+															justifyContent: "center",
+															boxSizing: "border-box",
+															flexShrink: "0",
+														}}
+													>
+														<img
+															src="/landing/claude-spark.svg"
+															alt=""
+															style={{ width: "14px", height: "14px" }}
+														/>
+													</span>
+													<span
+														style={{
+															width: "24px",
+															height: "24px",
+															borderRadius: "6px",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
+															display: "flex",
+															alignItems: "center",
+															justifyContent: "center",
+															boxSizing: "border-box",
+															flexShrink: "0",
+														}}
+													>
+														<img
+															src="/landing/brand-openai.svg"
+															alt=""
+															style={{ width: "14px", height: "14px" }}
+														/>
+													</span>
+													<span
+														style={{
+															width: "24px",
+															height: "24px",
+															borderRadius: "6px",
+															background: "var(--atelier-panel)",
+															border: "1px solid var(--atelier-border)",
+															display: "flex",
+															alignItems: "center",
+															justifyContent: "center",
+															boxSizing: "border-box",
+															flexShrink: "0",
+														}}
+													>
+														<img
+															src="/landing/brand-gemini.svg"
+															alt=""
+															style={{ width: "14px", height: "14px" }}
+														/>
+													</span>
+												</div>
+											</div>
+										</div>
+									</div>
+									<div
+										style={{
+											padding: "14px 16px 16px",
+											display: "flex",
+											flexDirection: "column",
+											gap: "5px",
+											borderTop: "1px solid var(--atelier-border-subtle)",
+											flex: "1",
+										}}
+									>
+										<b style={{ fontSize: "16px" }}>{"Sharing skills"}</b>
+										<span
+											style={{
+												fontSize: "14px",
+												lineHeight: "1.5",
+												color: "var(--atelier-fg-muted)",
+												textWrap: "pretty",
+											}}
+										>
+											{
+												"Write down how your team does a task, once. Every agent can read it."
+											}
+										</span>
+									</div>
+								</div>
+							</div>
+						</div>
+					</div>
+					<div
+						style={{
+							display: "flex",
+							flexDirection: "column",
+							gap: "20px",
+							paddingTop: "56px",
+							borderTop: "1px solid var(--atelier-border-strong)",
+						}}
+					>
+						<h3
+							style={{
+								margin: "0",
+								fontSize: "34px",
+								fontWeight: "700",
+								letterSpacing: "-0.02em",
+							}}
+						>
+							{"How it compares"}
+						</h3>
+						<CompareTable />
+					</div>
 				</div>
 			</main>
 			<SiteFooter />

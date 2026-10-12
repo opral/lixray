@@ -24,7 +24,6 @@ improvement. The current-epoch retirement interest itself is a correctness fix:
 a separate regression publishes an authority retirement and verifies that a
 plain subsequent local query excludes the retired checkpoint.
 
-Raw samples and command provenance are in
-[checkpoint-history-window-profile.json](checkpoint-history-window-profile.json).
+Historical raw captures are omitted from the source repository.
 The benchmark lives in the engine's checkpoint log profile regression; no
 benchmark switch or old-window compatibility path is added to production.
