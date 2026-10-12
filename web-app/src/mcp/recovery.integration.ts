@@ -217,7 +217,7 @@ void test("MCP history, diff, row-ref params and scoped file restoration use the
 				return {
 					...result,
 					columns: [{ name: "encoding_probe", type: "row_ref" }],
-					rows: [["invalid-ref-secret"]],
+					rows: [{ encoding_probe: "invalid-ref-secret" }],
 				};
 			return result;
 		}) as typeof lix.execute;
@@ -251,20 +251,20 @@ void test("MCP history, diff, row-ref params and scoped file restoration use the
 			JSON.stringify(captured),
 			/invalid-ref-secret|encoding_probe/,
 		);
-		const executeBatch = lix.executeBatch.bind(lix);
-		lix.executeBatch = (async (
-			...args: Parameters<typeof lix.executeBatch>
-		) => {
-			const result = await executeBatch(...args);
+		const transaction = lix.transaction.bind(lix);
+		lix.transaction = (async (...args: Parameters<typeof lix.transaction>) => {
+			const result = await transaction(...args);
 			return {
 				...result,
-				results: result.results.map((statement) => ({
-					...statement,
-					columns: [{ name: "ref", type: "row_ref" }],
-					rows: [["invalid-postcommit-ref"]],
-				})),
+				value: (result.value as import("@lix-js/sdk").StatementResult[]).map(
+					(statement) => ({
+						...statement,
+						columns: [{ name: "ref", type: "row_ref" }],
+						rows: [{ ref: "invalid-postcommit-ref" }],
+					}),
+				),
 			};
-		}) as unknown as typeof lix.executeBatch;
+		}) as typeof lix.transaction;
 		const failedWrite = await client.callTool({
 			name: "execute_sql",
 			arguments: {
