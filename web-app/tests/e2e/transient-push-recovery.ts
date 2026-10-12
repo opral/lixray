@@ -3,7 +3,7 @@ type PublicationResponse = {
 	source: string;
 	replicaId: string | null;
 	sessionId: string | null;
-	/** Captured for diagnostics; publication routes do not validate this read lease. */
+	/** Captured for diagnostics; merge replay validates it; push and retained-body publication do not. */
 	baselineLeaseId: string | null;
 	method: string;
 	url: string;
@@ -51,7 +51,7 @@ function publicationKey(response: PublicationResponse): string | null {
 		const url = new URL(response.url);
 		if (
 			!["http:", "https:"].includes(url.protocol) ||
-			!/^\/lix\/v1\/[^/]+\/sync\/(?:push|retained-bodies)$/.test(
+			!/^\/lix\/v1\/[^/]+\/sync\/(?:push|retained-bodies|merge)$/.test(
 				url.pathname,
 			) ||
 			url.search ||
@@ -66,6 +66,7 @@ function publicationKey(response: PublicationResponse): string | null {
 		response.replicaId,
 		response.sessionId,
 		response.url,
+		...(response.url.endsWith("/sync/merge") ? [response.baselineLeaseId] : []),
 	]);
 }
 

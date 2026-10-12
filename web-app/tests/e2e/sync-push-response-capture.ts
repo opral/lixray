@@ -20,7 +20,7 @@ export function isSyncPublicationProtocolRequest(
 		const parsedUrl = new URL(url);
 		return (
 			["http:", "https:"].includes(parsedUrl.protocol) &&
-			/^\/lix\/v1\/[^/]+\/sync\/(?:push|retained-bodies)$/.test(
+			/^\/lix\/v1\/[^/]+\/sync\/(?:push|retained-bodies|merge)$/.test(
 				parsedUrl.pathname,
 			) &&
 			!parsedUrl.search &&
