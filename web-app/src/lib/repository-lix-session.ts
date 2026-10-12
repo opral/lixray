@@ -662,11 +662,13 @@ async function reportLixRequestFailure(
 	captureException: typeof captureExceptionTelemetry,
 ): Promise<void> {
 	let code: string | undefined;
+	let retryable = false;
 	try {
 		const body: unknown = await response.clone().json();
 		const error = isRecord(body) ? body.error : undefined;
 		if (isRecord(error) && typeof error.code === "string") {
 			code = error.code;
+			retryable = isRecord(error.details) && error.details.retryable === true;
 		}
 	} catch {
 		// The SDK will report malformed/non-JSON responses separately.
@@ -676,6 +678,10 @@ async function reportLixRequestFailure(
 		code === MIGRATION_ERROR_CODE ||
 		code === "LIX_REPOSITORY_MIGRATING" ||
 		code === "LIX_ERROR_RECOVERING" ||
+		(response.status === 503 &&
+			retryable &&
+			(code === "LIX_REPOSITORY_OPENING" ||
+				code === "LIX_OPEN_DEADLINE_EXCEEDED")) ||
 		(response.status === 404 &&
 			method === "GET" &&
 			lixRequestPath(input).endsWith("/sync/chunk"))

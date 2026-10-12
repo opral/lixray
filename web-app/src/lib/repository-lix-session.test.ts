@@ -225,6 +225,32 @@ void test("does not report expected migration, recovery, or missing-chunk respon
 	assert.deepEqual(captured, []);
 });
 
+void test("reports terminal opening failures while healthy migration waits stay quiet", async () => {
+	const captured: unknown[] = [];
+	const cases = [
+		["LIX_REPOSITORY_OPENING", 503, true, false],
+		["LIX_OPEN_DEADLINE_EXCEEDED", 503, true, false],
+		["LIX_OPEN_STALLED", 503, false, true],
+		["LIX_OPEN_FAILED", 500, false, true],
+		["LIX_REPOSITORY_OPENING", 503, false, true],
+		["LIX_REPOSITORY_OPENING", 500, true, true],
+	] as const;
+	for (const [code, status, retryable, expected] of cases) {
+		const fetch = createTelemetryFetch(
+			async () =>
+				Response.json({ error: { code, details: { retryable } } }, { status }),
+			{ repositoryId: "repo-id" },
+			{ captureException: (error) => captured.push(error) },
+		);
+		const before = captured.length;
+		const response = await fetch(
+			"https://lixray.test/lix/v1/11111111-1111-4111-8111-111111111111/",
+		);
+		assert.equal(response.status, status);
+		assert.equal(captured.length - before, Number(expected), code);
+	}
+});
+
 void test("leaves repository-open failures to their terminal exception boundary", async () => {
 	const captured: unknown[] = [];
 	const fetch = createTelemetryFetch(
