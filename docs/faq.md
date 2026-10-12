@@ -15,14 +15,15 @@ filesystem, browser OPFS, or S3.
 
 ## Is it open source?
 
-[Lix](https://github.com/opral/lix) and [Atelier](https://github.com/opral/atelier)
-are MIT licensed. LixRay is also MIT licensed; its control-plane source is being
-prepared for public release.
+Yes. [LixRay's control plane](https://github.com/opral/lixray),
+[Lix](https://github.com/opral/lix), and [Atelier](https://github.com/opral/atelier)
+are open source and MIT licensed.
 
 ## Can I self-host it?
 
-You can self-host the Lix server to store and access your repositories without
-LixRay's control plane. A supported deployment of the full LixRay control plane
+The fastest way is to self-host the Lix server. It stores and serves your
+repositories without requiring LixRay's control plane. A supported deployment
+of the full LixRay control plane
 is TBD, pending demonstrated interest. See [self-hosting](./self-host.md) and
 [the demand-gathering issue](https://github.com/opral/lixray/issues/610).
 

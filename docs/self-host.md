@@ -1,5 +1,10 @@
 # Self-hosting
 
+LixRay's [control plane](https://github.com/opral/lixray) is open source and
+MIT licensed. The fastest way to self-host your repositories is to run a
+[Lix server](https://github.com/opral/lix/tree/main/packages/server). You do not
+need to deploy LixRay's control plane to store and access Lix repositories.
+
 ## Host your repositories with the Lix server
 
 You can run the [Lix server](https://github.com/opral/lix/tree/main/packages/server)
