@@ -423,6 +423,22 @@ export function createRepositoryOpenTrace(
 						].includes(progress.phase)
 					)
 						return;
+					// Record the planned formats before validation: a failed migration
+					// never reaches opened(report), but still needs these bounded facts.
+					for (const [field, value] of [
+						["from_format", progress.fromFormat],
+						["to_format", progress.toFormat],
+					] as const) {
+						if (
+							Number.isSafeInteger(value) &&
+							value! >= 0 &&
+							value! <= 1_000_000
+						)
+							attempt.span.setAttribute(
+								`lixray.repository.open.native.${progress.scope}.${field}`,
+								value!,
+							);
+					}
 					const end = now();
 					const previous = attempt.native.get(progress.scope);
 					if (previous?.phase === progress.phase) return;
