@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { highlightDocsCode } from "~/lib/docs-highlight";
 import {
 	SiteFooter,
 	SiteHeader,
@@ -15,8 +17,44 @@ export const secondaryButton =
  * link colors and the narrow-screen layout, keyed on data-lr markers.
  */
 const landingCss = `
-[data-lr="root"] a { color: var(--atelier-fg); }
-[data-lr="root"] a:hover { color: var(--atelier-accent); }
+/* Reference palette belongs to this marketing surface, independently of editor themes. */
+[data-lr="landing-page"] {
+ --landing-bg: #F3F1ED; /* token-literal: supplied landing reference palette */
+ --landing-panel: #FFFFFF; /* token-literal: supplied landing reference palette */
+ --landing-panel-muted: #FAF9F7; /* token-literal: supplied landing reference palette */
+ --landing-border: #E2DCD3; /* token-literal: supplied landing reference palette */
+ --landing-divider: #EDEAE6; /* token-literal: supplied landing reference palette */
+ --landing-fg: #1C1917; /* token-literal: supplied landing reference palette */
+ --landing-muted: #44403C; /* token-literal: supplied landing reference palette */
+ --landing-subtle: #78716C; /* token-literal: supplied landing reference palette */
+ --landing-faint: #A8A29E; /* token-literal: supplied landing reference palette */
+ --landing-accent: #E8590C; /* token-literal: supplied landing reference palette */
+ --landing-success-bg: #E7F3EB; /* token-literal: supplied landing reference palette */
+ --landing-success-fg: #1F6B40; /* token-literal: supplied landing reference palette */
+ --landing-warning-bg: #FDEBD3; /* token-literal: supplied landing reference palette */
+ --landing-warning-fg: #B54708; /* token-literal: supplied landing reference palette */
+ --landing-code-bg: #1C1917; /* token-literal: supplied code reference palette */
+ --landing-code-header: #292524; /* token-literal: supplied code reference palette */
+ --landing-code-border: #3A3531; /* token-literal: supplied code reference palette */
+ --landing-code-text: #F3F1ED; /* token-literal: supplied code reference palette */
+ --landing-code-line: #57534E; /* token-literal: supplied code reference palette */
+ --landing-code-keyword: #93C5FD; /* token-literal: supplied syntax reference palette */
+ --landing-code-string: #A8D8B9; /* token-literal: supplied syntax reference palette */
+ --landing-code-sql: #F97316; /* token-literal: supplied syntax reference palette */
+ --landing-code-highlight: rgba(249,115,22,.14); /* token-literal: supplied highlighted SQL row */
+ --landing-code-shadow: rgba(28,25,23,.16); /* token-literal: reference elevation outside editor theme */
+}
+.landing-code code { font-family: inherit; font-weight: inherit; }
+.landing-code .tok-keyword { color: var(--landing-code-keyword); }
+.landing-code .tok-string, .landing-code .tok-string2 { color: var(--landing-code-string); }
+.landing-code .landing-sql .tok-keyword { color: var(--landing-code-sql); }
+.landing-code .landing-code-row { display:grid; grid-template-columns:26px minmax(0,1fr); gap:16px; min-height:1.8em; }
+.landing-code .landing-line-number { color:var(--landing-code-line); text-align:right; user-select:none; }
+.landing-code .landing-source-line { white-space:pre; }
+.landing-code .landing-code-row[data-emphasis="true"] { background:var(--landing-code-highlight); box-shadow:inset 2px 0 0 var(--landing-code-sql); }
+
+[data-lr="root"] a { color: var(--landing-fg); }
+[data-lr="root"] a:hover { color: var(--landing-accent); }
 @media (max-width: 860px) {
 	[data-lr="root"] { padding: 40px 20px 56px !important; gap: 56px !important; }
 	[data-lr="root"] h1 { font-size: 40px !important; }
@@ -82,7 +120,7 @@ function CompareMark({ value }: { value: CompareCell }) {
 				<path
 					d="M6.6 11.3 l3 3 l5.8 -6.3"
 					fill="none"
-					stroke="var(--atelier-panel)"
+					stroke="var(--landing-panel)"
 					strokeWidth="2"
 					strokeLinecap="round"
 					strokeLinejoin="round"
@@ -95,7 +133,7 @@ function CompareMark({ value }: { value: CompareCell }) {
 			<span
 				aria-label="No"
 				style={{
-					color: "var(--atelier-fg-faint)",
+					color: "var(--landing-faint)",
 					fontSize: "18px",
 					lineHeight: "1",
 				}}
@@ -105,7 +143,7 @@ function CompareMark({ value }: { value: CompareCell }) {
 		);
 	}
 	return (
-		<span style={{ fontSize: "13.5px", color: "var(--atelier-fg-subtle)" }}>
+		<span style={{ fontSize: "13.5px", color: "var(--landing-subtle)" }}>
 			{value}
 		</span>
 	);
@@ -116,8 +154,8 @@ function CompareTable() {
 		<div
 			data-lr="cmp"
 			style={{
-				background: "var(--atelier-panel)",
-				border: "1px solid var(--atelier-border)",
+				background: "var(--landing-panel)",
+				border: "1px solid var(--landing-border)",
 				borderRadius: "14px",
 				overflow: "hidden",
 			}}
@@ -129,10 +167,10 @@ function CompareTable() {
 					gridTemplateColumns: compareGrid,
 					gap: "12px",
 					padding: "14px 20px",
-					background: "var(--atelier-bg-subtle)",
+					background: "var(--landing-panel-muted)",
 					fontSize: "14.5px",
 					fontWeight: "600",
-					color: "var(--atelier-fg-muted)",
+					color: "var(--landing-muted)",
 				}}
 			>
 				<span />
@@ -161,7 +199,7 @@ function CompareTable() {
 						gridTemplateColumns: compareGrid,
 						gap: "12px",
 						padding: "13px 20px",
-						borderTop: "1px solid var(--atelier-border-subtle)",
+						borderTop: "1px solid var(--landing-divider)",
 						fontSize: "15px",
 						alignItems: "center",
 					}}
@@ -184,13 +222,33 @@ function CompareTable() {
 export function LandingPage() {
 	const { user, repositoryTo } = useRepositoryCta();
 	const ctaLabel = user ? "Open LixRay" : "Create a repository";
+	const [installCopied, setInstallCopied] = useState(false);
+	const copyInstall = async () => {
+		await navigator.clipboard.writeText("npm install @lix-js/sdk");
+		setInstallCopied(true);
+		window.setTimeout(() => setInstallCopied(false), 1500);
+	};
+	const sdkExample = [
+		'import { openLix } from "@lix-js/sdk";',
+		"",
+		"const lix = await openLix({",
+		"  server: { url, headers },",
+		"});",
+		"",
+		"const rows = await lix.execute(`",
+		"  SELECT name, city, plan",
+		"  FROM customers",
+		"  ORDER BY name",
+		"`);",
+	];
 
 	return (
 		<div
+			data-lr="landing-page"
 			style={{
 				minHeight: "100vh",
 				colorScheme: "light",
-				background: "var(--atelier-bg)",
+				background: "var(--landing-bg)",
 			}}
 		>
 			<style>{landingCss}</style>
@@ -199,13 +257,13 @@ export function LandingPage() {
 				<div
 					data-lr="root"
 					style={{
-						background: "var(--atelier-bg)",
+						background: "var(--landing-bg)",
 						maxWidth: "1040px",
 						margin: "0 auto",
 						boxSizing: "border-box",
 						fontFamily:
 							"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-						color: "var(--atelier-fg)",
+						color: "var(--landing-fg)",
 						padding: "80px 64px 72px",
 						display: "flex",
 						flexDirection: "column",
@@ -225,14 +283,14 @@ export function LandingPage() {
 								textWrap: "balance",
 							}}
 						>
-							{"Shared repository for every AI agent you use."}
+							{"Shared repository for you and every AI agent you use."}
 						</h1>
 						<p
 							style={{
 								margin: "0",
 								fontSize: "19px",
 								lineHeight: "1.6",
-								color: "var(--atelier-fg-muted)",
+								color: "var(--landing-muted)",
 								textWrap: "pretty",
 								maxWidth: "680px",
 							}}
@@ -254,7 +312,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "17px",
 									fontWeight: "700",
-									color: "var(--atelier-panel)",
+									color: "var(--landing-panel)",
 									background: "var(--atelier-accent-gradient)",
 									boxShadow: "var(--atelier-shadow-accent)",
 									textDecoration: "none",
@@ -268,19 +326,30 @@ export function LandingPage() {
 								href="https://github.com/opral/lix"
 								target="_blank"
 								rel="noreferrer"
-								style={{ fontSize: "16px", fontWeight: "600" }}
+								style={{
+									display: "inline-flex",
+									alignItems: "center",
+									gap: "8px",
+									fontSize: "16px",
+									fontWeight: "600",
+								}}
 							>
+								<img
+									src="/landing/brand-github.svg"
+									alt=""
+									style={{ width: "18px", height: "18px", flexShrink: 0 }}
+								/>
 								{"View on GitHub"}
 							</a>
 						</div>
 					</div>
 					<div
 						style={{
-							background: "var(--atelier-panel)",
-							border: "1px solid var(--atelier-border)",
+							background: "var(--landing-panel)",
+							border: "1px solid var(--landing-border)",
 							borderRadius: "16px",
 							boxShadow:
-								"0 12px 32px color-mix(in srgb, var(--atelier-fg) 7%, transparent)",
+								"0 12px 32px color-mix(in srgb, var(--landing-fg) 7%, transparent)",
 							overflow: "hidden",
 						}}
 					>
@@ -290,8 +359,8 @@ export function LandingPage() {
 								alignItems: "center",
 								gap: "8px",
 								padding: "12px 16px",
-								background: "var(--atelier-bg-subtle)",
-								borderBottom: "1px solid var(--atelier-border-subtle)",
+								background: "var(--landing-panel-muted)",
+								borderBottom: "1px solid var(--landing-divider)",
 							}}
 						>
 							<span
@@ -299,7 +368,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "var(--atelier-border)",
+									background: "var(--landing-border)",
 								}}
 							></span>
 							<span
@@ -307,7 +376,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "var(--atelier-border)",
+									background: "var(--landing-border)",
 								}}
 							></span>
 							<span
@@ -315,7 +384,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "var(--atelier-border)",
+									background: "var(--landing-border)",
 									marginRight: "8px",
 								}}
 							></span>
@@ -323,7 +392,7 @@ export function LandingPage() {
 								style={{
 									fontFamily: "ui-monospace, Menlo, monospace",
 									fontSize: "13.5px",
-									color: "var(--atelier-fg-subtle)",
+									color: "var(--landing-subtle)",
 								}}
 							>
 								{"lixray.com"}
@@ -339,7 +408,7 @@ export function LandingPage() {
 							<div
 								style={{
 									padding: "16px 10px",
-									borderRight: "1px solid var(--atelier-border-subtle)",
+									borderRight: "1px solid var(--landing-divider)",
 									display: "flex",
 									flexDirection: "column",
 									gap: "2px",
@@ -370,7 +439,7 @@ export function LandingPage() {
 										gap: "10px",
 										padding: "7px 10px",
 										borderRadius: "8px",
-										background: "var(--atelier-bg)",
+										background: "var(--landing-bg)",
 										fontWeight: "600",
 									}}
 								>
@@ -379,7 +448,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="var(--atelier-fg)"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="1.5" width="5" height="5" rx="1" />
@@ -395,7 +464,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "var(--atelier-fg-muted)",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -403,7 +472,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="var(--atelier-fg-subtle)"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 										strokeLinejoin="round"
 									>
@@ -417,7 +486,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "var(--atelier-fg-muted)",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -425,7 +494,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="var(--atelier-fg-subtle)"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -439,7 +508,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "var(--atelier-fg-muted)",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -447,7 +516,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="var(--atelier-fg-subtle)"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 										strokeLinecap="round"
 									>
@@ -461,7 +530,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "var(--atelier-fg-subtle)",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									{"SOURCES"}
@@ -471,7 +540,7 @@ export function LandingPage() {
 											padding: "1px 7px",
 											borderRadius: "99px",
 											background: "var(--atelier-accent-subtle)",
-											color: "var(--atelier-accent)",
+											color: "var(--landing-accent)",
 											fontSize: "10.5px",
 											letterSpacing: "0.04em",
 										}}
@@ -518,14 +587,14 @@ export function LandingPage() {
 											width="13"
 											height="13"
 											rx="2.5"
-											fill="var(--atelier-panel)"
-											stroke="var(--atelier-fg)"
+											fill="var(--landing-panel)"
+											stroke="var(--landing-fg)"
 											strokeWidth="1.3"
 										/>
 										<path
 											d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 											fill="none"
-											stroke="var(--atelier-fg)"
+											stroke="var(--landing-fg)"
 											strokeWidth="1.4"
 											strokeLinejoin="round"
 										/>
@@ -538,7 +607,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "var(--atelier-fg-subtle)",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									<span
@@ -559,7 +628,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "var(--atelier-fg-subtle)",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									{"AGENTS"}
@@ -622,8 +691,8 @@ export function LandingPage() {
 									</span>
 									<span
 										style={{
-											background: "var(--atelier-fg)",
-											color: "var(--atelier-panel)",
+											background: "var(--landing-fg)",
+											color: "var(--landing-panel)",
 											fontSize: "14px",
 											fontWeight: "600",
 											padding: "8px 16px",
@@ -638,9 +707,9 @@ export function LandingPage() {
 										display: "flex",
 										justifyContent: "space-between",
 										padding: "8px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 										fontSize: "13.5px",
-										color: "var(--atelier-fg-subtle)",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									<span>{"Name"}</span>
@@ -652,7 +721,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -667,7 +736,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="var(--atelier-fg-subtle)"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -691,7 +760,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -706,7 +775,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="var(--atelier-fg-subtle)"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -730,7 +799,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -763,7 +832,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -796,7 +865,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid var(--atelier-border-subtle)",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -825,16 +894,14 @@ export function LandingPage() {
 											/>
 											<path
 												d="M3.3 6 l4 4 M7.3 6 l-4 4"
-												stroke="var(--atelier-panel)"
+												stroke="var(--landing-panel)"
 												strokeWidth="1.2"
 												strokeLinecap="round"
 											/>
 										</svg>
 										{"budget.xlsx"}
 									</span>
-									<span style={{ color: "var(--atelier-fg-muted)" }}>
-										{"You"}
-									</span>
+									<span style={{ color: "var(--landing-muted)" }}>{"You"}</span>
 								</div>
 								<div
 									style={{
@@ -858,16 +925,14 @@ export function LandingPage() {
 										/>
 										{"pitch-deck.pdf"}
 									</span>
-									<span style={{ color: "var(--atelier-fg-muted)" }}>
-										{"You"}
-									</span>
+									<span style={{ color: "var(--landing-muted)" }}>{"You"}</span>
 								</div>
 								<div
 									style={{
 										marginTop: "6px",
-										border: "1px solid var(--atelier-border)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "14px",
-										background: "var(--atelier-bg-subtle)",
+										background: "var(--landing-panel-muted)",
 										padding: "14px 16px",
 										display: "flex",
 										alignItems: "center",
@@ -892,7 +957,7 @@ export function LandingPage() {
 										style={{
 											flex: "1",
 											minWidth: "150px",
-											background: "var(--atelier-panel)",
+											background: "var(--landing-panel)",
 											borderRadius: "8px",
 											padding: "6px 12px",
 											fontFamily: "ui-monospace, Menlo, monospace",
@@ -903,9 +968,9 @@ export function LandingPage() {
 											style={{
 												display: "flex",
 												gap: "40px",
-												color: "var(--atelier-fg-subtle)",
+												color: "var(--landing-subtle)",
 												paddingBottom: "4px",
-												borderBottom: "1px solid var(--atelier-border-subtle)",
+												borderBottom: "1px solid var(--landing-divider)",
 											}}
 										>
 											<span style={{ width: "50px" }}>{"name"}</span>
@@ -933,8 +998,8 @@ export function LandingPage() {
 												</span>{" "}
 												<span
 													style={{
-														background: "var(--atelier-success-subtle)",
-														color: "var(--atelier-success-border)",
+														background: "var(--landing-success-bg)",
+														color: "var(--landing-success-fg)",
 														padding: "0 4px",
 														borderRadius: "3px",
 													}}
@@ -947,8 +1012,8 @@ export function LandingPage() {
 									<span style={{ display: "flex", gap: "8px" }}>
 										<span
 											style={{
-												background: "var(--atelier-fg)",
-												color: "var(--atelier-panel)",
+												background: "var(--landing-fg)",
+												color: "var(--landing-panel)",
 												fontSize: "14px",
 												fontWeight: "600",
 												padding: "8px 16px",
@@ -959,8 +1024,8 @@ export function LandingPage() {
 										</span>
 										<span
 											style={{
-												border: "1px solid var(--atelier-border)",
-												background: "var(--atelier-panel)",
+												border: "1px solid var(--landing-border)",
+												background: "var(--landing-panel)",
 												fontSize: "14px",
 												padding: "8px 16px",
 												borderRadius: "8px",
@@ -994,7 +1059,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="var(--atelier-fg)"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1006,7 +1071,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1026,7 +1091,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="var(--atelier-fg)"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1038,7 +1103,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1058,7 +1123,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="var(--atelier-fg)"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1071,7 +1136,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1093,7 +1158,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="var(--atelier-fg)"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1108,7 +1173,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1152,14 +1217,14 @@ export function LandingPage() {
 										width="13"
 										height="13"
 										rx="2.5"
-										fill="var(--atelier-panel)"
-										stroke="var(--atelier-fg)"
+										fill="var(--landing-panel)"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.3"
 									/>
 									<path
 										d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 										fill="none"
-										stroke="var(--atelier-fg)"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.4"
 										strokeLinejoin="round"
 									/>
@@ -1177,7 +1242,7 @@ export function LandingPage() {
 								<span
 									style={{
 										fontSize: "14px",
-										color: "var(--atelier-fg-subtle)",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									{"and more"}
@@ -1196,8 +1261,8 @@ export function LandingPage() {
 									style={{
 										fontSize: "11.5px",
 										fontWeight: "700",
-										color: "var(--atelier-tag-orange-fg)",
-										background: "var(--atelier-tag-orange)",
+										color: "var(--landing-warning-fg)",
+										background: "var(--landing-warning-bg)",
 										padding: "2px 8px",
 										borderRadius: "99px",
 									}}
@@ -1209,7 +1274,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1235,18 +1300,19 @@ export function LandingPage() {
 								style={{
 									margin: "0",
 									fontSize: "34px",
+									lineHeight: "1.2",
 									fontWeight: "700",
 									letterSpacing: "-0.02em",
 								}}
 							>
-								{"Hackable"}
+								{"Build on top"}
 							</h3>
 							<p
 								style={{
 									margin: "0",
 									fontSize: "18px",
 									lineHeight: "1.65",
-									color: "var(--atelier-fg-muted)",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 									maxWidth: "740px",
 								}}
@@ -1283,7 +1349,7 @@ export function LandingPage() {
 									</svg>
 								</a>
 								{
-									", an open-source engine for files, tables, and version control. You query it with SQL. Agents and your own code use the same API."
+									", an open source engine for files, tables, and version control. Everything is queryable with SQL. The LixRay UI, agents, and your own code all use the same API."
 								}
 							</p>
 						</div>
@@ -1291,19 +1357,17 @@ export function LandingPage() {
 							data-lr="hack"
 							style={{
 								display: "grid",
-								gridTemplateColumns: "minmax(0,1.25fr) 44px minmax(0,1fr)",
+								gridTemplateColumns: "minmax(0,1.44fr) 44px minmax(0,1fr)",
 								gap: "14px",
 								alignItems: "center",
 							}}
 						>
 							<div
 								style={{
-									colorScheme: "dark",
-									background: "var(--atelier-panel)",
+									background: "var(--landing-code-bg)",
 									borderRadius: "14px",
 									overflow: "hidden",
-									boxShadow:
-										"0 16px 36px color-mix(in srgb, var(--atelier-fg) 16%, transparent)",
+									boxShadow: "0 16px 36px var(--landing-code-shadow)",
 								}}
 							>
 								<div
@@ -1312,62 +1376,85 @@ export function LandingPage() {
 										alignItems: "center",
 										justifyContent: "space-between",
 										gap: "12px",
+										flexWrap: "wrap",
 										padding: "14px 20px",
-										background: "var(--atelier-bg-hover)",
-										borderBottom: "1px solid var(--atelier-border)",
+										background: "var(--landing-code-header)",
+										borderBottom: "1px solid var(--landing-code-border)",
 									}}
 								>
 									<span
 										style={{
 											fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
 											fontSize: "16px",
-											color: "var(--atelier-fg)",
+											lineHeight: "1.2",
+											color: "var(--landing-code-text)",
 										}}
 									>
-										<span style={{ color: "var(--atelier-fg-subtle)" }}>
+										<span style={{ color: "var(--landing-subtle)" }}>
 											{"$ "}
 										</span>
 										{"npm install @lix-js/sdk"}
 									</span>
-									<span
+									<button
+										type="button"
+										aria-label="Copy installation command"
+										onClick={() => void copyInstall()}
 										style={{
 											fontSize: "13px",
+											lineHeight: "1.2",
+											border: 0,
+											cursor: "pointer",
 											fontWeight: "600",
-											color: "var(--atelier-panel)",
-											background: "var(--atelier-fg)",
+											color: "var(--landing-code-bg)",
+											background: "var(--landing-bg)",
 											padding: "5px 12px",
 											borderRadius: "7px",
 										}}
 									>
-										{"Node.js"}
-									</span>
+										{installCopied ? "Copied" : "Copy"}
+									</button>
 								</div>
 								<pre
+									className="landing-code"
+									aria-label="Authenticated Lix SDK example"
 									style={{
 										margin: 0,
-										padding: "18px 20px",
+										padding: "18px 20px 20px 8px",
 										overflowX: "auto",
 										fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
-										fontSize: "13px",
+										fontSize: "14px",
 										lineHeight: "1.8",
-										color: "var(--atelier-fg)",
+										color: "var(--landing-code-text)",
 									}}
 								>
-									<code>{`import { openLix } from "@lix-js/sdk";
-
-const lix = await openLix({
-  server: {
-    url: process.env.LIXRAY_REPOSITORY_URL,
-    headers: {
-      Authorization: "Bearer " + process.env.LIXRAY_API_TOKEN,
-    },
-  },
-});
-
-const rows = await lix.execute(
-  "SELECT name, city, plan FROM customers ORDER BY name",
-);
-await lix.close();`}</code>
+									<code>
+										{sdkExample.map((line, index) => (
+											<span
+												key={index}
+												className={`landing-code-row${index >= 7 && index <= 9 ? " landing-sql" : ""}`}
+												data-emphasis={index === 8 ? "true" : undefined}
+											>
+												<span
+													className="landing-line-number"
+													aria-hidden="true"
+												>
+													{index + 1}
+												</span>
+												<span
+													className="landing-source-line"
+													dangerouslySetInnerHTML={{
+														__html:
+															index === 10
+																? '<span class="tok-string">`</span>);'
+																: highlightDocsCode(
+																		line,
+																		index >= 7 && index <= 9 ? "sql" : "js",
+																	),
+													}}
+												/>
+											</span>
+										))}
+									</code>
 								</pre>
 							</div>
 							<svg
@@ -1375,7 +1462,7 @@ await lix.close();`}</code>
 								height="24"
 								viewBox="0 0 44 24"
 								fill="none"
-								stroke="var(--atelier-accent)"
+								stroke="var(--landing-code-sql)"
 								strokeWidth="2"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1392,12 +1479,12 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "14px",
 										overflow: "hidden",
 										boxShadow:
-											"0 12px 28px color-mix(in srgb, var(--atelier-fg) 6%, transparent)",
+											"0 12px 28px color-mix(in srgb, var(--landing-fg) 6%, transparent)",
 									}}
 								>
 									<div
@@ -1406,8 +1493,8 @@ await lix.close();`}</code>
 											alignItems: "center",
 											gap: "8px",
 											padding: "10px 14px",
-											background: "var(--atelier-bg-subtle)",
-											borderBottom: "1px solid var(--atelier-border-subtle)",
+											background: "var(--landing-panel-muted)",
+											borderBottom: "1px solid var(--landing-divider)",
 										}}
 									>
 										<span
@@ -1415,7 +1502,7 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "var(--atelier-border)",
+												background: "var(--landing-border)",
 											}}
 										></span>
 										<span
@@ -1423,7 +1510,7 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "var(--atelier-border)",
+												background: "var(--landing-border)",
 											}}
 										></span>
 										<span
@@ -1431,15 +1518,16 @@ await lix.close();`}</code>
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "var(--atelier-border)",
+												background: "var(--landing-border)",
 												marginRight: "6px",
 											}}
 										></span>
 										<span
 											style={{
 												fontFamily: "ui-monospace, Menlo, monospace",
+												lineHeight: "14px",
 												fontSize: "12.5px",
-												color: "var(--atelier-fg-subtle)",
+												color: "var(--landing-subtle)",
 											}}
 										>
 											{"lixray.com/acme/home"}
@@ -1452,6 +1540,7 @@ await lix.close();`}</code>
 											gap: "9px",
 											padding: "14px 16px 10px",
 											fontSize: "17px",
+											lineHeight: "1.2",
 											fontWeight: "700",
 										}}
 									>
@@ -1460,7 +1549,7 @@ await lix.close();`}</code>
 											height="16"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="var(--atelier-fg-subtle)"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.3"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -1474,9 +1563,10 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "8px 16px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "12.5px",
-											color: "var(--atelier-fg-subtle)",
+											lineHeight: "14.5px",
+											color: "var(--landing-subtle)",
 										}}
 									>
 										<span>{"name"}</span>
@@ -1489,22 +1579,24 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Acme"}</span>
-										<span style={{ color: "var(--atelier-fg-muted)" }}>
+										<span style={{ color: "var(--landing-muted)" }}>
 											{"Hamburg"}
 										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "var(--atelier-success-subtle)",
-												color: "var(--atelier-success-border)",
+												background: "var(--landing-success-bg)",
+												color: "var(--landing-success-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -1517,22 +1609,24 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Bluebird Caf\u00e9"}</span>
-										<span style={{ color: "var(--atelier-fg-muted)" }}>
+										<span style={{ color: "var(--landing-muted)" }}>
 											{"Lisbon"}
 										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "var(--atelier-tag-orange)",
-												color: "var(--atelier-tag-orange-fg)",
+												background: "var(--landing-warning-bg)",
+												color: "var(--landing-warning-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -1545,22 +1639,24 @@ await lix.close();`}</code>
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Northwind"}</span>
-										<span style={{ color: "var(--atelier-fg-muted)" }}>
+										<span style={{ color: "var(--landing-muted)" }}>
 											{"Berlin"}
 										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "var(--atelier-success-subtle)",
-												color: "var(--atelier-success-border)",
+												background: "var(--landing-success-bg)",
+												color: "var(--landing-success-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -1570,6 +1666,18 @@ await lix.close();`}</code>
 								</div>
 							</div>
 						</div>
+						<p
+							data-lr="sdk-connection-note"
+							style={{
+								margin: "-12px 0 0",
+								fontSize: "12px",
+								lineHeight: "1.5",
+								color: "var(--landing-subtle)",
+							}}
+						>
+							Set <code>url</code> and <code>headers</code> using your{" "}
+							<a href="/docs/access-tokens">repository connection settings</a>.
+						</p>
 						<div
 							style={{
 								display: "flex",
@@ -1584,7 +1692,7 @@ await lix.close();`}</code>
 									fontSize: "13px",
 									fontWeight: "700",
 									letterSpacing: "0.1em",
-									color: "var(--atelier-fg-subtle)",
+									color: "var(--landing-subtle)",
 								}}
 							>
 								{"EXAMPLES"}
@@ -1599,8 +1707,8 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -1636,15 +1744,15 @@ await lix.close();`}</code>
 													/>
 													<path
 														d="M11.5 6 L6.5 16 h3.2 l1.8 -3.6 l1.8 3.6 h3.2 z"
-														fill="var(--atelier-panel)"
+														fill="var(--landing-panel)"
 													/>
 													<path
 														d="M16.5 16 l-1.6 3.2 l-1.6 -3.2 h-2 l3.6 7 l3.6 -7 z"
-														fill="var(--atelier-tag-orange)"
+														fill="var(--landing-warning-bg)"
 													/>
 												</svg>
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -1652,8 +1760,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -1665,7 +1773,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-subtle)"
+													stroke="var(--landing-subtle)"
 													strokeWidth="1.3"
 												>
 													<rect
@@ -1700,42 +1808,42 @@ await lix.close();`}</code>
 													y="0"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="0"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="36"
 													y="0"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="24"
 													y="6"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="6"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="36"
 													y="6"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
@@ -1861,105 +1969,105 @@ await lix.close();`}</code>
 													y="42"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="42"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="36"
 													y="42"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="42"
 													y="42"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="18"
 													y="48"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="24"
 													y="48"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="42"
 													y="48"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="48"
 													y="48"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="12"
 													y="54"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="18"
 													y="54"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="48"
 													y="54"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="6"
 													y="60"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="12"
 													y="60"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="48"
 													y="60"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="54"
 													y="60"
 													width="6"
 													height="6"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 											</svg>
 											<div
@@ -2023,7 +2131,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Mon"}
@@ -2089,7 +2197,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Wed"}
@@ -2187,7 +2295,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Sat"}
@@ -2202,7 +2310,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -2211,7 +2319,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -2223,8 +2331,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -2254,8 +2362,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -2268,7 +2376,7 @@ await lix.close();`}</code>
 													height="14"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-muted)"
+													stroke="var(--landing-muted)"
 													strokeWidth="1.3"
 												>
 													<circle cx="8" cy="8" r="6.2" />
@@ -2280,8 +2388,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -2291,7 +2399,7 @@ await lix.close();`}</code>
 											>
 												{"listings"}
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -2299,8 +2407,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -2313,7 +2421,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-subtle)"
+													stroke="var(--landing-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -2350,21 +2458,21 @@ await lix.close();`}</code>
 													y="0"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="0"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="20"
 													y="5"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="25"
@@ -2385,28 +2493,28 @@ await lix.close();`}</code>
 													y="5"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="45"
 													y="5"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="50"
 													y="5"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="15"
 													y="10"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="20"
@@ -2441,28 +2549,28 @@ await lix.close();`}</code>
 													y="10"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="45"
 													y="10"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="50"
 													y="10"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
 													y="15"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="15"
@@ -2511,21 +2619,21 @@ await lix.close();`}</code>
 													y="15"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="50"
 													y="15"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="20"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2588,98 +2696,98 @@ await lix.close();`}</code>
 													y="20"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="0"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="15"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="20"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="25"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="35"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="40"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="45"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="50"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="55"
 													y="25"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="30"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2742,14 +2850,14 @@ await lix.close();`}</code>
 													y="30"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="35"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2812,14 +2920,14 @@ await lix.close();`}</code>
 													y="35"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="40"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2882,14 +2990,14 @@ await lix.close();`}</code>
 													y="40"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="45"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2917,21 +3025,21 @@ await lix.close();`}</code>
 													y="45"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="45"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="35"
 													y="45"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="40"
@@ -2952,14 +3060,14 @@ await lix.close();`}</code>
 													y="45"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="50"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
@@ -2987,7 +3095,7 @@ await lix.close();`}</code>
 													y="50"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
@@ -3001,7 +3109,7 @@ await lix.close();`}</code>
 													y="50"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="40"
@@ -3029,84 +3137,84 @@ await lix.close();`}</code>
 													y="50"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="5"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="10"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="15"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="20"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="25"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="30"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="35"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="40"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="45"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="50"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="55"
 													y="55"
 													width="5"
 													height="5"
-													fill="var(--atelier-fg)"
+													fill="var(--landing-fg)"
 												/>
 												<rect
 													x="0"
@@ -3197,8 +3305,8 @@ await lix.close();`}</code>
 												style={{
 													flex: "1",
 													minWidth: "0",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "9px",
 													overflow: "hidden",
 												}}
@@ -3218,8 +3326,8 @@ await lix.close();`}</code>
 													<span>{"2BR \u00b7 18 min"}</span>
 													<span
 														style={{
-															background: "var(--atelier-success-subtle)",
-															color: "var(--atelier-success-border)",
+															background: "var(--landing-success-bg)",
+															color: "var(--landing-success-fg)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3235,7 +3343,7 @@ await lix.close();`}</code>
 														alignItems: "center",
 														gap: "8px",
 														padding: "5px 10px",
-														borderTop: "1px solid var(--atelier-border-subtle)",
+														borderTop: "1px solid var(--landing-divider)",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
 														whiteSpace: "nowrap",
@@ -3244,8 +3352,8 @@ await lix.close();`}</code>
 													<span>{"1BR \u00b7 25 min"}</span>
 													<span
 														style={{
-															background: "var(--atelier-success-subtle)",
-															color: "var(--atelier-success-border)",
+															background: "var(--landing-success-bg)",
+															color: "var(--landing-success-fg)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3261,7 +3369,7 @@ await lix.close();`}</code>
 														alignItems: "center",
 														gap: "8px",
 														padding: "5px 10px",
-														borderTop: "1px solid var(--atelier-border-subtle)",
+														borderTop: "1px solid var(--landing-divider)",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
 														whiteSpace: "nowrap",
@@ -3270,8 +3378,8 @@ await lix.close();`}</code>
 													<span>{"3BR \u00b7 41 min"}</span>
 													<span
 														style={{
-															background: "var(--atelier-border-subtle)",
-															color: "var(--atelier-fg-muted)",
+															background: "var(--landing-divider)",
+															color: "var(--landing-muted)",
 															padding: "0 8px",
 															borderRadius: "99px",
 															fontSize: "11.5px",
@@ -3289,7 +3397,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -3298,7 +3406,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3310,8 +3418,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3320,7 +3428,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "var(--atelier-bg-subtle)",
+											background: "var(--landing-panel-muted)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -3341,8 +3449,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -3361,8 +3469,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3377,7 +3485,7 @@ await lix.close();`}</code>
 												/>
 												{"scripts"}
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -3385,8 +3493,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3399,7 +3507,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-subtle)"
+													stroke="var(--landing-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3435,8 +3543,8 @@ await lix.close();`}</code>
 											>
 												<div
 													style={{
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "9px",
 														fontFamily: "ui-monospace, Menlo, monospace",
 														fontSize: "12px",
@@ -3456,8 +3564,8 @@ await lix.close();`}</code>
 														<span>{"digest.ts"}</span>
 														<span
 															style={{
-																background: "var(--atelier-success-subtle)",
-																color: "var(--atelier-success-border)",
+																background: "var(--landing-success-bg)",
+																color: "var(--landing-success-fg)",
 																padding: "0 8px",
 																borderRadius: "99px",
 															}}
@@ -3472,15 +3580,14 @@ await lix.close();`}</code>
 															alignItems: "center",
 															gap: "8px",
 															padding: "7px 10px",
-															borderTop:
-																"1px solid var(--atelier-border-subtle)",
+															borderTop: "1px solid var(--landing-divider)",
 														}}
 													>
 														<span>{"cleanup.ts"}</span>
 														<span
 															style={{
-																background: "var(--atelier-success-subtle)",
-																color: "var(--atelier-success-border)",
+																background: "var(--landing-success-bg)",
+																color: "var(--landing-success-fg)",
 																padding: "0 8px",
 																borderRadius: "99px",
 															}}
@@ -3498,7 +3605,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -3510,7 +3617,7 @@ await lix.close();`}</code>
 													padding: "1px 7px",
 													borderRadius: "99px",
 													background: "var(--atelier-accent-subtle)",
-													color: "var(--atelier-accent)",
+													color: "var(--landing-accent)",
 													fontSize: "11px",
 													fontWeight: "600",
 													verticalAlign: "middle",
@@ -3523,7 +3630,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3544,8 +3651,8 @@ await lix.close();`}</code>
 							>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3554,7 +3661,7 @@ await lix.close();`}</code>
 								>
 									<div
 										style={{
-											background: "var(--atelier-tag-orange)",
+											background: "var(--landing-warning-bg)",
 											padding: "16px 16px 18px",
 											display: "flex",
 											flexDirection: "column",
@@ -3575,8 +3682,8 @@ await lix.close();`}</code>
 													width: "24px",
 													height: "24px",
 													borderRadius: "6px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													display: "flex",
 													alignItems: "center",
 													justifyContent: "center",
@@ -3595,8 +3702,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3609,7 +3716,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-subtle)"
+													stroke="var(--landing-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3624,7 +3731,7 @@ await lix.close();`}</code>
 												</svg>
 												{"posts"}
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -3632,8 +3739,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3658,8 +3765,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3674,15 +3781,15 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Mon"}
 													</span>
 													<span
 														style={{
-															background: "var(--atelier-success-subtle)",
-															color: "var(--atelier-success-border)",
+															background: "var(--landing-success-bg)",
+															color: "var(--landing-success-fg)",
 															borderRadius: "4px",
 															padding: "3px 4px",
 															fontSize: "10.5px",
@@ -3699,8 +3806,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3715,7 +3822,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Tue"}
@@ -3724,8 +3831,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3740,15 +3847,15 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Wed"}
 													</span>
 													<span
 														style={{
-															background: "var(--atelier-tag-orange)",
-															color: "var(--atelier-tag-orange-fg)",
+															background: "var(--landing-warning-bg)",
+															color: "var(--landing-warning-fg)",
 															borderRadius: "4px",
 															padding: "3px 4px",
 															fontSize: "10.5px",
@@ -3765,8 +3872,8 @@ await lix.close();`}</code>
 												<div
 													style={{
 														flex: "1",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "8px",
 														height: "92px",
 														padding: "6px 5px",
@@ -3781,7 +3888,7 @@ await lix.close();`}</code>
 														style={{
 															fontFamily: "ui-monospace, Menlo, monospace",
 															fontSize: "10.5px",
-															color: "var(--atelier-fg-subtle)",
+															color: "var(--landing-subtle)",
 														}}
 													>
 														{"Thu"}
@@ -3812,7 +3919,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -3821,7 +3928,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -3833,8 +3940,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -3874,8 +3981,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3888,7 +3995,7 @@ await lix.close();`}</code>
 													height="12"
 													viewBox="0 0 16 16"
 													fill="none"
-													stroke="var(--atelier-fg-subtle)"
+													stroke="var(--landing-subtle)"
 													strokeWidth="1.3"
 													style={{ flexShrink: "0" }}
 												>
@@ -3903,7 +4010,7 @@ await lix.close();`}</code>
 												</svg>
 												{"meetings"}
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -3911,8 +4018,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -3932,7 +4039,7 @@ await lix.close();`}</code>
 														width="11"
 														height="14"
 														rx="1.6"
-														fill="var(--atelier-accent)"
+														fill="var(--landing-accent)"
 													/>
 													<rect
 														x="1"
@@ -3968,11 +4075,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "6px",
 														boxShadow:
-															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+															"0 6px 14px color-mix(in srgb, var(--landing-fg) 10%, transparent)",
 														transform: "rotate(-8deg)",
 														transformOrigin: "bottom center",
 														zIndex: "1",
@@ -3984,7 +4091,7 @@ await lix.close();`}</code>
 													<div
 														style={{
 															height: "14px",
-															background: "var(--atelier-accent)",
+															background: "var(--landing-accent)",
 														}}
 													></div>
 													<div
@@ -4022,7 +4129,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "var(--atelier-accent)",
+																	background: "var(--landing-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -4030,7 +4137,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "var(--atelier-border)",
+																	background: "var(--landing-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -4044,11 +4151,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "6px",
 														boxShadow:
-															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+															"0 6px 14px color-mix(in srgb, var(--landing-fg) 10%, transparent)",
 														transform: "rotate(8deg)",
 														transformOrigin: "bottom center",
 														zIndex: "1",
@@ -4060,7 +4167,7 @@ await lix.close();`}</code>
 													<div
 														style={{
 															height: "14px",
-															background: "var(--atelier-accent)",
+															background: "var(--landing-accent)",
 														}}
 													></div>
 													<div
@@ -4105,7 +4212,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "var(--atelier-accent)",
+																	background: "var(--landing-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -4113,7 +4220,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "var(--atelier-border)",
+																	background: "var(--landing-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -4127,11 +4234,11 @@ await lix.close();`}</code>
 														bottom: "0",
 														width: "108px",
 														height: "72px",
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "6px",
 														boxShadow:
-															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 10%, transparent)",
+															"0 6px 14px color-mix(in srgb, var(--landing-fg) 10%, transparent)",
 														transform: "rotate(0deg)",
 														transformOrigin: "bottom center",
 														zIndex: "2",
@@ -4143,7 +4250,7 @@ await lix.close();`}</code>
 													<div
 														style={{
 															height: "14px",
-															background: "var(--atelier-accent)",
+															background: "var(--landing-accent)",
 														}}
 													></div>
 													<div
@@ -4181,7 +4288,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "8px",
 																	height: "22px",
-																	background: "var(--atelier-accent)",
+																	background: "var(--landing-accent)",
 																}}
 															></span>
 															<span style={{ flex: "1" }}></span>
@@ -4189,7 +4296,7 @@ await lix.close();`}</code>
 																style={{
 																	width: "30px",
 																	height: "3px",
-																	background: "var(--atelier-border)",
+																	background: "var(--landing-border)",
 																	alignSelf: "center",
 																}}
 															></span>
@@ -4205,7 +4312,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -4216,7 +4323,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>
@@ -4228,8 +4335,8 @@ await lix.close();`}</code>
 								</div>
 								<div
 									style={{
-										background: "var(--atelier-panel)",
-										border: "1px solid var(--atelier-border)",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "16px",
 										overflow: "hidden",
 										display: "flex",
@@ -4259,8 +4366,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -4275,7 +4382,7 @@ await lix.close();`}</code>
 												/>
 												{"skills"}
 											</span>
-											<span style={{ color: "var(--atelier-fg-faint)" }}>
+											<span style={{ color: "var(--landing-faint)" }}>
 												{"\u2192"}
 											</span>
 											<span
@@ -4283,8 +4390,8 @@ await lix.close();`}</code>
 													display: "flex",
 													alignItems: "center",
 													gap: "5px",
-													background: "var(--atelier-panel)",
-													border: "1px solid var(--atelier-border)",
+													background: "var(--landing-panel)",
+													border: "1px solid var(--landing-border)",
 													borderRadius: "99px",
 													padding: "2px 9px",
 													fontFamily: "ui-monospace, Menlo, monospace",
@@ -4312,8 +4419,8 @@ await lix.close();`}</code>
 											>
 												<div
 													style={{
-														background: "var(--atelier-panel)",
-														border: "1px solid var(--atelier-border)",
+														background: "var(--landing-panel)",
+														border: "1px solid var(--landing-border)",
 														borderRadius: "8px",
 														width: "108px",
 														padding: "9px 10px",
@@ -4321,7 +4428,7 @@ await lix.close();`}</code>
 														flexDirection: "column",
 														gap: "6px",
 														boxShadow:
-															"0 6px 14px color-mix(in srgb, var(--atelier-fg) 8%, transparent)",
+															"0 6px 14px color-mix(in srgb, var(--landing-fg) 8%, transparent)",
 													}}
 												>
 													<span
@@ -4348,21 +4455,21 @@ await lix.close();`}</code>
 													<span
 														style={{
 															height: "3px",
-															background: "var(--atelier-border)",
+															background: "var(--landing-border)",
 															width: "90%",
 														}}
 													></span>
 													<span
 														style={{
 															height: "3px",
-															background: "var(--atelier-border)",
+															background: "var(--landing-border)",
 															width: "70%",
 														}}
 													></span>
 													<span
 														style={{
 															height: "3px",
-															background: "var(--atelier-border)",
+															background: "var(--landing-border)",
 															width: "80%",
 														}}
 													></span>
@@ -4372,7 +4479,7 @@ await lix.close();`}</code>
 													height="92"
 													viewBox="0 0 56 92"
 													fill="none"
-													stroke="var(--atelier-fg-faint)"
+													stroke="var(--landing-faint)"
 													strokeWidth="1.5"
 												>
 													<path d="M0 46 C28 46 28 12 56 12" />
@@ -4391,8 +4498,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "var(--atelier-panel)",
-															border: "1px solid var(--atelier-border)",
+															background: "var(--landing-panel)",
+															border: "1px solid var(--landing-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4411,8 +4518,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "var(--atelier-panel)",
-															border: "1px solid var(--atelier-border)",
+															background: "var(--landing-panel)",
+															border: "1px solid var(--landing-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4431,8 +4538,8 @@ await lix.close();`}</code>
 															width: "24px",
 															height: "24px",
 															borderRadius: "6px",
-															background: "var(--atelier-panel)",
-															border: "1px solid var(--atelier-border)",
+															background: "var(--landing-panel)",
+															border: "1px solid var(--landing-border)",
 															display: "flex",
 															alignItems: "center",
 															justifyContent: "center",
@@ -4456,7 +4563,7 @@ await lix.close();`}</code>
 											display: "flex",
 											flexDirection: "column",
 											gap: "5px",
-											borderTop: "1px solid var(--atelier-border-subtle)",
+											borderTop: "1px solid var(--landing-divider)",
 											flex: "1",
 										}}
 									>
@@ -4465,7 +4572,7 @@ await lix.close();`}</code>
 											style={{
 												fontSize: "14px",
 												lineHeight: "1.5",
-												color: "var(--atelier-fg-muted)",
+												color: "var(--landing-muted)",
 												textWrap: "pretty",
 											}}
 										>

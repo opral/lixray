@@ -16,7 +16,7 @@ import pwaIcons from "../pwa-icons.json";
 import atelierCss from "@opral/atelier/style.css?url";
 import appCss from "../styles.css?url";
 
-const title = "LixRay — Shared repository for every AI agent you use.";
+const title = "LixRay — Shared repository for you and every AI agent you use.";
 const description =
 	"Files and SQL tables in one open-source repository. Claude, ChatGPT, Codex and your scripts read and write the same data.";
 // Absolute URL: link-preview crawlers do not resolve relative image paths.
