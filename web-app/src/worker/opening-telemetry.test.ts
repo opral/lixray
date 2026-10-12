@@ -3,6 +3,80 @@ import test from "node:test";
 import { serverErrorEvents } from "./otlp-server-errors.ts";
 import { repositoryOpenDiagnostics } from "../lib/repository-open-telemetry.ts";
 
+void test("retryable opening polls retain raw spans without synthesizing exception alerts", async () => {
+	for (const [code, status, retryable, expected] of [
+		["LIX_REPOSITORY_OPENING", "503", "true", 0],
+		["LIX_OPEN_DEADLINE_EXCEEDED", "503", "true", 0],
+		["LIX_OPEN_STALLED", "503", "false", 1],
+		["LIX_ERROR_MIGRATION_FAILED", "500", "false", 1],
+		["LIX_REPOSITORY_OPENING", "503", "false", 1],
+		["LIX_REPOSITORY_OPENING", "503", undefined, 1],
+		["LIX_REPOSITORY_OPENING", "500", "true", 1],
+	] as const) {
+		const span = {
+			name: "lix.repository.admission",
+			traceId: new Uint8Array(16).fill(1),
+			spanId: new Uint8Array(8).fill(2),
+			startTimeUnixNano: "1788735600123456789",
+			status: { code: 2 },
+			attributes: [
+				["lix.error.owner", "boundary"],
+				["lix.error.code", code],
+				["http.response.status_code", status],
+				["lix.error.retryable", retryable],
+			]
+				.filter(([, value]) => value !== undefined)
+				.map(([key, value]) => ({ key, value: { stringValue: value } })),
+		};
+		const before = structuredClone(span);
+		const events = await serverErrorEvents(span);
+		assert.equal(events.length, expected, code);
+		assert.deepEqual(span, before);
+	}
+});
+
+void test("healthy opening codes never hide explicit or contradictory failures", async () => {
+	const attribute = (key: string, value: string) => ({
+		key,
+		value: { stringValue: value },
+	});
+	const base = {
+		name: "lix.repository.admission",
+		traceId: new Uint8Array(16).fill(1),
+		spanId: new Uint8Array(8).fill(2),
+		startTimeUnixNano: "1788735600123456789",
+		status: { code: 2 },
+		attributes: [
+			attribute("lix.error.code", "LIX_REPOSITORY_OPENING"),
+			attribute("http.response.status_code", "503"),
+			attribute("lix.error.retryable", "true"),
+		],
+	};
+	for (const span of [
+		{
+			...base,
+			events: [
+				{
+					name: "exception",
+					attributes: [attribute("exception.type", "TypeError")],
+				},
+			],
+		},
+		{
+			...base,
+			events: [{ name: "failure", attributes: [attribute("level", "ERROR")] }],
+		},
+		{
+			...base,
+			attributes: [
+				...base.attributes,
+				attribute("error.type", "LIX_OPEN_STALLED"),
+			],
+		},
+	])
+		assert.equal((await serverErrorEvents(span)).length, 1);
+});
+
 void test("an unfinished opener's independent stall report reaches PostHog with structural correlation", async () => {
 	const attribute = (key: string, value: string) => ({
 		key,
