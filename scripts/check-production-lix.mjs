@@ -199,6 +199,7 @@ async function admitRepository({
 	sleepImpl,
 }) {
 	const expectedRepositoryId = protocolUrl.pathname.split("/").at(-2);
+	let openingCode = "LIX_REPOSITORY_MIGRATING";
 	for (let attempt = 0; attempt < MAX_ADMISSION_ATTEMPTS; attempt += 1) {
 		const remaining = deadline - performance.now();
 		if (remaining <= 0) break;
@@ -214,10 +215,8 @@ async function admitRepository({
 			},
 			Math.min(timeoutMs, remaining),
 		);
-		if (
-			admission.response.status === 503 &&
-			admission.body?.error?.code === "LIX_REPOSITORY_MIGRATING"
-		) {
+		if (isRetryableOpening(admission, "LIX_REPOSITORY_MIGRATING")) {
+			openingCode = admission.body.error.code;
 			const delay = Math.min(1_000, deadline - performance.now());
 			if (delay <= 0 || attempt + 1 === MAX_ADMISSION_ATTEMPTS) break;
 			await sleepImpl(delay);
@@ -240,7 +239,7 @@ async function admitRepository({
 		return identity;
 	}
 	throw new Error(
-		"The production Lix admission timed out waiting for LIX_REPOSITORY_MIGRATING.",
+		`The production Lix admission timed out waiting for ${openingCode}.`,
 	);
 }
 
@@ -252,6 +251,7 @@ async function awaitHandshake({
 	deadline,
 	sleepImpl,
 }) {
+	let openingCode = "LIX_ERROR_MIGRATING";
 	for (let attempt = 0; attempt < MAX_ADMISSION_ATTEMPTS; attempt += 1) {
 		const remaining = deadline - performance.now();
 		if (remaining <= 0) break;
@@ -261,17 +261,34 @@ async function awaitHandshake({
 			{ headers: protocolHeaders },
 			Math.min(timeoutMs, remaining),
 		);
-		if (
-			result.response.status !== 503 ||
-			result.body?.error?.code !== "LIX_ERROR_MIGRATING"
-		)
-			return result;
+		if (!isRetryableOpening(result, "LIX_ERROR_MIGRATING")) return result;
+		openingCode = result.body.error.code;
 		const delay = Math.min(1_000, deadline - performance.now());
 		if (delay <= 0 || attempt + 1 === MAX_ADMISSION_ATTEMPTS) break;
 		await sleepImpl(delay);
 	}
 	throw new Error(
-		"The production Lix handshake timed out waiting for LIX_ERROR_MIGRATING.",
+		`The production Lix handshake timed out waiting for ${openingCode}.`,
+	);
+}
+
+function isRetryableOpening({ response, body }, legacyCode) {
+	const error = body?.error;
+	const details = error?.details;
+	if (
+		response.status !== 503 ||
+		details?.retryable === false ||
+		details?.stalled === true ||
+		details?.openPhase === "failed"
+	)
+		return false;
+	// Older servers report migration without retry metadata. Current opening
+	// responses must explicitly authorize joining the retained opening owner.
+	if (error?.code === legacyCode) return true;
+	return (
+		["LIX_REPOSITORY_OPENING", "LIX_OPEN_DEADLINE_EXCEEDED"].includes(
+			error?.code,
+		) && details?.retryable === true
 	);
 }
 

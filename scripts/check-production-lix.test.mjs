@@ -413,3 +413,180 @@ void test("invalid embedded identity closes the allocated session before SQL", a
 		assert.deepEqual(methods, ["GET", "GET", "DELETE"]);
 	}
 });
+
+function openingStage(url) {
+	const parsed = new URL(url);
+	if (parsed.pathname.endsWith("/admission")) return "admission";
+	if (parsed.pathname.endsWith(`/${repositoryId}/`))
+		return parsed.searchParams.get("activeBranchId") === globalBranchId
+			? "global handshake"
+			: "handshake";
+	return undefined;
+}
+
+void test("awaits explicitly retryable current opening at admission and both handshakes", async () => {
+	for (const code of ["LIX_REPOSITORY_OPENING", "LIX_OPEN_DEADLINE_EXCEEDED"]) {
+		for (const stage of ["admission", "handshake", "global handshake"]) {
+			let attempts = 0;
+			let reads = 0;
+			const delays = [];
+			const closed = [];
+			await checkProductionLix({
+				lixUrl,
+				sleepImpl: async (delay) => delays.push(delay),
+				fetchImpl: async (url, init) => {
+					if (openingStage(url) === stage && ++attempts <= 2)
+						return Response.json(
+							{
+								error: {
+									code,
+									details: {
+										retryable: true,
+										stalled: false,
+										openPhase: "storage_migrating",
+									},
+								},
+							},
+							{ status: 503 },
+						);
+					if (init.method === "POST") {
+						reads += 1;
+						if (stage !== "global handshake" || reads === 2)
+							assert.equal(
+								attempts,
+								3,
+								"SQL waits for the required admission and session",
+							);
+					}
+					if (init.method === "DELETE")
+						closed.push(new Headers(init.headers).get("Lix-Session-Id"));
+					return success(url, init);
+				},
+			});
+			assert.equal(attempts, 3);
+			assert.equal(reads, 2, "opening retries never replay SQL");
+			assert.deepEqual(delays, [1_000, 1_000]);
+			assert.deepEqual(closed, ["global-session", "session-1"]);
+		}
+	}
+});
+
+void test("current opening retries stop immediately for missing authorization, terminal progress and wrong status", async () => {
+	const failures = [];
+	for (const code of ["LIX_REPOSITORY_OPENING", "LIX_OPEN_DEADLINE_EXCEEDED"]) {
+		for (const details of [
+			undefined,
+			{},
+			{ retryable: false },
+			{ retryable: "true" },
+			{ retryable: true, stalled: true },
+			{ retryable: true, openPhase: "failed" },
+		])
+			failures.push({ status: 503, code, details });
+		for (const status of [500, 404])
+			failures.push({ status, code, details: { retryable: true } });
+	}
+	for (const code of [
+		"LIX_OPEN_STALLED",
+		"LIX_OPEN_FAILED",
+		"LIX_ERROR_MIGRATION_FAILED",
+		"LIX_ERROR_RECOVERING",
+	])
+		failures.push({ status: 503, code, details: { retryable: true } });
+	for (const stage of ["admission", "handshake", "global handshake"]) {
+		for (const { status, code, details } of failures) {
+			let attempts = 0;
+			const closed = [];
+			await assert.rejects(
+				checkProductionLix({
+					lixUrl,
+					sleepImpl: async () =>
+						assert.fail("terminal opening responses must not be polled"),
+					fetchImpl: async (url, init) => {
+						if (openingStage(url) === stage) {
+							attempts += 1;
+							return Response.json({ error: { code, details } }, { status });
+						}
+						if (init.method === "DELETE")
+							closed.push(new Headers(init.headers).get("Lix-Session-Id"));
+						return success(url, init);
+					},
+				}),
+				new RegExp(`${stage} failed with HTTP ${status} ${code}`),
+			);
+			assert.equal(attempts, 1);
+			assert.deepEqual(
+				closed,
+				stage === "global handshake" ? ["session-1"] : [],
+			);
+		}
+	}
+});
+
+void test("current opening polling retains the 120 attempt deployment bound at every stage", async () => {
+	for (const stage of ["admission", "handshake", "global handshake"]) {
+		for (const code of [
+			"LIX_REPOSITORY_OPENING",
+			"LIX_OPEN_DEADLINE_EXCEEDED",
+		]) {
+			let attempts = 0;
+			let sleeps = 0;
+			await assert.rejects(
+				checkProductionLix({
+					lixUrl,
+					sleepImpl: async () => {
+						sleeps += 1;
+					},
+					fetchImpl: async (url, init) => {
+						if (openingStage(url) === stage) {
+							attempts += 1;
+							return Response.json(
+								{ error: { code, details: { retryable: true } } },
+								{ status: 503 },
+							);
+						}
+						return success(url, init);
+					},
+				}),
+				new RegExp(`(?:admission|handshake) timed out waiting for ${code}`),
+			);
+			assert.equal(attempts, 120);
+			assert.equal(sleeps, 119);
+		}
+	}
+});
+
+void test("explicit terminal metadata also stops legacy migration polling", async () => {
+	for (const [stage, code] of [
+		["admission", "LIX_REPOSITORY_MIGRATING"],
+		["handshake", "LIX_ERROR_MIGRATING"],
+		["global handshake", "LIX_ERROR_MIGRATING"],
+	]) {
+		for (const details of [
+			{ retryable: false },
+			{ stalled: true },
+			{ openPhase: "failed" },
+		]) {
+			let attempts = 0;
+			await assert.rejects(
+				checkProductionLix({
+					lixUrl,
+					sleepImpl: async () =>
+						assert.fail("explicit terminal metadata must not be retried"),
+					fetchImpl: async (url, init) => {
+						if (openingStage(url) === stage) {
+							attempts += 1;
+							return Response.json(
+								{ error: { code, details } },
+								{ status: 503 },
+							);
+						}
+						return success(url, init);
+					},
+				}),
+				new RegExp(`${stage} failed with HTTP 503 ${code}`),
+			);
+			assert.equal(attempts, 1);
+		}
+	}
+});
