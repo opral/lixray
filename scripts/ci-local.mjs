@@ -76,8 +76,8 @@ run("Prepare pinned Lix browser SDK", "pnpm", ["--dir", "web-app", "lix:build"],
 	LIXRAY_LIX_ARTIFACTS: "only",
 	LIXRAY_SKIP_VENDORED_LIX_WASM: "0",
 });
-run("MCP recovery with real engine", "pnpm", ["--dir", "web-app", "test:mcp-recovery"]);
 run("Source, tooling, and frontend CI", "pnpm", ["run", "ci"]);
+run("MCP recovery with real engine", "pnpm", ["--dir", "web-app", "test:mcp-recovery"]);
 run("Install Chromium", "pnpm", ["--dir", "web-app", "exec", "playwright", "install", "chromium"]);
 run("Atelier styles", "pnpm", ["--filter", "@opral/atelier", "test:styles"]);
 run("LixRay styles", "pnpm", ["--dir", "web-app", "test:styles"]);
