@@ -47,19 +47,19 @@ async function branchProtocolResponse(request: Request): Promise<Response> {
 		const body = JSON.parse(await request.text()) as { branchId: string };
 		return Response.json({ branchId: body.branchId });
 	}
-	if (pathname === "/lix/v1/execute-batch") {
+	if (pathname === "/lix/v1/transaction/begin") {
+		return Response.json({ transactionId: "transaction-1" });
+	}
+	if (pathname === "/lix/v1/transaction/execute") {
 		return Response.json({
-			commit: { before: "before", after: "after" },
-			results: [
-				{
-					statementIndex: 0,
-					columns: [],
-					rows: [],
-					rowsAffected: 0,
-					notices: [],
-				},
-			],
+			columns: [],
+			rows: [],
+			rowsAffected: 0,
+			notices: [],
 		});
+	}
+	if (pathname === "/lix/v1/transaction/commit") {
+		return Response.json({ commit: { before: "before", after: "after" } });
 	}
 	return new Response("Not found", { status: 404 });
 }
@@ -204,19 +204,13 @@ void test("valid row references pass through the canonical SDK value codec", asy
 
 void test("executeBatch preserves canonical SDK rejection without inventing a commit outcome", async () => {
 	const runtime = client(async (_lixId, request) => {
-		if (testProtocolPath(request) !== "/lix/v1/execute-batch")
+		if (testProtocolPath(request) !== "/lix/v1/transaction/execute")
 			return branchProtocolResponse(request);
 		return Response.json({
-			commit: { before: "before", after: "after" },
-			results: [
-				{
-					statementIndex: 0,
-					columns: [{ name: "row_ref", type: "row_ref" }],
-					rows: [[{ kind: "row_ref", value: "malformed" }]],
-					rowsAffected: 1,
-					notices: [],
-				},
-			],
+			columns: [{ name: "row_ref", type: "row_ref" }],
+			rows: [[{ kind: "row_ref", value: "malformed" }]],
+			rowsAffected: 1,
+			notices: [],
 		});
 	});
 
@@ -229,7 +223,9 @@ void test("executeBatch preserves canonical SDK rejection without inventing a co
 				(error as Error).message,
 				"value is not a canonical lix_row_ref",
 			);
-			assert.equal((error as { details?: unknown }).details, undefined);
+			assert.deepEqual((error as { details?: unknown }).details, {
+				statementIndex: 0,
+			});
 			assert.equal((error as Error & { cause?: unknown }).cause, undefined);
 			return true;
 		},
@@ -249,7 +245,7 @@ void test("adapter result encoding failures carry bounded MCP ownership", async 
 					close: async () => {},
 					execute: async () => ({
 						columns: [{ name: "row_ref", type: "row_ref" }],
-						rows: [["malformed"]],
+						rows: [{ row_ref: "malformed" }],
 						rowsAffected: 1,
 						notices: [],
 					}),
@@ -282,13 +278,13 @@ void test("executeBatch keeps the adapter result encoding cause and known commit
 					activeBranchId: async () => "main",
 					switchBranch: async () => ({ branchId: "main" }),
 					close: async () => {},
-					executeBatch: async () => ({
+					transaction: async () => ({
 						commit: { before: "before", after: "after" },
-						results: [
+						value: [
 							{
 								statementIndex: 0,
 								columns: [{ name: "row_ref", type: "row_ref" }],
-								rows: [["malformed"]],
+								rows: [{ row_ref: "malformed" }],
 								rowsAffected: 1,
 								notices: [],
 							},
@@ -316,7 +312,7 @@ void test("executeBatch keeps the adapter result encoding cause and known commit
 	);
 });
 
-void test("executeBatch uses the canonical atomic endpoint", async () => {
+void test("executeBatch executes ordered statements in one canonical transaction", async () => {
 	const requests: Array<Request> = [];
 	const runtime = client(async (_lixId, request) => {
 		requests.push(request);
@@ -327,19 +323,17 @@ void test("executeBatch uses the canonical atomic endpoint", async () => {
 		statements: [{ sql: "SELECT 1" }, { sql: "SELECT 2" }],
 	});
 
-	assert.equal(response.results.length, 1);
+	assert.equal(response.results.length, 2);
 	assert.deepEqual(response.commit, { before: "before", after: "after" });
 	assert.equal("commit" in response.results[0]!, false);
-	assert.equal(
-		new URL(requests.at(-1)?.url ?? "https://invalid").pathname,
-		`/lix/v1/${LIX_ID}/execute-batch`,
-	);
-	assert.deepEqual(await requests.at(-1)?.json(), {
-		statements: [
-			{ sql: "SELECT 1", params: [] },
-			{ sql: "SELECT 2", params: [] },
-		],
-	});
+	assert.deepEqual(requests.slice(1).map(testProtocolPath), [
+		"/lix/v1/transaction/begin",
+		"/lix/v1/transaction/execute",
+		"/lix/v1/transaction/execute",
+		"/lix/v1/transaction/commit",
+	]);
+	assert.deepEqual(await requests[2]!.json(), { sql: "SELECT 1", params: [] });
+	assert.deepEqual(await requests[3]!.json(), { sql: "SELECT 2", params: [] });
 });
 
 void test("Lix protocol errors retain status and structured error details", async () => {

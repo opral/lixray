@@ -1896,6 +1896,22 @@ void test("browser route attempts become replay-stable performance samples with 
 				value: { doubleValue: 80.5 },
 			},
 			{
+				key: "lixray.repository.open.native.local.from_format",
+				value: { intValue: 86 },
+			},
+			{
+				key: "lixray.repository.open.native.local.to_format",
+				value: { intValue: 87 },
+			},
+			{
+				key: "lixray.repository.open.native.authority.from_format",
+				value: { intValue: -1 },
+			},
+			{
+				key: "lixray.repository.open.native.authority.to_format",
+				value: { stringValue: "private" },
+			},
+			{
 				key: "lixray.repository.open.native.local.inspecting_ms",
 				value: { doubleValue: 3.5 },
 			},
@@ -2207,6 +2223,10 @@ void test("browser route attempts become replay-stable performance samples with 
 	assert.equal(event.properties.longest_phase, "engine");
 	assert.equal(event.properties.longest_phase_ms, 80.5);
 	assert.equal(event.properties.native_local_inspecting_ms, 3.5);
+	assert.equal(event.properties.native_local_from_format, 86);
+	assert.equal(event.properties.native_local_to_format, 87);
+	assert.equal(event.properties.native_authority_from_format, undefined);
+	assert.equal(event.properties.native_authority_to_format, undefined);
 	assert.equal(event.properties.native_local_opening_ms, 45);
 	assert.equal(event.properties.native_authority_migrating_ms, 5);
 	assert.equal(event.properties.profile_navigation_timing_supported, true);

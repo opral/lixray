@@ -51,15 +51,9 @@ function mockLix(
 			calls.push({ method: "prepare" });
 			await options.prepareOfflineEditing?.();
 		},
-		executeBatch: async (statements: Array<{ sql: string }>) => {
-			calls.push({ method: "executeBatch" });
-			return {
-				results: statements.map(({ sql }) => {
-					calls.push({ method: "batch-statement", sql });
-					return { rows: [{ value: 1 }], rowsAffected: 0 };
-				}),
-				commit: null,
-			};
+		transaction: async (callback: () => unknown) => {
+			calls.push({ method: "transaction" });
+			return { value: await callback(), commit: null };
 		},
 		observe: (sql: string) => {
 			calls.push({ method: "observe", sql });
@@ -409,45 +403,6 @@ void test("a first mutation waits for offline write preparation", async () => {
 	);
 });
 
-void test("a read-only batch reaches Lix without preparing the write frontier", async () => {
-	const { lix, calls } = mockLix();
-	const scoped = withNativeFileWorkingScope(lix, { fileId: "file-1" });
-	const readSql = "SELECT content FROM lix_as_of('lix_file', $1) WHERE id = $2";
-
-	await scoped.executeBatch([
-		{ sql: readSql, params: ["commit-old", "file-1"] },
-		{ sql: "SELECT 1" },
-	]);
-
-	assert.deepEqual(
-		calls.map((call) => call.method),
-		["executeBatch", "batch-statement", "batch-statement"],
-	);
-	assert.equal(calls.filter((call) => call.method === "prepare").length, 0);
-});
-
-void test("a batch containing a SELECT Lix mutator waits for preparation", async () => {
-	const { lix, calls } = mockLix();
-	const scoped = withNativeFileWorkingScope(lix, { fileId: "file-1" });
-	const mutationSql = "SELECT commit_id FROM lix_undo()";
-
-	await scoped.executeBatch([{ sql: "SELECT 1" }, { sql: mutationSql }]);
-
-	assert.deepEqual(
-		calls.map((call) => call.sql ?? call.method),
-		[
-			HEAD_QUERY,
-			FILE_QUERY,
-			"prepare",
-			HEAD_QUERY,
-			HEAD_QUERY,
-			"executeBatch",
-			"SELECT 1",
-			mutationSql,
-		],
-	);
-});
-
 void test("explicit offline preparation remains available to callers", async () => {
 	const { lix, calls } = mockLix();
 	const scoped = withNativeFileWorkingScope(lix, { fileId: "file-1" });
@@ -513,4 +468,13 @@ void test("does not retry permanent preparation errors", async () => {
 	);
 	assert.equal(calls.filter((call) => call.sql === FILE_QUERY).length, 1);
 	assert.equal(calls.filter((call) => call.method === "prepare").length, 0);
+});
+
+void test("transactions wait for file preparation before starting the callback", async () => {
+	const { lix, calls } = mockLix();
+	const scoped = withNativeFileWorkingScope(lix, { fileId: "file-1" });
+	await scoped.transaction(() => {
+		assert.equal(calls.filter((call) => call.method === "prepare").length, 1);
+		assert.equal(calls.at(-1)?.method, "transaction");
+	});
 });

@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { highlightDocsCode } from "~/lib/docs-highlight";
 import {
 	SiteFooter,
 	SiteHeader,
@@ -15,8 +17,62 @@ export const secondaryButton =
  * link colors and the narrow-screen layout, keyed on data-lr markers.
  */
 const landingCss = `
-[data-lr="root"] a { color: #1C1917; }
-[data-lr="root"] a:hover { color: #E8590C; }
+/* Reference palette belongs to this marketing surface, independently of editor themes. */
+[data-lr="landing-page"] {
+ --landing-bg: #F3F1ED; /* token-literal: supplied landing reference palette */
+ --landing-panel: #FFFFFF; /* token-literal: supplied landing reference palette */
+ --landing-panel-muted: #FAF9F7; /* token-literal: supplied landing reference palette */
+ --landing-border: #E2DCD3; /* token-literal: supplied landing reference palette */
+ --landing-divider: #EDEAE6; /* token-literal: supplied landing reference palette */
+ --landing-fg: #1C1917; /* token-literal: supplied landing reference palette */
+ --landing-muted: #44403C; /* token-literal: supplied landing reference palette */
+ --landing-subtle: #78716C; /* token-literal: supplied landing reference palette */
+ --landing-faint: #A8A29E; /* token-literal: supplied landing reference palette */
+ --landing-accent: #E8590C; /* token-literal: supplied landing reference palette */
+ --landing-success-bg: #E7F3EB; /* token-literal: supplied landing reference palette */
+ --landing-success-fg: #1F6B40; /* token-literal: supplied landing reference palette */
+ --landing-warning-bg: #FDEBD3; /* token-literal: supplied landing reference palette */
+ --landing-warning-fg: #B54708; /* token-literal: supplied landing reference palette */
+ --landing-code-bg: #1C1917; /* token-literal: supplied code reference palette */
+ --landing-code-header: #292524; /* token-literal: supplied code reference palette */
+ --landing-code-border: #3A3531; /* token-literal: supplied code reference palette */
+ --landing-code-text: #F3F1ED; /* token-literal: supplied code reference palette */
+ --landing-code-line: #57534E; /* token-literal: supplied code reference palette */
+ --landing-code-keyword: #93C5FD; /* token-literal: supplied syntax reference palette */
+ --landing-code-string: #A8D8B9; /* token-literal: supplied syntax reference palette */
+ --landing-code-sql: #F97316; /* token-literal: supplied syntax reference palette */
+ --landing-code-highlight: rgba(249,115,22,.14); /* token-literal: supplied highlighted SQL row */
+ --landing-code-shadow: rgba(28,25,23,.16); /* token-literal: reference elevation outside editor theme */
+ --landing-pixel-a: #1C1917; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-w: #FFFFFF; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-l: #A8A29E; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-y: #F2C94C; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-d: #C99A2E; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-b: #E8B48A; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-n: #3B4A6B; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-r: #D9534F; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-g: #E7E5E4; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-e: #08B5D6; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-o: #E8590C; /* token-literal: pixel-art illustration palette */
+ --landing-pixel-c: #7FB3E6; /* token-literal: pixel-art illustration palette */
+ --landing-tint-1: #EEF4F9; /* token-literal: example card tint from the landing reference */
+ --landing-tint-2: #F1F0EC; /* token-literal: example card tint from the landing reference */
+ --landing-tint-3: #F1F5EE; /* token-literal: example card tint from the landing reference */
+ --landing-tint-4: #FDF0EA; /* token-literal: example card tint from the landing reference */
+ --landing-tint-5: #FFF1EA; /* token-literal: example card tint from the landing reference */
+ --landing-tint-6: #FFF4E8; /* token-literal: example card tint from the landing reference */
+}
+.landing-code code { font-family: inherit; font-weight: inherit; }
+.landing-code .tok-keyword { color: var(--landing-code-keyword); }
+.landing-code .tok-string, .landing-code .tok-string2 { color: var(--landing-code-string); }
+.landing-code .landing-sql .tok-keyword { color: var(--landing-code-sql); }
+.landing-code .landing-code-row { display:grid; grid-template-columns:26px minmax(0,1fr); gap:16px; min-height:1.8em; }
+.landing-code .landing-line-number { color:var(--landing-code-line); text-align:right; user-select:none; }
+.landing-code .landing-source-line { white-space:pre; }
+.landing-code .landing-code-row[data-emphasis="true"] { background:var(--landing-code-highlight); box-shadow:inset 2px 0 0 var(--landing-code-sql); }
+
+[data-lr="root"] a { color: var(--landing-fg); }
+[data-lr="root"] a:hover { color: var(--landing-accent); }
 @media (max-width: 860px) {
 	[data-lr="root"] { padding: 40px 20px 56px !important; gap: 56px !important; }
 	[data-lr="root"] h1 { font-size: 40px !important; }
@@ -83,11 +139,16 @@ function CompareMark({ value }: { value: boolean }) {
 			viewBox="0 0 22 22"
 			aria-label={value ? "Yes" : "No"}
 		>
-			<circle cx="11" cy="11" r="11" fill={value ? "#2F8F57" : "#E7E5E4"} />
+			<circle
+				cx="11"
+				cy="11"
+				r="11"
+				fill={value ? "var(--atelier-success)" : "var(--landing-divider)"}
+			/>
 			<path
 				d={value ? "M6.6 11.3 l3 3 l5.8 -6.3" : "M7.5 7.5 l7 7 M14.5 7.5 l-7 7"}
 				fill="none"
-				stroke={value ? "#FFFFFF" : "#78716C"}
+				stroke={value ? "var(--landing-panel)" : "var(--landing-subtle)"}
 				strokeWidth="2"
 				strokeLinecap="round"
 				strokeLinejoin="round"
@@ -101,8 +162,8 @@ function CompareTable() {
 		<div
 			data-lr="cmp"
 			style={{
-				background: "#FFFFFF",
-				border: "1px solid #E2DCD3",
+				background: "var(--landing-panel)",
+				border: "1px solid var(--landing-border)",
 				borderRadius: "14px",
 				overflow: "hidden",
 			}}
@@ -114,10 +175,10 @@ function CompareTable() {
 					gridTemplateColumns: compareGrid,
 					gap: "12px",
 					padding: "14px 20px",
-					background: "#FAF9F7",
+					background: "var(--landing-panel-muted)",
 					fontSize: "14.5px",
 					fontWeight: "600",
-					color: "#44403C",
+					color: "var(--landing-muted)",
 				}}
 			>
 				<span />
@@ -146,7 +207,7 @@ function CompareTable() {
 						gridTemplateColumns: compareGrid,
 						gap: "12px",
 						padding: "13px 20px",
-						borderTop: "1px solid #EDEAE6",
+						borderTop: "1px solid var(--landing-divider)",
 						fontSize: "15px",
 						alignItems: "center",
 					}}
@@ -186,18 +247,18 @@ type Example = {
 };
 
 const spritePalette: Record<string, string> = {
-	A: "#1C1917",
-	W: "#FFFFFF",
-	L: "#A8A29E",
-	Y: "#F2C94C",
-	D: "#C99A2E",
-	B: "#E8B48A",
-	N: "#3B4A6B",
-	R: "#D9534F",
-	G: "#E7E5E4",
-	E: "#08B5D6",
-	O: "#E8590C",
-	C: "#7FB3E6",
+	A: "var(--landing-pixel-a)",
+	W: "var(--landing-pixel-w)",
+	L: "var(--landing-pixel-l)",
+	Y: "var(--landing-pixel-y)",
+	D: "var(--landing-pixel-d)",
+	B: "var(--landing-pixel-b)",
+	N: "var(--landing-pixel-n)",
+	R: "var(--landing-pixel-r)",
+	G: "var(--landing-pixel-g)",
+	E: "var(--landing-pixel-e)",
+	O: "var(--landing-pixel-o)",
+	C: "var(--landing-pixel-c)",
 };
 
 // Each example needs data that lives on and changes over time. If an agent
@@ -206,7 +267,7 @@ const examples: Example[] = [
 	{
 		title: "Refund approvals",
 		body: "Ask an agent to build a refund panel on your orders table. It works on a branch until you merge.",
-		tint: "#FFF1EA",
+		tint: "var(--landing-tint-5)",
 		flow: [
 			{ kind: "table", label: "orders" },
 			{ kind: "app", label: "refund panel" },
@@ -226,15 +287,15 @@ const examples: Example[] = [
 			kind: "approvals",
 			branch: "refund-panel",
 			rows: [
-				["#4821 · €39", "Approve"],
-				["#4817 · €120", "Approve"],
+				["Order 4821 · €39", "Approve"],
+				["Order 4817 · €120", "Approve"],
 			],
 		},
 	},
 	{
 		title: "Feature requests",
 		body: "An agent reads support emails and keeps a table of who asked for what.",
-		tint: "#EEF4F9",
+		tint: "var(--landing-tint-1)",
 		flow: [
 			{ kind: "file", label: "support/*.md" },
 			{ kind: "table", label: "requests" },
@@ -263,7 +324,7 @@ const examples: Example[] = [
 	{
 		title: "Hiring pipeline",
 		body: "CVs stay PDFs. An agent screens each new one into a candidates table, and your team reviews it from any AI tool.",
-		tint: "#F1F5EE",
+		tint: "var(--landing-tint-3)",
 		flow: [
 			{ kind: "file", label: "cvs/*.pdf" },
 			{ kind: "table", label: "candidates" },
@@ -293,7 +354,7 @@ const examples: Example[] = [
 	{
 		title: "Read-later archive",
 		body: "Clip articles as Markdown files. An agent tags them and keeps your reading list.",
-		tint: "#FFF4E8",
+		tint: "var(--landing-tint-6)",
 		flow: [
 			{ kind: "file", label: "clips/*.md" },
 			{ kind: "table", label: "reading" },
@@ -323,7 +384,7 @@ const examples: Example[] = [
 	{
 		title: "Auto-updating wiki",
 		body: "After each release, an agent updates your wiki. Every edit shows up in a diff.",
-		tint: "#F1F0EC",
+		tint: "var(--landing-tint-2)",
 		flow: [
 			{ kind: "file", label: "CHANGELOG.md" },
 			{ kind: "file", label: "wiki/" },
@@ -351,7 +412,7 @@ const examples: Example[] = [
 	{
 		title: "Sharing skills",
 		body: "Write down how your team does a task, once. Every agent can read it.",
-		tint: "#FDF0EA",
+		tint: "var(--landing-tint-4)",
 		flow: [{ kind: "file", label: "skills/" }, { kind: "agents" }],
 		sprite: [
 			"...AAAA...",
@@ -427,8 +488,8 @@ function ExamplePillView({ pill }: { pill: ExamplePill }) {
 				display: "flex",
 				alignItems: "center",
 				gap: "5px",
-				background: "#FFFFFF",
-				border: "1px solid #E2DCD3",
+				background: "var(--landing-panel)",
+				border: "1px solid var(--landing-border)",
 				borderRadius: "99px",
 				padding: "2px 9px",
 				fontFamily: monoFont,
@@ -440,7 +501,7 @@ function ExamplePillView({ pill }: { pill: ExamplePill }) {
 				height="12"
 				viewBox="0 0 16 16"
 				fill="none"
-				stroke="#78716C"
+				stroke="var(--landing-subtle)"
 				strokeWidth="1.3"
 			>
 				{pill.kind === "table" ? (
@@ -463,8 +524,8 @@ function ExamplePillView({ pill }: { pill: ExamplePill }) {
 }
 
 const mockPanel = {
-	background: "#FFFFFF",
-	border: "1px solid #E2DCD3",
+	background: "var(--landing-panel)",
+	border: "1px solid var(--landing-border)",
 	borderRadius: "9px",
 	fontSize: "12px",
 	overflow: "hidden",
@@ -486,11 +547,11 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 							padding: "6px 9px",
 							fontFamily: monoFont,
 							fontSize: "11px",
-							color: "#C2410C",
-							background: "#FFF7F2",
+							color: "var(--landing-warning-fg)",
+							background: "var(--landing-warning-bg)",
 							display: "flex",
 							alignItems: "center",
-							borderBottom: "1px solid #EDEAE6",
+							borderBottom: "1px solid var(--landing-divider)",
 						}}
 					>
 						<svg
@@ -518,7 +579,7 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 								justifyContent: "space-between",
 								gap: "6px",
 								padding: "6px 9px",
-								borderTop: "1px solid #EDEAE6",
+								borderTop: "1px solid var(--landing-divider)",
 							}}
 						>
 							<span style={ellipsis}>{order}</span>
@@ -526,8 +587,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 								style={{
 									fontSize: "11px",
 									fontWeight: "600",
-									color: "#FFFFFF",
-									background: "#2F8F57",
+									color: "var(--landing-panel)",
+									background: "var(--atelier-success)",
 									borderRadius: "6px",
 									padding: "2px 7px",
 								}}
@@ -564,11 +625,13 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 								style={{
 									height: "8px",
 									borderRadius: "4px",
-									background: "#7FB3E6",
+									background: "var(--landing-pixel-c)",
 									width: `${(count / max) * 100}%`,
 								}}
 							/>
-							<span style={{ color: "#78716C", textAlign: "right" }}>
+							<span
+								style={{ color: "var(--landing-subtle)", textAlign: "right" }}
+							>
 								{count}
 							</span>
 						</div>
@@ -593,7 +656,7 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 							<div
 								style={{
 									fontSize: "10.5px",
-									color: "#78716C",
+									color: "var(--landing-subtle)",
 									marginBottom: "5px",
 									...ellipsis,
 								}}
@@ -607,8 +670,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 										style={{
 											fontSize: "10px",
 											fontWeight: "700",
-											background: "#E3EEDC",
-											color: "#3E6B2E",
+											background: "var(--landing-success-bg)",
+											color: "var(--landing-success-fg)",
 											borderRadius: "5px",
 											padding: "2px 4px",
 										}}
@@ -632,7 +695,7 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 								alignItems: "center",
 								gap: "6px",
 								padding: "6px 9px",
-								borderTop: index ? "1px solid #EDEAE6" : "none",
+								borderTop: index ? "1px solid var(--landing-divider)" : "none",
 							}}
 						>
 							<span
@@ -641,7 +704,7 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 									height: "6px",
 									borderRadius: "3px",
 									flexShrink: "0",
-									background: unread ? "#E8590C" : "transparent",
+									background: unread ? "var(--landing-accent)" : "transparent",
 								}}
 							/>
 							<span style={{ ...ellipsis, flex: "1" }}>{title}</span>
@@ -649,8 +712,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 								style={{
 									fontFamily: monoFont,
 									fontSize: "10.5px",
-									color: "#78716C",
-									background: "#F3F1ED",
+									color: "var(--landing-subtle)",
+									background: "var(--landing-bg)",
 									borderRadius: "4px",
 									padding: "1px 5px",
 								}}
@@ -667,8 +730,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 					<div
 						style={{
 							padding: "6px 9px",
-							borderBottom: "1px solid #EDEAE6",
-							color: "#78716C",
+							borderBottom: "1px solid var(--landing-divider)",
+							color: "var(--landing-subtle)",
 							...ellipsis,
 						}}
 					>
@@ -677,8 +740,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 					<div
 						style={{
 							padding: "5px 9px",
-							background: "#FDECEC",
-							color: "#B42318",
+							background: "var(--atelier-diff-removed-subtle)",
+							color: "var(--atelier-diff-removed)",
 							...ellipsis,
 						}}
 					>
@@ -687,8 +750,8 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 					<div
 						style={{
 							padding: "5px 9px",
-							background: "#E8F5EC",
-							color: "#1F7A43",
+							background: "var(--atelier-diff-added-subtle)",
+							color: "var(--atelier-diff-added)",
 							...ellipsis,
 						}}
 					>
@@ -704,7 +767,7 @@ function ExampleMockView({ mock }: { mock: ExampleMock }) {
 							key={file}
 							style={{
 								padding: "6px 9px",
-								borderTop: index ? "1px solid #EDEAE6" : "none",
+								borderTop: index ? "1px solid var(--landing-divider)" : "none",
 								...ellipsis,
 							}}
 						>
@@ -730,8 +793,8 @@ function ExampleCards() {
 				<div
 					key={example.title}
 					style={{
-						background: "#FFFFFF",
-						border: "1px solid #E2DCD3",
+						background: "var(--landing-panel)",
+						border: "1px solid var(--landing-border)",
 						borderRadius: "16px",
 						overflow: "hidden",
 						display: "flex",
@@ -758,7 +821,7 @@ function ExampleCards() {
 							}}
 						>
 							<ExamplePillView pill={example.flow[0]} />
-							<span style={{ color: "#A8A29E" }}>{"→"}</span>
+							<span style={{ color: "var(--landing-faint)" }}>{"→"}</span>
 							<ExamplePillView pill={example.flow[1]} />
 						</div>
 						<div
@@ -781,7 +844,7 @@ function ExampleCards() {
 							display: "flex",
 							flexDirection: "column",
 							gap: "5px",
-							borderTop: "1px solid #EDEAE6",
+							borderTop: "1px solid var(--landing-divider)",
 							flex: "1",
 						}}
 					>
@@ -790,7 +853,7 @@ function ExampleCards() {
 							style={{
 								fontSize: "14px",
 								lineHeight: "1.5",
-								color: "#57534E",
+								color: "var(--landing-muted)",
 								textWrap: "pretty",
 							}}
 						>
@@ -806,22 +869,48 @@ function ExampleCards() {
 export function LandingPage() {
 	const { user, repositoryTo } = useRepositoryCta();
 	const ctaLabel = user ? "Open LixRay" : "Create a repository";
+	const [installCopied, setInstallCopied] = useState(false);
+	const copyInstall = async () => {
+		await navigator.clipboard.writeText("npm install @lix-js/sdk");
+		setInstallCopied(true);
+		window.setTimeout(() => setInstallCopied(false), 1500);
+	};
+	const sdkExample = [
+		'import { openLix } from "@lix-js/sdk";',
+		"",
+		"const lix = await openLix({",
+		"  server: { url, headers },",
+		"});",
+		"",
+		"const rows = await lix.execute(`",
+		"  SELECT name, city, plan",
+		"  FROM customers",
+		"  ORDER BY name",
+		"`);",
+	];
 
 	return (
-		<div style={{ minHeight: "100vh", background: "#F3F1ED" }}>
+		<div
+			data-lr="landing-page"
+			style={{
+				minHeight: "100vh",
+				colorScheme: "light",
+				background: "var(--landing-bg)",
+			}}
+		>
 			<style>{landingCss}</style>
 			<SiteHeader />
 			<main>
 				<div
 					data-lr="root"
 					style={{
-						background: "#F3F1ED",
+						background: "var(--landing-bg)",
 						maxWidth: "1040px",
 						margin: "0 auto",
 						boxSizing: "border-box",
 						fontFamily:
 							"-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-						color: "#1C1917",
+						color: "var(--landing-fg)",
 						padding: "80px 64px 72px",
 						display: "flex",
 						flexDirection: "column",
@@ -841,14 +930,14 @@ export function LandingPage() {
 								textWrap: "balance",
 							}}
 						>
-							{"Shared repository for every AI agent you use."}
+							{"Shared repository for you and every AI agent you use."}
 						</h1>
 						<p
 							style={{
 								margin: "0",
 								fontSize: "19px",
 								lineHeight: "1.6",
-								color: "#44403C",
+								color: "var(--landing-muted)",
 								textWrap: "pretty",
 								maxWidth: "680px",
 							}}
@@ -857,17 +946,22 @@ export function LandingPage() {
 								"Files and SQL tables under version control, in one open-source repo. Claude, ChatGPT, Codex, and your scripts read and write the same data."
 							}
 						</p>
-						<div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
+						<div
+							style={{
+								display: "flex",
+								flexWrap: "wrap",
+								alignItems: "center",
+								gap: "20px",
+							}}
+						>
 							<a
 								href={repositoryTo}
 								style={{
 									fontSize: "17px",
 									fontWeight: "700",
-									color: "#FFFFFF",
-									background:
-										"linear-gradient(180deg, #F97316 0%, #E8590C 100%)",
-									boxShadow:
-										"0 8px 20px rgba(232,89,12,.3), inset 0 1px 0 rgba(255,255,255,.25)",
+									color: "var(--landing-panel)",
+									background: "var(--atelier-accent-gradient)",
+									boxShadow: "var(--atelier-shadow-accent)",
 									textDecoration: "none",
 									padding: "14px 24px",
 									borderRadius: "10px",
@@ -879,18 +973,30 @@ export function LandingPage() {
 								href="https://github.com/opral/lix"
 								target="_blank"
 								rel="noreferrer"
-								style={{ fontSize: "16px", fontWeight: "600" }}
+								style={{
+									display: "inline-flex",
+									alignItems: "center",
+									gap: "8px",
+									fontSize: "16px",
+									fontWeight: "600",
+								}}
 							>
+								<img
+									src="/landing/brand-github.svg"
+									alt=""
+									style={{ width: "18px", height: "18px", flexShrink: 0 }}
+								/>
 								{"View on GitHub"}
 							</a>
 						</div>
 					</div>
 					<div
 						style={{
-							background: "#FFFFFF",
-							border: "1px solid #E2DCD3",
+							background: "var(--landing-panel)",
+							border: "1px solid var(--landing-border)",
 							borderRadius: "16px",
-							boxShadow: "0 12px 32px rgba(28,25,23,0.07)",
+							boxShadow:
+								"0 12px 32px color-mix(in srgb, var(--landing-fg) 7%, transparent)",
 							overflow: "hidden",
 						}}
 					>
@@ -900,8 +1006,8 @@ export function LandingPage() {
 								alignItems: "center",
 								gap: "8px",
 								padding: "12px 16px",
-								background: "#FAF9F7",
-								borderBottom: "1px solid #EDEAE6",
+								background: "var(--landing-panel-muted)",
+								borderBottom: "1px solid var(--landing-divider)",
 							}}
 						>
 							<span
@@ -909,7 +1015,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--landing-border)",
 								}}
 							></span>
 							<span
@@ -917,7 +1023,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--landing-border)",
 								}}
 							></span>
 							<span
@@ -925,7 +1031,7 @@ export function LandingPage() {
 									width: "11px",
 									height: "11px",
 									borderRadius: "50%",
-									background: "#E2DCD3",
+									background: "var(--landing-border)",
 									marginRight: "8px",
 								}}
 							></span>
@@ -933,7 +1039,7 @@ export function LandingPage() {
 								style={{
 									fontFamily: "ui-monospace, Menlo, monospace",
 									fontSize: "13.5px",
-									color: "#78716C",
+									color: "var(--landing-subtle)",
 								}}
 							>
 								{"lixray.com"}
@@ -949,7 +1055,7 @@ export function LandingPage() {
 							<div
 								style={{
 									padding: "16px 10px",
-									borderRight: "1px solid #EDEAE6",
+									borderRight: "1px solid var(--landing-divider)",
 									display: "flex",
 									flexDirection: "column",
 									gap: "2px",
@@ -980,7 +1086,7 @@ export function LandingPage() {
 										gap: "10px",
 										padding: "7px 10px",
 										borderRadius: "8px",
-										background: "#F3F1ED",
+										background: "var(--landing-bg)",
 										fontWeight: "600",
 									}}
 								>
@@ -989,7 +1095,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#1C1917"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="1.5" width="5" height="5" rx="1" />
@@ -1005,7 +1111,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -1013,7 +1119,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 										strokeLinejoin="round"
 									>
@@ -1027,7 +1133,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -1035,7 +1141,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 									>
 										<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -1049,7 +1155,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#44403C",
+										color: "var(--landing-muted)",
 									}}
 								>
 									<svg
@@ -1057,7 +1163,7 @@ export function LandingPage() {
 										height="16"
 										viewBox="0 0 16 16"
 										fill="none"
-										stroke="#78716C"
+										stroke="var(--landing-subtle)"
 										strokeWidth="1.3"
 										strokeLinecap="round"
 									>
@@ -1071,7 +1177,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "#78716C",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									{"SOURCES"}
@@ -1080,8 +1186,8 @@ export function LandingPage() {
 											marginLeft: "8px",
 											padding: "1px 7px",
 											borderRadius: "99px",
-											background: "#FFF4EC",
-											color: "#C2410C",
+											background: "var(--atelier-accent-subtle)",
+											color: "var(--landing-accent)",
 											fontSize: "10.5px",
 											letterSpacing: "0.04em",
 										}}
@@ -1098,9 +1204,18 @@ export function LandingPage() {
 									}}
 								>
 									<svg width="16" height="16" viewBox="0 0 16 16">
-										<path d="M5.5 1.5h5l4.5 8h-5z" fill="#FBBC04" />
-										<path d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z" fill="#0F9D58" />
-										<path d="M3.5 13.8h9.5l2-4.3H5.8z" fill="#4285F4" />
+										<path
+											d="M5.5 1.5h5l4.5 8h-5z"
+											fill="#FBBC04" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+											fill="#0F9D58" /* token-literal: Google Drive brand mark */
+										/>
+										<path
+											d="M3.5 13.8h9.5l2-4.3H5.8z"
+											fill="#4285F4" /* token-literal: Google Drive brand mark */
+										/>
 									</svg>
 									{"Google Drive"}
 								</span>
@@ -1119,14 +1234,14 @@ export function LandingPage() {
 											width="13"
 											height="13"
 											rx="2.5"
-											fill="#FFFFFF"
-											stroke="#1C1917"
+											fill="var(--landing-panel)"
+											stroke="var(--landing-fg)"
 											strokeWidth="1.3"
 										/>
 										<path
 											d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 											fill="none"
-											stroke="#1C1917"
+											stroke="var(--landing-fg)"
 											strokeWidth="1.4"
 											strokeLinejoin="round"
 										/>
@@ -1139,7 +1254,7 @@ export function LandingPage() {
 										alignItems: "center",
 										gap: "10px",
 										padding: "7px 10px",
-										color: "#78716C",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									<span
@@ -1160,7 +1275,7 @@ export function LandingPage() {
 										fontSize: "12px",
 										fontWeight: "700",
 										letterSpacing: "0.1em",
-										color: "#78716C",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									{"AGENTS"}
@@ -1223,8 +1338,8 @@ export function LandingPage() {
 									</span>
 									<span
 										style={{
-											background: "#1C1917",
-											color: "#FFFFFF",
+											background: "var(--landing-fg)",
+											color: "var(--landing-panel)",
 											fontSize: "14px",
 											fontWeight: "600",
 											padding: "8px 16px",
@@ -1239,9 +1354,9 @@ export function LandingPage() {
 										display: "flex",
 										justifyContent: "space-between",
 										padding: "8px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 										fontSize: "13.5px",
-										color: "#78716C",
+										color: "var(--landing-subtle)",
 									}}
 								>
 									<span>{"Name"}</span>
@@ -1253,7 +1368,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -1268,7 +1383,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -1283,12 +1398,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"Claude"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -1297,7 +1407,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -1312,7 +1422,7 @@ export function LandingPage() {
 											height="20"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.1"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -1327,12 +1437,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/brand-openai.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"ChatGPT"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -1341,7 +1446,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -1365,12 +1470,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"Claude"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -1379,7 +1479,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -1403,12 +1503,7 @@ export function LandingPage() {
 											gap: "7px",
 										}}
 									>
-										<img
-											src="/landing/brand-openai.svg"
-											alt=""
-											style={{ width: "15px", height: "15px" }}
-										/>
-										{"ChatGPT"}
+										{"You"}
 									</span>
 								</div>
 								<div
@@ -1417,7 +1512,7 @@ export function LandingPage() {
 										justifyContent: "space-between",
 										alignItems: "center",
 										padding: "7px 0",
-										borderBottom: "1px solid #EDEAE6",
+										borderBottom: "1px solid var(--landing-divider)",
 									}}
 								>
 									<span
@@ -1434,7 +1529,7 @@ export function LandingPage() {
 												width="11"
 												height="14"
 												rx="1.6"
-												fill="#21A366"
+												fill="#21A366" /* token-literal: Excel brand mark */
 											/>
 											<rect
 												x="1"
@@ -1442,18 +1537,18 @@ export function LandingPage() {
 												width="9"
 												height="8"
 												rx="1.3"
-												fill="#107C41"
+												fill="#107C41" /* token-literal: Excel brand mark */
 											/>
 											<path
 												d="M3.3 6 l4 4 M7.3 6 l-4 4"
-												stroke="#FFFFFF"
+												stroke="var(--landing-panel)"
 												strokeWidth="1.2"
 												strokeLinecap="round"
 											/>
 										</svg>
 										{"budget.xlsx"}
 									</span>
-									<span style={{ color: "#44403C" }}>{"You"}</span>
+									<span style={{ color: "var(--landing-muted)" }}>{"You"}</span>
 								</div>
 								<div
 									style={{
@@ -1477,14 +1572,14 @@ export function LandingPage() {
 										/>
 										{"pitch-deck.pdf"}
 									</span>
-									<span style={{ color: "#44403C" }}>{"You"}</span>
+									<span style={{ color: "var(--landing-muted)" }}>{"You"}</span>
 								</div>
 								<div
 									style={{
 										marginTop: "6px",
-										border: "1px solid #E2DCD3",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "14px",
-										background: "#FAF9F7",
+										background: "var(--landing-panel-muted)",
 										padding: "14px 16px",
 										display: "flex",
 										alignItems: "center",
@@ -1500,13 +1595,8 @@ export function LandingPage() {
 											fontSize: "14.5px",
 										}}
 									>
-										<img
-											src="/landing/claude-spark.svg"
-											alt=""
-											style={{ width: "16px", height: "16px" }}
-										/>
 										<span>
-											<b>{"Claude"}</b>
+											<b>{"You"}</b>
 											{" changed 1 row in customers"}
 										</span>
 									</span>
@@ -1514,7 +1604,7 @@ export function LandingPage() {
 										style={{
 											flex: "1",
 											minWidth: "150px",
-											background: "#FFFFFF",
+											background: "var(--landing-panel)",
 											borderRadius: "8px",
 											padding: "6px 12px",
 											fontFamily: "ui-monospace, Menlo, monospace",
@@ -1525,9 +1615,9 @@ export function LandingPage() {
 											style={{
 												display: "flex",
 												gap: "40px",
-												color: "#78716C",
+												color: "var(--landing-subtle)",
 												paddingBottom: "4px",
-												borderBottom: "1px solid #EDEAE6",
+												borderBottom: "1px solid var(--landing-divider)",
 											}}
 										>
 											<span style={{ width: "50px" }}>{"name"}</span>
@@ -1544,8 +1634,8 @@ export function LandingPage() {
 											<span>
 												<span
 													style={{
-														background: "#FDECEC",
-														color: "#B42318",
+														background: "var(--atelier-danger-subtle)",
+														color: "var(--atelier-danger)",
 														textDecoration: "line-through",
 														padding: "0 4px",
 														borderRadius: "3px",
@@ -1555,8 +1645,8 @@ export function LandingPage() {
 												</span>{" "}
 												<span
 													style={{
-														background: "#E7F3EB",
-														color: "#1F6B40",
+														background: "var(--landing-success-bg)",
+														color: "var(--landing-success-fg)",
 														padding: "0 4px",
 														borderRadius: "3px",
 													}}
@@ -1569,8 +1659,8 @@ export function LandingPage() {
 									<span style={{ display: "flex", gap: "8px" }}>
 										<span
 											style={{
-												background: "#1C1917",
-												color: "#FFFFFF",
+												background: "var(--landing-fg)",
+												color: "var(--landing-panel)",
 												fontSize: "14px",
 												fontWeight: "600",
 												padding: "8px 16px",
@@ -1581,8 +1671,8 @@ export function LandingPage() {
 										</span>
 										<span
 											style={{
-												border: "1px solid #E2DCD3",
-												background: "#FFFFFF",
+												border: "1px solid var(--landing-border)",
+												background: "var(--landing-panel)",
 												fontSize: "14px",
 												padding: "8px 16px",
 												borderRadius: "8px",
@@ -1649,7 +1739,9 @@ export function LandingPage() {
 										flexShrink: "0",
 									}}
 								/>
-								<span style={{ fontSize: "14px", color: "#78716C" }}>
+								<span
+									style={{ fontSize: "14px", color: "var(--landing-subtle)" }}
+								>
 									{"and more"}
 								</span>
 							</span>
@@ -1658,7 +1750,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1680,7 +1772,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1692,7 +1784,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1714,7 +1806,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1727,7 +1819,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1747,7 +1839,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1762,7 +1854,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1784,7 +1876,7 @@ export function LandingPage() {
 								height="24"
 								viewBox="0 0 20 20"
 								fill="none"
-								stroke="#1C1917"
+								stroke="var(--landing-fg)"
 								strokeWidth="1.6"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -1796,11 +1888,11 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
-								{"Self-host it, or embed Lix in your product."}
+								{"Self-host the Lix server, or embed Lix in your product."}
 							</span>
 						</div>
 						<div
@@ -1820,9 +1912,18 @@ export function LandingPage() {
 								}}
 							>
 								<svg width="22" height="22" viewBox="0 0 16 16">
-									<path d="M5.5 1.5h5l4.5 8h-5z" fill="#FBBC04" />
-									<path d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z" fill="#0F9D58" />
-									<path d="M3.5 13.8h9.5l2-4.3H5.8z" fill="#4285F4" />
+									<path
+										d="M5.5 1.5h5l4.5 8h-5z"
+										fill="#FBBC04" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M5.5 1.5L1 9.5l2.5 4.3L8 5.8z"
+										fill="#0F9D58" /* token-literal: Google Drive brand mark */
+									/>
+									<path
+										d="M3.5 13.8h9.5l2-4.3H5.8z"
+										fill="#4285F4" /* token-literal: Google Drive brand mark */
+									/>
 								</svg>
 								<svg width="22" height="22" viewBox="0 0 16 16">
 									<rect
@@ -1831,14 +1932,14 @@ export function LandingPage() {
 										width="13"
 										height="13"
 										rx="2.5"
-										fill="#FFFFFF"
-										stroke="#1C1917"
+										fill="var(--landing-panel)"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.3"
 									/>
 									<path
 										d="M5.2 11.5 V4.6 l5.8 6.9 V4.5"
 										fill="none"
-										stroke="#1C1917"
+										stroke="var(--landing-fg)"
 										strokeWidth="1.4"
 										strokeLinejoin="round"
 									/>
@@ -1853,7 +1954,12 @@ export function LandingPage() {
 										flexShrink: "0",
 									}}
 								/>
-								<span style={{ fontSize: "14px", color: "#78716C" }}>
+								<span
+									style={{
+										fontSize: "14px",
+										color: "var(--landing-subtle)",
+									}}
+								>
 									{"and more"}
 								</span>
 							</span>
@@ -1870,8 +1976,8 @@ export function LandingPage() {
 									style={{
 										fontSize: "11.5px",
 										fontWeight: "700",
-										color: "#B54708",
-										background: "#FDEBD3",
+										color: "var(--landing-warning-fg)",
+										background: "var(--landing-warning-bg)",
 										padding: "2px 8px",
 										borderRadius: "99px",
 									}}
@@ -1883,7 +1989,7 @@ export function LandingPage() {
 								style={{
 									fontSize: "15px",
 									lineHeight: "1.55",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 								}}
 							>
@@ -1899,7 +2005,7 @@ export function LandingPage() {
 							flexDirection: "column",
 							gap: "20px",
 							paddingTop: "56px",
-							borderTop: "1px solid #D6CFC6",
+							borderTop: "1px solid var(--atelier-border-strong)",
 						}}
 					>
 						<h3
@@ -1917,7 +2023,7 @@ export function LandingPage() {
 								margin: "0",
 								fontSize: "18px",
 								lineHeight: "1.65",
-								color: "#44403C",
+								color: "var(--landing-muted)",
 								maxWidth: "680px",
 								textWrap: "pretty",
 							}}
@@ -1934,7 +2040,7 @@ export function LandingPage() {
 							flexDirection: "column",
 							gap: "28px",
 							paddingTop: "56px",
-							borderTop: "1px solid #D6CFC6",
+							borderTop: "1px solid var(--atelier-border-strong)",
 						}}
 					>
 						<div
@@ -1944,6 +2050,7 @@ export function LandingPage() {
 								style={{
 									margin: "0",
 									fontSize: "34px",
+									lineHeight: "1.2",
 									fontWeight: "700",
 									letterSpacing: "-0.02em",
 								}}
@@ -1955,7 +2062,7 @@ export function LandingPage() {
 									margin: "0",
 									fontSize: "18px",
 									lineHeight: "1.65",
-									color: "#44403C",
+									color: "var(--landing-muted)",
 									textWrap: "pretty",
 									maxWidth: "740px",
 								}}
@@ -1977,19 +2084,19 @@ export function LandingPage() {
 									>
 										<path
 											d="M14.7618 5.74842L16.9208 9.85984L22.3675 0.358398H25.7133L19.0723 11.6284L22.5712 17.5085H19.2407L16.9208 13.443L14.6393 17.5085H11.2705L14.7618 11.6284L11.393 5.74842H14.7618Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M6.16211 17.5081V5.74805H9.42368V17.5081H6.16211Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M3.52112 0.393555V17.6416H0.287109V0.393555H3.52112Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 										<path
 											d="M6.21582 0.393555H14.8399V3.08856H6.21582V0.393555Z"
-											fill="#08B5D6"
+											fill="#08B5D6" /* token-literal: Lix brand mark */
 										/>
 									</svg>
 									<svg
@@ -1997,7 +2104,7 @@ export function LandingPage() {
 										height="11"
 										viewBox="0 0 12 12"
 										fill="none"
-										stroke="#08B5D6"
+										stroke="#08B5D6" /* token-literal: Lix brand mark */
 										strokeWidth="1.6"
 										strokeLinecap="round"
 										strokeLinejoin="round"
@@ -2020,17 +2127,17 @@ export function LandingPage() {
 							data-lr="hack"
 							style={{
 								display: "grid",
-								gridTemplateColumns: "minmax(0,1.25fr) 44px minmax(0,1fr)",
+								gridTemplateColumns: "minmax(0,1.44fr) 44px minmax(0,1fr)",
 								gap: "14px",
 								alignItems: "center",
 							}}
 						>
 							<div
 								style={{
-									background: "#1C1917",
+									background: "var(--landing-code-bg)",
 									borderRadius: "14px",
 									overflow: "hidden",
-									boxShadow: "0 16px 36px rgba(28,25,23,0.16)",
+									boxShadow: "0 16px 36px var(--landing-code-shadow)",
 								}}
 							>
 								<div
@@ -2039,241 +2146,93 @@ export function LandingPage() {
 										alignItems: "center",
 										justifyContent: "space-between",
 										gap: "12px",
+										flexWrap: "wrap",
 										padding: "14px 20px",
-										background: "#292524",
-										borderBottom: "1px solid #3A3531",
+										background: "var(--landing-code-header)",
+										borderBottom: "1px solid var(--landing-code-border)",
 									}}
 								>
 									<span
 										style={{
 											fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
 											fontSize: "16px",
-											color: "#F3F1ED",
+											lineHeight: "1.2",
+											color: "var(--landing-code-text)",
 										}}
 									>
-										<span style={{ color: "#8A8178" }}>{"$ "}</span>
+										<span style={{ color: "var(--landing-subtle)" }}>
+											{"$ "}
+										</span>
 										{"npm install @lix-js/sdk"}
 									</span>
-									<span
+									<button
+										type="button"
+										aria-label="Copy installation command"
+										onClick={() => void copyInstall()}
 										style={{
 											fontSize: "13px",
+											lineHeight: "1.2",
+											border: 0,
+											cursor: "pointer",
 											fontWeight: "600",
-											color: "#1C1917",
-											background: "#F3F1ED",
+											color: "var(--landing-code-bg)",
+											background: "var(--landing-bg)",
 											padding: "5px 12px",
 											borderRadius: "7px",
 										}}
 									>
-										{"Copy"}
-									</span>
+										{installCopied ? "Copied" : "Copy"}
+									</button>
 								</div>
-								<div
+								<pre
+									className="landing-code"
+									aria-label="Authenticated Lix SDK example"
 									style={{
+										margin: 0,
 										padding: "18px 20px 20px 8px",
+										overflowX: "auto",
 										fontFamily: "ui-monospace, 'SF Mono', Menlo, monospace",
 										fontSize: "14px",
 										lineHeight: "1.8",
-										color: "#F3F1ED",
+										color: "var(--landing-code-text)",
 									}}
 								>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"1"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"import"}</span>
-											{" { openLix } "}
-											<span style={{ color: "#93C5FD" }}>{"from"}</span>{" "}
-											<span style={{ color: "#A8D8B9" }}>
-												{'"@lix-js/sdk"'}
-											</span>
-											{";"}
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"2"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}></span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"3"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"const"}</span>
-											{" lix = "}
-											<span style={{ color: "#93C5FD" }}>{"await"}</span>
-											{" openLix({"}
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"4"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												{"server: "}
-												<span style={{ color: "#A8D8B9" }}>
-													{'"https://lixray.com/acme/home"'}
+									<code>
+										{sdkExample.map((line, index) => (
+											<span
+												key={index}
+												className={`landing-code-row${index >= 7 && index <= 9 ? " landing-sql" : ""}`}
+												data-emphasis={index === 8 ? "true" : undefined}
+											>
+												<span
+													className="landing-line-number"
+													aria-hidden="true"
+												>
+													{index + 1}
 												</span>
-												{","}
+												<span
+													className="landing-source-line"
+													dangerouslySetInnerHTML={{
+														__html:
+															index === 10
+																? '<span class="tok-string">`</span>);'
+																: highlightDocsCode(
+																		line,
+																		index >= 7 && index <= 9 ? "sql" : "js",
+																	),
+													}}
+												/>
 											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"5"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>{"});"}</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"6"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}></span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"7"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#93C5FD" }}>{"const"}</span>
-											{" rows = "}
-											<span style={{ color: "#93C5FD" }}>{"await"}</span>
-											{" lix.execute("}
-											<span style={{ color: "#A8D8B9" }}>{"`"}</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"8"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"SELECT"}</span>
-												{" name, city, plan"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-											background: "rgba(249,115,22,0.14)",
-											boxShadow: "inset 2px 0 0 #F97316",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"9"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"FROM"}</span>
-												{" customers"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"10"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ paddingLeft: "2ch" }}>
-												<span style={{ color: "#F97316" }}>{"ORDER BY"}</span>
-												{" name"}
-											</span>
-										</span>
-									</div>
-									<div
-										style={{
-											display: "grid",
-											gridTemplateColumns: "26px minmax(0,1fr)",
-											gap: "16px",
-											minHeight: "1.8em",
-										}}
-									>
-										<span style={{ color: "#57534E", textAlign: "right" }}>
-											{"11"}
-										</span>
-										<span style={{ whiteSpace: "nowrap" }}>
-											<span style={{ color: "#A8D8B9" }}>{"`"}</span>
-											{");"}
-										</span>
-									</div>
-								</div>
+										))}
+									</code>
+								</pre>
 							</div>
 							<svg
 								width="44"
 								height="24"
 								viewBox="0 0 44 24"
 								fill="none"
-								stroke="#E8590C"
+								stroke="var(--landing-code-sql)"
 								strokeWidth="2"
 								strokeLinecap="round"
 								strokeLinejoin="round"
@@ -2290,11 +2249,12 @@ export function LandingPage() {
 							>
 								<div
 									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
+										background: "var(--landing-panel)",
+										border: "1px solid var(--landing-border)",
 										borderRadius: "14px",
 										overflow: "hidden",
-										boxShadow: "0 12px 28px rgba(28,25,23,0.06)",
+										boxShadow:
+											"0 12px 28px color-mix(in srgb, var(--landing-fg) 6%, transparent)",
 									}}
 								>
 									<div
@@ -2303,8 +2263,8 @@ export function LandingPage() {
 											alignItems: "center",
 											gap: "8px",
 											padding: "10px 14px",
-											background: "#FAF9F7",
-											borderBottom: "1px solid #EDEAE6",
+											background: "var(--landing-panel-muted)",
+											borderBottom: "1px solid var(--landing-divider)",
 										}}
 									>
 										<span
@@ -2312,7 +2272,7 @@ export function LandingPage() {
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--landing-border)",
 											}}
 										></span>
 										<span
@@ -2320,7 +2280,7 @@ export function LandingPage() {
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--landing-border)",
 											}}
 										></span>
 										<span
@@ -2328,15 +2288,16 @@ export function LandingPage() {
 												width: "9px",
 												height: "9px",
 												borderRadius: "50%",
-												background: "#E2DCD3",
+												background: "var(--landing-border)",
 												marginRight: "6px",
 											}}
 										></span>
 										<span
 											style={{
 												fontFamily: "ui-monospace, Menlo, monospace",
+												lineHeight: "14px",
 												fontSize: "12.5px",
-												color: "#78716C",
+												color: "var(--landing-subtle)",
 											}}
 										>
 											{"lixray.com/acme/home"}
@@ -2349,6 +2310,7 @@ export function LandingPage() {
 											gap: "9px",
 											padding: "14px 16px 10px",
 											fontSize: "17px",
+											lineHeight: "1.2",
 											fontWeight: "700",
 										}}
 									>
@@ -2357,7 +2319,7 @@ export function LandingPage() {
 											height="16"
 											viewBox="0 0 16 16"
 											fill="none"
-											stroke="#78716C"
+											stroke="var(--landing-subtle)"
 											strokeWidth="1.3"
 										>
 											<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
@@ -2371,9 +2333,10 @@ export function LandingPage() {
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "8px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "12.5px",
-											color: "#8A8178",
+											lineHeight: "14.5px",
+											color: "var(--landing-subtle)",
 										}}
 									>
 										<span>{"name"}</span>
@@ -2386,20 +2349,24 @@ export function LandingPage() {
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Acme"}</span>
-										<span style={{ color: "#57534E" }}>{"Hamburg"}</span>
+										<span style={{ color: "var(--landing-muted)" }}>
+											{"Hamburg"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#E7F3EB",
-												color: "#1F6B40",
+												background: "var(--landing-success-bg)",
+												color: "var(--landing-success-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -2412,20 +2379,24 @@ export function LandingPage() {
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Bluebird Caf\u00e9"}</span>
-										<span style={{ color: "#57534E" }}>{"Lisbon"}</span>
+										<span style={{ color: "var(--landing-muted)" }}>
+											{"Lisbon"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#FDEBD3",
-												color: "#B54708",
+												background: "var(--landing-warning-bg)",
+												color: "var(--landing-warning-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -2438,20 +2409,24 @@ export function LandingPage() {
 											gridTemplateColumns: "minmax(0,1.3fr) minmax(0,1fr) 60px",
 											gap: "10px",
 											padding: "10px 16px",
-											borderTop: "1px solid #EDEAE6",
+											borderTop: "1px solid var(--landing-divider)",
 											fontSize: "14px",
+											lineHeight: "16.5px",
 											alignItems: "center",
 										}}
 									>
 										<span>{"Northwind"}</span>
-										<span style={{ color: "#57534E" }}>{"Berlin"}</span>
+										<span style={{ color: "var(--landing-muted)" }}>
+											{"Berlin"}
+										</span>
 										<span
 											style={{
 												justifySelf: "start",
-												background: "#E7F3EB",
-												color: "#1F6B40",
+												background: "var(--landing-success-bg)",
+												color: "var(--landing-success-fg)",
 												padding: "1px 10px",
 												borderRadius: "99px",
+												lineHeight: "14.5px",
 												fontSize: "12.5px",
 											}}
 										>
@@ -2461,6 +2436,18 @@ export function LandingPage() {
 								</div>
 							</div>
 						</div>
+						<p
+							data-lr="sdk-connection-note"
+							style={{
+								margin: "-12px 0 0",
+								fontSize: "12px",
+								lineHeight: "1.5",
+								color: "var(--landing-subtle)",
+							}}
+						>
+							Set <code>url</code> and <code>headers</code> using your{" "}
+							<a href="/docs/access-tokens">repository connection settings</a>.
+						</p>
 						<div
 							style={{
 								display: "flex",
@@ -2475,7 +2462,7 @@ export function LandingPage() {
 									fontSize: "13px",
 									fontWeight: "700",
 									letterSpacing: "0.1em",
-									color: "#78716C",
+									color: "var(--landing-subtle)",
 								}}
 							>
 								{"EXAMPLES"}

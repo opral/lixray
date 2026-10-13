@@ -260,3 +260,17 @@ void test("recognizes client route cancellation without hiding other failures", 
 		false,
 	);
 });
+
+void test("captures exact merge publications for bounded storage-error classification", () => {
+	const url = "http://127.0.0.1:8790/lix/v1/repository/sync/merge";
+	assert.equal(isSyncPublicationProtocolRequest("POST", url), true);
+	assert.equal(isSyncPublicationProtocolRequest("GET", url), false);
+	assert.equal(
+		isSyncPublicationProtocolRequest("POST", `${url}?retry=1`),
+		false,
+	);
+	assert.equal(
+		isSyncPublicationProtocolRequest("POST", `${url}#fragment`),
+		false,
+	);
+});

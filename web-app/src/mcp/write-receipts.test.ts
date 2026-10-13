@@ -1,7 +1,28 @@
+import { executeBatch } from "../lib/execute-batch.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { Lix } from "@lix-js/sdk";
 import { openMemoryWasmBinding } from "../../../vendor/lix/packages/js-sdk/dist/binding.node-wasm.js";
+
+void test("a failed batch rolls back every preceding statement", async () => {
+	const lix = new Lix(await openMemoryWasmBinding());
+	try {
+		await assert.rejects(
+			executeBatch(lix, [
+				{
+					sql: "INSERT INTO lix_file (path, content) VALUES ('/rollback.md', CAST('A' AS BYTEA))",
+				},
+				{ sql: "SELECT * FROM missing_batch_table" },
+			]),
+		);
+		const result = await lix.query(
+			"SELECT id FROM lix_file WHERE path = '/rollback.md'",
+		);
+		assert.equal(result.length, 0);
+	} finally {
+		await lix.close();
+	}
+});
 
 void test("a write's receipt names a span, and the span says what changed", async () => {
 	const lix = new Lix(await openMemoryWasmBinding());
@@ -77,7 +98,7 @@ void test("a real atomic batch has statement images and one receipt for its net 
 		await lix.execute(
 			"INSERT INTO lix_file (path, content) VALUES ('/notes.md', CAST('A' AS BYTEA))",
 		);
-		const batch = await lix.executeBatch([
+		const batch = await executeBatch(lix, [
 			{
 				sql: "UPDATE lix_file SET content = CAST('B' AS BYTEA) WHERE path = '/notes.md' RETURNING OLD.content AS before, NEW.content AS after",
 			},

@@ -1,3 +1,4 @@
+import { json } from "@lix-js/sdk";
 import assert from "node:assert/strict";
 import { isDeepStrictEqual } from "node:util";
 import test from "node:test";
@@ -26,14 +27,16 @@ function adapter(lix: Lix | LixTransaction): TransactionClient {
 						? null
 						: v.kind === "blob"
 							? new Uint8Array(Buffer.from(v.base64, "base64"))
-							: (v.value as SqlParam),
+							: v.kind === "json"
+								? json(v.value as import("@lix-js/sdk").JsonValue)
+								: (v.value as SqlParam),
 				),
 			);
 			return {
 				columns: result.columns.map((c) => c.name),
 				rows: result.rows.map((row) =>
-					result.columns.map((c, index) => {
-						const value = Array.isArray(row) ? row[index] : row[c.name];
+					result.columns.map((c) => {
+						const value = row[c.name];
 						return (
 							value === null
 								? { kind: "null" }
@@ -214,7 +217,7 @@ for (const hasDescription of [true, false]) {
 				[
 					crypto.randomUUID(),
 					r.conversation_id!,
-					descriptionDocument("Reply").value,
+					json(descriptionDocument("Reply").value),
 				],
 			);
 			await update(lix, r.commit_id, {

@@ -239,31 +239,16 @@ export function withNativeFileWorkingScope(
 
 			if (
 				key === "execute" ||
-				key === "executeBatch" ||
 				key === "beginTransaction" ||
 				key === "transaction"
 			) {
 				return (...args: unknown[]) => {
 					const sql = typeof args[0] === "string" ? args[0] : undefined;
-					const readOnlyBatch =
-						key === "executeBatch" &&
-						Array.isArray(args[0]) &&
-						args[0].every(
-							(statement: unknown) =>
-								typeof statement === "object" &&
-								statement !== null &&
-								"sql" in statement &&
-								typeof statement.sql === "string" &&
-								isClearlyReadOnlySql(statement.sql),
-						);
 					const checkHead =
 						key === "execute"
 							? sql === undefined || !isClearlyReadOnlySql(sql)
-							: key === "executeBatch"
-								? !readOnlyBatch
-								: true;
+							: true;
 					const invalidate =
-						(key === "executeBatch" && !readOnlyBatch) ||
 						key === "transaction" ||
 						(sql !== undefined && invalidatesScopeForSql(sql));
 					if (!checkHead && !invalidate)

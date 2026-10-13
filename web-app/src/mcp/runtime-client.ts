@@ -1,3 +1,4 @@
+import { executeBatch } from "../lib/execute-batch.ts";
 import { unreachableValue } from "./wire-value.ts";
 import { context, trace, type SpanContext } from "@opentelemetry/api";
 import { withSpan, fetchLixWithTrace, failSpan } from "../telemetry.ts";
@@ -7,7 +8,6 @@ import {
 	type StatementResult as LixStatementResult,
 	type JsonValue,
 	type Lix,
-	type ResultArrayRow,
 	type ResultColumnType,
 	type SqlParam,
 	Value,
@@ -234,7 +234,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 					await session.lix.execute(
 						request.sql,
 						(request.params ?? []).map(decodeWireParam),
-						{ ...request.options, rowMode: "array" },
+						request.options,
 					),
 				);
 			});
@@ -269,12 +269,13 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 			const session = await this.session(lixId);
 			return await this.enqueueSession(session, async () => {
 				await this.ensureBranch(session, branchId);
-				const results = await session.lix.executeBatch(
+				const results = await executeBatch(
+					session.lix,
 					request.statements.map((statement) => ({
 						sql: statement.sql,
 						params: (statement.params ?? []).map(decodeWireParam),
 					})),
-					{ ...request.options, rowMode: "array" },
+					request.options,
 				);
 				try {
 					return {
@@ -323,7 +324,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 										await tx.execute(
 											request.sql,
 											(request.params ?? []).map(decodeWireParam),
-											{ ...request.options, rowMode: "array" },
+											request.options,
 										),
 									),
 							});
@@ -419,7 +420,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				const result = await session.lix.execute(
 					"SELECT commit_id FROM lix_undo()",
 					[],
-					{ rowMode: "object" },
+					{},
 				);
 				const value = result.rows[0]?.commit_id;
 				return { commitId: typeof value === "string" ? value : null };
@@ -437,7 +438,7 @@ export class WorkerLixRuntimeClient implements LixRuntimeClient {
 				const result = await session.lix.execute(
 					"SELECT commit_id FROM lix_redo()",
 					[],
-					{ rowMode: "object" },
+					{},
 				);
 				const value = result.rows[0]?.commit_id;
 				return { commitId: typeof value === "string" ? value : null };
@@ -678,20 +679,16 @@ function decodeWireParam(
 	}
 }
 
-function encodeExecuteResult(
-	result: LixExecuteResult<ResultArrayRow>,
-): ExecuteResponse {
+function encodeExecuteResult(result: LixExecuteResult): ExecuteResponse {
 	return { ...encodeStatementResult(result), commit: result.commit ?? null };
 }
 
-function encodeStatementResult(
-	result: LixStatementResult<ResultArrayRow>,
-): StatementResponse {
+function encodeStatementResult(result: LixStatementResult): StatementResponse {
 	return {
 		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column, index) =>
-				encodeLixValue(column.type, row[index]),
+			result.columns.map((column) =>
+				encodeLixValue(column.type, row[column.name]),
 			),
 		),
 		rowsAffected: result.rowsAffected,

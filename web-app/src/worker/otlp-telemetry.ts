@@ -570,6 +570,15 @@ async function repositoryPerformanceEvent(
 	copyOpenEnum(properties, fields, "terminal_phase", REPOSITORY_OPEN_PHASES);
 	copyOpenEnum(properties, fields, "longest_phase", REPOSITORY_OPEN_PHASES);
 	for (const scope of ["local", "authority"] as const) {
+		for (const field of ["from_format", "to_format"] as const)
+			copyOpenNumber(
+				properties,
+				fields,
+				`native.${scope}.${field}`,
+				`native_${scope}_${field}`,
+				1_000_000,
+				true,
+			);
 		for (const phase of [
 			"inspecting",
 			"migrating",
