@@ -25,7 +25,6 @@ const landingCss = `
 	[data-lr="mock"] > :first-child { display: none !important; }
 	[data-lr="hooks"] { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
 	[data-lr="hooks"] > * { grid-column: auto !important; }
-	[data-lr="hooks"] > :last-child { grid-column: 1 / -1 !important; }
 	[data-lr="hack"] { grid-template-columns: minmax(0, 1fr) !important; }
 	[data-lr="hack"] > :nth-child(2) { justify-self: center; transform: rotate(90deg); }
 	[data-lr="hack"] > :first-child { overflow-x: auto !important; }
@@ -36,37 +35,39 @@ const landingCss = `
 }
 `;
 
-type CompareCell = true | false | string;
-
 const compareColumns = [
 	"Notion",
-	"Google Drive",
 	"ChatGPT / Claude Projects",
-	"git + SQLite",
+	"GitHub",
+	"Obsidian",
 ];
 
 // Cells are claims about other products. Keep them conservative.
-const compareRows: { label: string; cells: CompareCell[] }[] = [
-	{ label: "Open source", cells: [false, false, false, true] },
+// The first cell of each row is LixRay.
+const compareRows: { label: string; cells: boolean[] }[] = [
 	{
-		label: "Files in any format",
-		cells: ["Attachments", true, "Uploads", true],
+		label: "Open source, self-hostable",
+		cells: [true, false, false, false, false],
 	},
 	{
-		label: "Tables you can query with SQL",
-		cells: ["API, no SQL", "Sheets, no SQL", false, true],
+		label: "Works with ChatGPT, Claude, and Codex",
+		cells: [true, true, false, true, true],
 	},
 	{
-		label: "Version control for files and rows",
-		cells: ["Page history", "File versions", false, "Files, not rows"],
+		label: "Plain files: Markdown, CSV, PDF",
+		cells: [true, false, true, true, true],
 	},
 	{
-		label: "Same data for every agent",
-		cells: ["MCP + API", "Via connectors", "One vendor", "Local files"],
+		label: "Database tables",
+		cells: [true, true, false, false, false],
+	},
+	{
+		label: "Version control",
+		cells: [true, false, false, true, false],
 	},
 ];
 
-const compareGrid = "minmax(0,1.6fr) repeat(5, minmax(0,1fr))";
+const compareGrid = "minmax(0,1.4fr) repeat(5, minmax(0,1fr))";
 const compareCell = {
 	display: "flex",
 	alignItems: "center",
@@ -74,33 +75,25 @@ const compareCell = {
 	textAlign: "center",
 } as const;
 
-function CompareMark({ value }: { value: CompareCell }) {
-	if (value === true) {
-		return (
-			<svg width="18" height="18" viewBox="0 0 22 22" aria-label="Yes">
-				<circle cx="11" cy="11" r="11" fill="#2F8F57" />
-				<path
-					d="M6.6 11.3 l3 3 l5.8 -6.3"
-					fill="none"
-					stroke="#FFFFFF"
-					strokeWidth="2"
-					strokeLinecap="round"
-					strokeLinejoin="round"
-				/>
-			</svg>
-		);
-	}
-	if (value === false) {
-		return (
-			<span
-				aria-label="No"
-				style={{ color: "#A8A29E", fontSize: "18px", lineHeight: "1" }}
-			>
-				{"\u2013"}
-			</span>
-		);
-	}
-	return <span style={{ fontSize: "13.5px", color: "#78716C" }}>{value}</span>;
+function CompareMark({ value }: { value: boolean }) {
+	return (
+		<svg
+			width="18"
+			height="18"
+			viewBox="0 0 22 22"
+			aria-label={value ? "Yes" : "No"}
+		>
+			<circle cx="11" cy="11" r="11" fill={value ? "#2F8F57" : "#E7E5E4"} />
+			<path
+				d={value ? "M6.6 11.3 l3 3 l5.8 -6.3" : "M7.5 7.5 l7 7 M14.5 7.5 l-7 7"}
+				fill="none"
+				stroke={value ? "#FFFFFF" : "#78716C"}
+				strokeWidth="2"
+				strokeLinecap="round"
+				strokeLinejoin="round"
+			/>
+		</svg>
+	);
 }
 
 function CompareTable() {
@@ -159,14 +152,651 @@ function CompareTable() {
 					}}
 				>
 					<span>{row.label}</span>
-					<span style={compareCell}>
-						<CompareMark value />
-					</span>
 					{row.cells.map((cell, index) => (
-						<span key={compareColumns[index]} style={compareCell}>
+						<span key={index} style={compareCell}>
 							<CompareMark value={cell} />
 						</span>
 					))}
+				</div>
+			))}
+		</div>
+	);
+}
+
+type ExamplePill =
+	| { kind: "table" | "file" | "app"; label: string }
+	| { kind: "agents" };
+
+type ExampleMock =
+	| { kind: "approvals"; branch: string; rows: [string, string][] }
+	| { kind: "bars"; rows: [string, number][] }
+	| { kind: "board"; columns: [string, string[]][] }
+	| { kind: "reading"; rows: [string, string, boolean][] }
+	| { kind: "diff"; file: string; removed: string; added: string }
+	| { kind: "files"; files: string[] };
+
+type Example = {
+	title: string;
+	body: string;
+	tint: string;
+	flow: [ExamplePill, ExamplePill];
+	// Pixel art, one character per 6px pixel. "." is transparent.
+	sprite: string[];
+	mock: ExampleMock;
+};
+
+const spritePalette: Record<string, string> = {
+	A: "#1C1917",
+	W: "#FFFFFF",
+	L: "#A8A29E",
+	Y: "#F2C94C",
+	D: "#C99A2E",
+	B: "#E8B48A",
+	N: "#3B4A6B",
+	R: "#D9534F",
+	G: "#E7E5E4",
+	E: "#08B5D6",
+	O: "#E8590C",
+	C: "#7FB3E6",
+};
+
+// Each example needs data that lives on and changes over time. If an agent
+// could do it alone in one chat, it doesn't belong here.
+const examples: Example[] = [
+	{
+		title: "Refund approvals",
+		body: "Ask an agent to build a refund panel on your orders table. It works on a branch until you merge.",
+		tint: "#FFF1EA",
+		flow: [
+			{ kind: "table", label: "orders" },
+			{ kind: "app", label: "refund panel" },
+		],
+		sprite: [
+			"AAAAAAAAAA",
+			"ACCCCCCCCA",
+			"AAAAAAAAAA",
+			"AAAAAAAAAA",
+			"ACCCCCCCCA",
+			"ACYYCCCCCA",
+			"ACYYCCWWCA",
+			"ACCCCCCCCA",
+			"AAAAAAAAAA",
+		],
+		mock: {
+			kind: "approvals",
+			branch: "refund-panel",
+			rows: [
+				["#4821 · €39", "Approve"],
+				["#4817 · €120", "Approve"],
+			],
+		},
+	},
+	{
+		title: "Feature requests",
+		body: "An agent reads support emails and keeps a table of who asked for what.",
+		tint: "#EEF4F9",
+		flow: [
+			{ kind: "file", label: "support/*.md" },
+			{ kind: "table", label: "requests" },
+		],
+		sprite: [
+			"........RR",
+			"........RR",
+			"AAAAAAAAAA",
+			"AAWWWWWWAA",
+			"AWAWWWWAWA",
+			"AWWAWWAWWA",
+			"AWWWAAWWWA",
+			"AWWWWWWWWA",
+			"AWWWWWWWWA",
+			"AAAAAAAAAA",
+		],
+		mock: {
+			kind: "bars",
+			rows: [
+				["CSV export", 4],
+				["Dark mode", 2],
+				["SSO", 1],
+			],
+		},
+	},
+	{
+		title: "Hiring pipeline",
+		body: "CVs stay PDFs. An agent screens each new one into a candidates table, and your team reviews it from any AI tool.",
+		tint: "#F1F5EE",
+		flow: [
+			{ kind: "file", label: "cvs/*.pdf" },
+			{ kind: "table", label: "candidates" },
+		],
+		sprite: [
+			"...AAAA...",
+			"..AAAAAA..",
+			"..ABBBBA..",
+			"..ABBBBA..",
+			"...ABBA...",
+			"..AAWWAA..",
+			".ANNWRWNA.",
+			".ANNNRNNA.",
+			".ANNNRNNA.",
+			".ANNNNNNA.",
+			".AAAAAAAA.",
+		],
+		mock: {
+			kind: "board",
+			columns: [
+				["Screen", ["JW", "AT", "KO"]],
+				["Call", ["ML"]],
+				["Offer", []],
+			],
+		},
+	},
+	{
+		title: "Read-later archive",
+		body: "Clip articles as Markdown files. An agent tags them and keeps your reading list.",
+		tint: "#FFF4E8",
+		flow: [
+			{ kind: "file", label: "clips/*.md" },
+			{ kind: "table", label: "reading" },
+		],
+		sprite: [
+			".AAAA.AAAA.",
+			"AWWWWAWWWWA",
+			"AWLLWAWLLWA",
+			"AWWWWAWWWWA",
+			"AWLLWAWLLWA",
+			"AWWWWAWWWWA",
+			"AWLLWAWLLWA",
+			"AWWWWAWWWWA",
+			".AAAAAAAAA.",
+			"........R..",
+			"........R..",
+		],
+		mock: {
+			kind: "reading",
+			rows: [
+				["Local-first software", "sync", true],
+				["SQLite in production", "db", false],
+				["Designing data apps", "db", true],
+			],
+		},
+	},
+	{
+		title: "Auto-updating wiki",
+		body: "After each release, an agent updates your wiki. Every edit shows up in a diff.",
+		tint: "#F1F0EC",
+		flow: [
+			{ kind: "file", label: "CHANGELOG.md" },
+			{ kind: "file", label: "wiki/" },
+		],
+		sprite: [
+			"....Y.....",
+			"....A.....",
+			".AAAAAAA..",
+			".AGGGGGA..",
+			".AGEGEGA..",
+			".AGGGGGA..",
+			".AAAAAAA..",
+			"..AOOOA...",
+			".AOOOOOA..",
+			".AOOOOOA..",
+			"..A...A...",
+		],
+		mock: {
+			kind: "diff",
+			file: "wiki/exports.md",
+			removed: "Runs every night.",
+			added: "Runs every hour.",
+		},
+	},
+	{
+		title: "Sharing skills",
+		body: "Write down how your team does a task, once. Every agent can read it.",
+		tint: "#FDF0EA",
+		flow: [{ kind: "file", label: "skills/" }, { kind: "agents" }],
+		sprite: [
+			"...AAAA...",
+			"...A..A...",
+			"AAAAAAAAAA",
+			"ARRRRRRRRA",
+			"ARRRRRRRRA",
+			"AAAAYYAAAA",
+			"ARRRRRRRRA",
+			"ARRRRRRRRA",
+			"AAAAAAAAAA",
+		],
+		mock: {
+			kind: "files",
+			files: ["refund-policy.md", "release-notes.md", "hiring-rubric.md"],
+		},
+	},
+];
+
+const monoFont = "ui-monospace, Menlo, monospace";
+
+function Sprite({ rows }: { rows: string[] }) {
+	const width = Math.max(...rows.map((row) => row.length)) * 6;
+	return (
+		<svg
+			width={width}
+			height={rows.length * 6}
+			viewBox={`0 0 ${width} ${rows.length * 6}`}
+			shapeRendering="crispEdges"
+			aria-hidden="true"
+			style={{ display: "block", flexShrink: "0" }}
+		>
+			{rows.flatMap((row, y) =>
+				[...row].map((pixel, x) =>
+					pixel === "." ? null : (
+						<rect
+							key={`${x}-${y}`}
+							x={x * 6}
+							y={y * 6}
+							width="6"
+							height="6"
+							fill={spritePalette[pixel]}
+						/>
+					),
+				),
+			)}
+		</svg>
+	);
+}
+
+function ExamplePillView({ pill }: { pill: ExamplePill }) {
+	if (pill.kind === "agents") {
+		return (
+			<span style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+				{[
+					"/landing/claude-spark.svg",
+					"/landing/brand-openai.svg",
+					"/landing/codex-icon.svg",
+				].map((src) => (
+					<img
+						key={src}
+						src={src}
+						alt=""
+						style={{ width: "18px", height: "18px", display: "block" }}
+					/>
+				))}
+			</span>
+		);
+	}
+	return (
+		<span
+			style={{
+				display: "flex",
+				alignItems: "center",
+				gap: "5px",
+				background: "#FFFFFF",
+				border: "1px solid #E2DCD3",
+				borderRadius: "99px",
+				padding: "2px 9px",
+				fontFamily: monoFont,
+				fontSize: "12px",
+			}}
+		>
+			<svg
+				width="12"
+				height="12"
+				viewBox="0 0 16 16"
+				fill="none"
+				stroke="#78716C"
+				strokeWidth="1.3"
+			>
+				{pill.kind === "table" ? (
+					<>
+						<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+						<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
+					</>
+				) : pill.kind === "file" ? (
+					<path d="M4 1.5 h5 l3.5 3.5 v9.5 h-8.5 z M9 1.5 v3.5 h3.5" />
+				) : (
+					<>
+						<rect x="1.5" y="2.5" width="13" height="11" rx="1.8" />
+						<path d="M1.5 5.5 h13" />
+					</>
+				)}
+			</svg>
+			{pill.label}
+		</span>
+	);
+}
+
+const mockPanel = {
+	background: "#FFFFFF",
+	border: "1px solid #E2DCD3",
+	borderRadius: "9px",
+	fontSize: "12px",
+	overflow: "hidden",
+} as const;
+
+const ellipsis = {
+	overflow: "hidden",
+	textOverflow: "ellipsis",
+	whiteSpace: "nowrap",
+} as const;
+
+function ExampleMockView({ mock }: { mock: ExampleMock }) {
+	switch (mock.kind) {
+		case "approvals":
+			return (
+				<div style={mockPanel}>
+					<div
+						style={{
+							padding: "6px 9px",
+							fontFamily: monoFont,
+							fontSize: "11px",
+							color: "#C2410C",
+							background: "#FFF7F2",
+							display: "flex",
+							alignItems: "center",
+							borderBottom: "1px solid #EDEAE6",
+						}}
+					>
+						<svg
+							width="10"
+							height="10"
+							viewBox="0 0 16 16"
+							fill="none"
+							stroke="currentColor"
+							strokeWidth="1.6"
+							style={{ marginRight: "5px", flexShrink: "0" }}
+						>
+							<circle cx="4" cy="3.5" r="1.8" />
+							<circle cx="4" cy="12.5" r="1.8" />
+							<circle cx="12" cy="5.5" r="1.8" />
+							<path d="M4 5.3 v5.4 M12 7.3 c0 3 -8 2 -8 3.4" />
+						</svg>
+						{mock.branch}
+					</div>
+					{mock.rows.map(([order, action]) => (
+						<div
+							key={order}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								justifyContent: "space-between",
+								gap: "6px",
+								padding: "6px 9px",
+								borderTop: "1px solid #EDEAE6",
+							}}
+						>
+							<span style={ellipsis}>{order}</span>
+							<span
+								style={{
+									fontSize: "11px",
+									fontWeight: "600",
+									color: "#FFFFFF",
+									background: "#2F8F57",
+									borderRadius: "6px",
+									padding: "2px 7px",
+								}}
+							>
+								{action}
+							</span>
+						</div>
+					))}
+				</div>
+			);
+		case "bars": {
+			const max = Math.max(...mock.rows.map(([, count]) => count));
+			return (
+				<div
+					style={{
+						...mockPanel,
+						padding: "8px 9px",
+						display: "grid",
+						gap: "7px",
+					}}
+				>
+					{mock.rows.map(([label, count]) => (
+						<div
+							key={label}
+							style={{
+								display: "grid",
+								gridTemplateColumns: "72px minmax(0,1fr) 12px",
+								gap: "7px",
+								alignItems: "center",
+							}}
+						>
+							<span style={ellipsis}>{label}</span>
+							<span
+								style={{
+									height: "8px",
+									borderRadius: "4px",
+									background: "#7FB3E6",
+									width: `${(count / max) * 100}%`,
+								}}
+							/>
+							<span style={{ color: "#78716C", textAlign: "right" }}>
+								{count}
+							</span>
+						</div>
+					))}
+				</div>
+			);
+		}
+		case "board":
+			return (
+				<div
+					style={{
+						display: "grid",
+						gridTemplateColumns: `repeat(${mock.columns.length}, minmax(0,1fr))`,
+						gap: "5px",
+					}}
+				>
+					{mock.columns.map(([column, people]) => (
+						<div
+							key={column}
+							style={{ ...mockPanel, padding: "6px", minHeight: "74px" }}
+						>
+							<div
+								style={{
+									fontSize: "10.5px",
+									color: "#78716C",
+									marginBottom: "5px",
+									...ellipsis,
+								}}
+							>
+								{column}
+							</div>
+							<div style={{ display: "flex", flexWrap: "wrap", gap: "3px" }}>
+								{people.map((initials) => (
+									<span
+										key={initials}
+										style={{
+											fontSize: "10px",
+											fontWeight: "700",
+											background: "#E3EEDC",
+											color: "#3E6B2E",
+											borderRadius: "5px",
+											padding: "2px 4px",
+										}}
+									>
+										{initials}
+									</span>
+								))}
+							</div>
+						</div>
+					))}
+				</div>
+			);
+		case "reading":
+			return (
+				<div style={mockPanel}>
+					{mock.rows.map(([title, tag, unread], index) => (
+						<div
+							key={title}
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "6px",
+								padding: "6px 9px",
+								borderTop: index ? "1px solid #EDEAE6" : "none",
+							}}
+						>
+							<span
+								style={{
+									width: "6px",
+									height: "6px",
+									borderRadius: "3px",
+									flexShrink: "0",
+									background: unread ? "#E8590C" : "transparent",
+								}}
+							/>
+							<span style={{ ...ellipsis, flex: "1" }}>{title}</span>
+							<span
+								style={{
+									fontFamily: monoFont,
+									fontSize: "10.5px",
+									color: "#78716C",
+									background: "#F3F1ED",
+									borderRadius: "4px",
+									padding: "1px 5px",
+								}}
+							>
+								{tag}
+							</span>
+						</div>
+					))}
+				</div>
+			);
+		case "diff":
+			return (
+				<div style={{ ...mockPanel, fontFamily: monoFont, fontSize: "11.5px" }}>
+					<div
+						style={{
+							padding: "6px 9px",
+							borderBottom: "1px solid #EDEAE6",
+							color: "#78716C",
+							...ellipsis,
+						}}
+					>
+						{mock.file}
+					</div>
+					<div
+						style={{
+							padding: "5px 9px",
+							background: "#FDECEC",
+							color: "#B42318",
+							...ellipsis,
+						}}
+					>
+						{"- " + mock.removed}
+					</div>
+					<div
+						style={{
+							padding: "5px 9px",
+							background: "#E8F5EC",
+							color: "#1F7A43",
+							...ellipsis,
+						}}
+					>
+						{"+ " + mock.added}
+					</div>
+				</div>
+			);
+		case "files":
+			return (
+				<div style={{ ...mockPanel, fontFamily: monoFont, fontSize: "11.5px" }}>
+					{mock.files.map((file, index) => (
+						<div
+							key={file}
+							style={{
+								padding: "6px 9px",
+								borderTop: index ? "1px solid #EDEAE6" : "none",
+								...ellipsis,
+							}}
+						>
+							{file}
+						</div>
+					))}
+				</div>
+			);
+	}
+}
+
+function ExampleCards() {
+	return (
+		<div
+			data-lr="cases"
+			style={{
+				display: "grid",
+				gridTemplateColumns: "repeat(3, minmax(0,1fr))",
+				gap: "16px",
+			}}
+		>
+			{examples.map((example) => (
+				<div
+					key={example.title}
+					style={{
+						background: "#FFFFFF",
+						border: "1px solid #E2DCD3",
+						borderRadius: "16px",
+						overflow: "hidden",
+						display: "flex",
+						flexDirection: "column",
+					}}
+				>
+					<div
+						style={{
+							background: example.tint,
+							padding: "16px 16px 18px",
+							display: "flex",
+							flexDirection: "column",
+							gap: "14px",
+							height: "190px",
+							boxSizing: "border-box",
+						}}
+					>
+						<div
+							style={{
+								display: "flex",
+								alignItems: "center",
+								gap: "7px",
+								flexWrap: "wrap",
+							}}
+						>
+							<ExamplePillView pill={example.flow[0]} />
+							<span style={{ color: "#A8A29E" }}>{"→"}</span>
+							<ExamplePillView pill={example.flow[1]} />
+						</div>
+						<div
+							style={{
+								flex: "1",
+								display: "flex",
+								alignItems: "flex-end",
+								gap: "14px",
+							}}
+						>
+							<Sprite rows={example.sprite} />
+							<div style={{ flex: "1", minWidth: "0" }}>
+								<ExampleMockView mock={example.mock} />
+							</div>
+						</div>
+					</div>
+					<div
+						style={{
+							padding: "14px 16px 16px",
+							display: "flex",
+							flexDirection: "column",
+							gap: "5px",
+							borderTop: "1px solid #EDEAE6",
+							flex: "1",
+						}}
+					>
+						<b style={{ fontSize: "16px" }}>{example.title}</b>
+						<span
+							style={{
+								fontSize: "14px",
+								lineHeight: "1.5",
+								color: "#57534E",
+								textWrap: "pretty",
+							}}
+						>
+							{example.body}
+						</span>
+					</div>
 				</div>
 			))}
 		</div>
@@ -224,7 +854,7 @@ export function LandingPage() {
 							}}
 						>
 							{
-								"Files and SQL tables in one open-source repo. Claude, ChatGPT, Codex, and your scripts read and write the same data."
+								"Files and SQL tables under version control, in one open-source repo. Claude, ChatGPT, Codex, and your scripts read and write the same data."
 							}
 						</p>
 						<div style={{ display: "flex", alignItems: "center", gap: "20px" }}>
@@ -981,19 +1611,49 @@ export function LandingPage() {
 								gap: "8px",
 							}}
 						>
-							<svg
-								width="24"
-								height="24"
-								viewBox="0 0 20 20"
-								fill="none"
-								stroke="#1C1917"
-								strokeWidth="1.6"
-								strokeLinecap="round"
-								strokeLinejoin="round"
+							<span
+								style={{
+									display: "flex",
+									alignItems: "center",
+									gap: "10px",
+									height: "24px",
+								}}
 							>
-								<path d="M7 6 L3 10 L7 14 M13 6 L17 10 L13 14" />
-							</svg>
-							<b style={{ fontSize: "17px" }}>{"Open source"}</b>
+								<img
+									src="/landing/claude-spark.svg"
+									alt="Claude"
+									style={{
+										width: "22px",
+										height: "22px",
+										display: "block",
+										flexShrink: "0",
+									}}
+								/>
+								<img
+									src="/landing/brand-openai.svg"
+									alt="ChatGPT"
+									style={{
+										width: "22px",
+										height: "22px",
+										display: "block",
+										flexShrink: "0",
+									}}
+								/>
+								<img
+									src="/landing/codex-icon.svg"
+									alt="Codex"
+									style={{
+										width: "22px",
+										height: "22px",
+										display: "block",
+										flexShrink: "0",
+									}}
+								/>
+								<span style={{ fontSize: "14px", color: "#78716C" }}>
+									{"and more"}
+								</span>
+							</span>
+							<b style={{ fontSize: "17px" }}>{"Every agent"}</b>
 							<span
 								style={{
 									fontSize: "15px",
@@ -1002,7 +1662,9 @@ export function LandingPage() {
 									textWrap: "pretty",
 								}}
 							>
-								{"Self-host it, or embed Lix in your product."}
+								{
+									"Claude, ChatGPT, Codex, and any MCP client connect. Your scripts use the same SQL."
+								}
 							</span>
 						</div>
 						<div
@@ -1034,7 +1696,9 @@ export function LandingPage() {
 									textWrap: "pretty",
 								}}
 							>
-								{"Store any file as is. Markdown and CSV diff row by row."}
+								{
+									"Markdown, CSV, PDFs, and spreadsheets stay files. Any agent can read them."
+								}
 							</span>
 						</div>
 						<div
@@ -1067,9 +1731,7 @@ export function LandingPage() {
 									textWrap: "pretty",
 								}}
 							>
-								{
-									"Store customers, orders, or any other rows. Query them with SQL."
-								}
+								{"Customers, orders, runs. Agents query them with SQL."}
 							</span>
 						</div>
 						<div
@@ -1104,12 +1766,46 @@ export function LandingPage() {
 									textWrap: "pretty",
 								}}
 							>
-								{"Branch, diff, and roll back files and rows."}
+								{
+									"Branch, diff, and roll back files and rows. Markdown and CSV diff row by row."
+								}
 							</span>
 						</div>
 						<div
 							style={{
-								gridColumn: "span 4",
+								gridColumn: "span 2",
+								display: "flex",
+								flexDirection: "column",
+								gap: "8px",
+							}}
+						>
+							<svg
+								width="24"
+								height="24"
+								viewBox="0 0 20 20"
+								fill="none"
+								stroke="#1C1917"
+								strokeWidth="1.6"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<path d="M7 6 L3 10 L7 14 M13 6 L17 10 L13 14" />
+							</svg>
+							<b style={{ fontSize: "17px" }}>{"Open source"}</b>
+							<span
+								style={{
+									fontSize: "15px",
+									lineHeight: "1.55",
+									color: "#44403C",
+									textWrap: "pretty",
+								}}
+							>
+								{"Self-host it, or embed Lix in your product."}
+							</span>
+						</div>
+						<div
+							style={{
+								gridColumn: "span 2",
 								display: "flex",
 								flexDirection: "column",
 								gap: "8px",
@@ -1192,10 +1888,45 @@ export function LandingPage() {
 								}}
 							>
 								{
-									"Mount Drive, Notion, and Granola in the repo. Agents then work from one place."
+									"Mount Drive, Notion, and Granola. Agents work from one place."
 								}
 							</span>
 						</div>
+					</div>
+					<div
+						style={{
+							display: "flex",
+							flexDirection: "column",
+							gap: "20px",
+							paddingTop: "56px",
+							borderTop: "1px solid #D6CFC6",
+						}}
+					>
+						<h3
+							style={{
+								margin: "0",
+								fontSize: "34px",
+								fontWeight: "700",
+								letterSpacing: "-0.02em",
+							}}
+						>
+							{"Why not Notion or GitHub?"}
+						</h3>
+						<p
+							style={{
+								margin: "0",
+								fontSize: "18px",
+								lineHeight: "1.65",
+								color: "#44403C",
+								maxWidth: "680px",
+								textWrap: "pretty",
+							}}
+						>
+							{
+								"Each covers part of it. LixRay is the only one that is open source and keeps files, database tables, and version control in one repo every agent can use."
+							}
+						</p>
+						<CompareTable />
 					</div>
 					<div
 						style={{
@@ -1217,7 +1948,7 @@ export function LandingPage() {
 									letterSpacing: "-0.02em",
 								}}
 							>
-								{"Hackable"}
+								{"Your agents can build on it"}
 							</h3>
 							<p
 								style={{
@@ -1229,7 +1960,9 @@ export function LandingPage() {
 									maxWidth: "740px",
 								}}
 							>
-								{"LixRay is built on "}
+								{
+									"Ask an agent to build a dashboard, an app, or a workflow on your files and tables. It works on a branch, so it can try anything. Merge what works and throw away the rest. LixRay is built on "
+								}
 								<a
 									href="https://lix.dev"
 									aria-label="Lix"
@@ -1259,9 +1992,27 @@ export function LandingPage() {
 											fill="#08B5D6"
 										/>
 									</svg>
+									<svg
+										width="11"
+										height="11"
+										viewBox="0 0 12 12"
+										fill="none"
+										stroke="#08B5D6"
+										strokeWidth="1.6"
+										strokeLinecap="round"
+										strokeLinejoin="round"
+										aria-hidden="true"
+										style={{
+											display: "inline-block",
+											marginLeft: "2px",
+											verticalAlign: "4px",
+										}}
+									>
+										<path d="M3.5 8.5 L8.5 3.5 M4.5 3.5 H8.5 V7.5" />
+									</svg>
 								</a>
 								{
-									", an open-source engine for files, tables, and version control. You query it with SQL. Agents and your own code use the same API."
+									", an open-source engine with one SQL API for agents and your own code."
 								}
 							</p>
 						</div>
@@ -1390,7 +2141,7 @@ export function LandingPage() {
 										</span>
 										<span style={{ whiteSpace: "nowrap" }}>
 											<span style={{ paddingLeft: "2ch" }}>
-												{"url: "}
+												{"server: "}
 												<span style={{ color: "#A8D8B9" }}>
 													{'"https://lixray.com/acme/home"'}
 												</span>
@@ -1729,2884 +2480,8 @@ export function LandingPage() {
 							>
 								{"EXAMPLES"}
 							</span>
-							<div
-								data-lr="cases"
-								style={{
-									display: "grid",
-									gridTemplateColumns: "repeat(3, minmax(0,1fr))",
-									gap: "16px",
-								}}
-							>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#FFF1EA",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "7px",
-												flexWrap: "wrap",
-											}}
-										>
-											<span style={{ display: "flex", gap: "4px" }}>
-												<svg width="24" height="24" viewBox="0 0 28 28">
-													<rect width="28" height="28" rx="7" fill="#FC4C02" />
-													<path
-														d="M11.5 6 L6.5 16 h3.2 l1.8 -3.6 l1.8 3.6 h3.2 z"
-														fill="#FFFFFF"
-													/>
-													<path
-														d="M16.5 16 l-1.6 3.2 l-1.6 -3.2 h-2 l3.6 7 l3.6 -7 z"
-														fill="#FFC4A8"
-													/>
-												</svg>
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#78716C"
-													strokeWidth="1.3"
-												>
-													<rect
-														x="1.5"
-														y="2.5"
-														width="13"
-														height="11"
-														rx="1.8"
-													/>
-													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
-												</svg>
-												{"runs"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												gap: "14px",
-											}}
-										>
-											<svg
-												width="72"
-												height="66"
-												viewBox="0 0 72 66"
-												shapeRendering="crispEdges"
-												style={{ display: "block", flexShrink: "0" }}
-											>
-												<rect
-													x="24"
-													y="0"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="0"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="36"
-													y="0"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="24"
-													y="6"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="6"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="36"
-													y="6"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="12"
-													width="6"
-													height="6"
-													fill="#E8B48A"
-												/>
-												<rect
-													x="18"
-													y="18"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="24"
-													y="18"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="30"
-													y="18"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="36"
-													y="18"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="12"
-													y="24"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="24"
-													y="24"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="30"
-													y="24"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="36"
-													y="24"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="48"
-													y="24"
-													width="6"
-													height="6"
-													fill="#E8B48A"
-												/>
-												<rect
-													x="6"
-													y="30"
-													width="6"
-													height="6"
-													fill="#E8B48A"
-												/>
-												<rect
-													x="24"
-													y="30"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="30"
-													y="30"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="36"
-													y="30"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="24"
-													y="36"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="30"
-													y="36"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="36"
-													y="36"
-													width="6"
-													height="6"
-													fill="#FC4C02"
-												/>
-												<rect
-													x="24"
-													y="42"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="42"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="36"
-													y="42"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="42"
-													y="42"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="18"
-													y="48"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="24"
-													y="48"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="42"
-													y="48"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="48"
-													y="48"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="12"
-													y="54"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="18"
-													y="54"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="48"
-													y="54"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="6"
-													y="60"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="12"
-													y="60"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="48"
-													y="60"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-												<rect
-													x="54"
-													y="60"
-													width="6"
-													height="6"
-													fill="#1C1917"
-												/>
-											</svg>
-											<div
-												style={{
-													flex: "1",
-													display: "flex",
-													alignItems: "flex-end",
-													justifyContent: "center",
-													gap: "10px",
-												}}
-											>
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														alignItems: "center",
-														gap: "4px",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "11px",
-														}}
-													>
-														{"8.2"}
-													</span>
-													<div
-														style={{
-															display: "flex",
-															flexDirection: "column",
-															gap: "2px",
-														}}
-													>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-													</div>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Mon"}
-													</span>
-												</div>
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														alignItems: "center",
-														gap: "4px",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "11px",
-														}}
-													>
-														{"10.1"}
-													</span>
-													<div
-														style={{
-															display: "flex",
-															flexDirection: "column",
-															gap: "2px",
-														}}
-													>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-													</div>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Wed"}
-													</span>
-												</div>
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														alignItems: "center",
-														gap: "4px",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "11px",
-														}}
-													>
-														{"21.0"}
-													</span>
-													<div
-														style={{
-															display: "flex",
-															flexDirection: "column",
-															gap: "2px",
-														}}
-													>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-														<span
-															style={{
-																display: "block",
-																width: "16px",
-																height: "6px",
-																background: "#FC4C02",
-															}}
-														></span>
-													</div>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Sat"}
-													</span>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>{"Run log"}</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"Your Strava runs in a table. Ask an agent how training is going."
-											}
-										</span>
-									</div>
-								</div>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#EEF4F9",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "6px",
-											}}
-										>
-											<span
-												style={{
-													width: "24px",
-													height: "24px",
-													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													display: "flex",
-													alignItems: "center",
-													justifyContent: "center",
-													boxSizing: "border-box",
-													flexShrink: "0",
-												}}
-											>
-												<svg
-													width="14"
-													height="14"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#57534E"
-													strokeWidth="1.3"
-												>
-													<circle cx="8" cy="8" r="6.2" />
-													<path d="M1.8 8 h12.4 M8 1.8 c-2.8 3 -2.8 9.4 0 12.4 M8 1.8 c2.8 3 2.8 9.4 0 12.4" />
-												</svg>
-											</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												{"listings"}
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#78716C"
-													strokeWidth="1.3"
-													style={{ flexShrink: "0" }}
-												>
-													<rect
-														x="1.5"
-														y="2.5"
-														width="13"
-														height="11"
-														rx="1.8"
-													/>
-													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
-												</svg>
-												{"apartments"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												justifyContent: "flex-start",
-												gap: "14px",
-											}}
-										>
-											<svg
-												width="60"
-												height="65"
-												viewBox="0 0 60 65"
-												shapeRendering="crispEdges"
-												style={{ display: "block", flexShrink: "0" }}
-											>
-												<rect
-													x="25"
-													y="0"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="0"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="20"
-													y="5"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="25"
-													y="5"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="30"
-													y="5"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="35"
-													y="5"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="45"
-													y="5"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="50"
-													y="5"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="15"
-													y="10"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="20"
-													y="10"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="25"
-													y="10"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="30"
-													y="10"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="35"
-													y="10"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="40"
-													y="10"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="45"
-													y="10"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="50"
-													y="10"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="15"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="15"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="20"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="25"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="30"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="35"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="40"
-													y="15"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="45"
-													y="15"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="50"
-													y="15"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="20"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="15"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="20"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="25"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="30"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="35"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="40"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="45"
-													y="20"
-													width="5"
-													height="5"
-													fill="#D9534F"
-												/>
-												<rect
-													x="50"
-													y="20"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="0"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="15"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="20"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="25"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="35"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="40"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="45"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="50"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="55"
-													y="25"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="30"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="15"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="20"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="25"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="30"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="35"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="40"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="45"
-													y="30"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="50"
-													y="30"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="35"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="35"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="15"
-													y="35"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="20"
-													y="35"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="25"
-													y="35"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="30"
-													y="35"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="35"
-													y="35"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="40"
-													y="35"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="45"
-													y="35"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="50"
-													y="35"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="40"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="40"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="15"
-													y="40"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="20"
-													y="40"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="25"
-													y="40"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="30"
-													y="40"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="35"
-													y="40"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="40"
-													y="40"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="45"
-													y="40"
-													width="5"
-													height="5"
-													fill="#7FB3E6"
-												/>
-												<rect
-													x="50"
-													y="40"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="45"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="45"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="15"
-													y="45"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="20"
-													y="45"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="25"
-													y="45"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="45"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="35"
-													y="45"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="40"
-													y="45"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="45"
-													y="45"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="50"
-													y="45"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="50"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="15"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="20"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="25"
-													y="50"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="50"
-													width="5"
-													height="5"
-													fill="#F2C94C"
-												/>
-												<rect
-													x="35"
-													y="50"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="40"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="45"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="50"
-													y="50"
-													width="5"
-													height="5"
-													fill="#E8D9C0"
-												/>
-												<rect
-													x="55"
-													y="50"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="5"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="10"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="15"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="20"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="25"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="30"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="35"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="40"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="45"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="50"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="55"
-													y="55"
-													width="5"
-													height="5"
-													fill="#1C1917"
-												/>
-												<rect
-													x="0"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="5"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="10"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="15"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="20"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="25"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="30"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="35"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="40"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="45"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="50"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-												<rect
-													x="55"
-													y="60"
-													width="5"
-													height="5"
-													fill="#3E9B6A"
-												/>
-											</svg>
-											<div
-												style={{
-													flex: "1",
-													minWidth: "0",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "9px",
-													overflow: "hidden",
-												}}
-											>
-												<div
-													style={{
-														display: "flex",
-														justifyContent: "space-between",
-														alignItems: "center",
-														gap: "8px",
-														padding: "5px 10px",
-														fontFamily: "ui-monospace, Menlo, monospace",
-														fontSize: "12px",
-														whiteSpace: "nowrap",
-													}}
-												>
-													<span>{"2BR \u00b7 18 min"}</span>
-													<span
-														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
-															padding: "0 8px",
-															borderRadius: "99px",
-															fontSize: "11.5px",
-														}}
-													>
-														{"new"}
-													</span>
-												</div>
-												<div
-													style={{
-														display: "flex",
-														justifyContent: "space-between",
-														alignItems: "center",
-														gap: "8px",
-														padding: "5px 10px",
-														borderTop: "1px solid #EDEAE6",
-														fontFamily: "ui-monospace, Menlo, monospace",
-														fontSize: "12px",
-														whiteSpace: "nowrap",
-													}}
-												>
-													<span>{"1BR \u00b7 25 min"}</span>
-													<span
-														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
-															padding: "0 8px",
-															borderRadius: "99px",
-															fontSize: "11.5px",
-														}}
-													>
-														{"new"}
-													</span>
-												</div>
-												<div
-													style={{
-														display: "flex",
-														justifyContent: "space-between",
-														alignItems: "center",
-														gap: "8px",
-														padding: "5px 10px",
-														borderTop: "1px solid #EDEAE6",
-														fontFamily: "ui-monospace, Menlo, monospace",
-														fontSize: "12px",
-														whiteSpace: "nowrap",
-													}}
-												>
-													<span>{"3BR \u00b7 41 min"}</span>
-													<span
-														style={{
-															background: "#EDEAE6",
-															color: "#57534E",
-															padding: "0 8px",
-															borderRadius: "99px",
-															fontSize: "11.5px",
-														}}
-													>
-														{"far"}
-													</span>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>{"Apartment hunt"}</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"A script adds new listings with your commute time. An agent flags the good ones."
-											}
-										</span>
-									</div>
-								</div>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#F1F0EC",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "6px",
-											}}
-										>
-											<span
-												style={{
-													width: "24px",
-													height: "24px",
-													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													display: "flex",
-													alignItems: "center",
-													justifyContent: "center",
-													boxSizing: "border-box",
-													flexShrink: "0",
-												}}
-											>
-												<img
-													src="/landing/claude-spark.svg"
-													alt=""
-													style={{ width: "14px", height: "14px" }}
-												/>
-											</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<img
-													src="/landing/icon-folder.svg"
-													alt=""
-													style={{ width: "12px", height: "12px" }}
-												/>
-												{"scripts"}
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#78716C"
-													strokeWidth="1.3"
-													style={{ flexShrink: "0" }}
-												>
-													<rect
-														x="1.5"
-														y="2.5"
-														width="13"
-														height="11"
-														rx="1.8"
-													/>
-													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
-												</svg>
-												{"any table"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												justifyContent: "flex-start",
-												gap: "14px",
-											}}
-										>
-											<div
-												style={{
-													flex: "1",
-													minWidth: "0",
-													display: "flex",
-													flexDirection: "column",
-													gap: "8px",
-												}}
-											>
-												<div
-													style={{
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "9px",
-														fontFamily: "ui-monospace, Menlo, monospace",
-														fontSize: "12px",
-														whiteSpace: "nowrap",
-													}}
-												>
-													<div
-														style={{
-															display: "flex",
-															justifyContent: "space-between",
-															alignItems: "center",
-															gap: "8px",
-															padding: "7px 10px",
-															borderTop: "none",
-														}}
-													>
-														<span>{"digest.ts"}</span>
-														<span
-															style={{
-																background: "#E7F3EB",
-																color: "#1F6B40",
-																padding: "0 8px",
-																borderRadius: "99px",
-															}}
-														>
-															{"Mon 9:00"}
-														</span>
-													</div>
-													<div
-														style={{
-															display: "flex",
-															justifyContent: "space-between",
-															alignItems: "center",
-															gap: "8px",
-															padding: "7px 10px",
-															borderTop: "1px solid #EDEAE6",
-														}}
-													>
-														<span>{"cleanup.ts"}</span>
-														<span
-															style={{
-																background: "#E7F3EB",
-																color: "#1F6B40",
-																padding: "0 8px",
-																borderRadius: "99px",
-															}}
-														>
-															{"daily"}
-														</span>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>
-											{"Automations"}
-											<span
-												style={{
-													marginLeft: "8px",
-													padding: "1px 7px",
-													borderRadius: "99px",
-													background: "#FFF4EC",
-													color: "#C2410C",
-													fontSize: "11px",
-													fontWeight: "600",
-													verticalAlign: "middle",
-												}}
-											>
-												{"Soon"}
-											</span>
-										</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"Keep scripts next to your data. Scheduled runs are coming soon."
-											}
-										</span>
-									</div>
-								</div>
-							</div>
-							<div
-								data-lr="cases"
-								style={{
-									display: "grid",
-									gridTemplateColumns: "repeat(3, minmax(0,1fr))",
-									gap: "16px",
-								}}
-							>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#FFF4E8",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "6px",
-											}}
-										>
-											<span
-												style={{
-													width: "24px",
-													height: "24px",
-													borderRadius: "6px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													display: "flex",
-													alignItems: "center",
-													justifyContent: "center",
-													boxSizing: "border-box",
-													flexShrink: "0",
-												}}
-											>
-												<img
-													src="/lixray-mark.svg"
-													alt=""
-													style={{ width: "14px", height: "14px" }}
-												/>
-											</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#78716C"
-													strokeWidth="1.3"
-													style={{ flexShrink: "0" }}
-												>
-													<rect
-														x="1.5"
-														y="2.5"
-														width="13"
-														height="11"
-														rx="1.8"
-													/>
-													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
-												</svg>
-												{"posts"}
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												{"this week"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												justifyContent: "center",
-											}}
-										>
-											<div
-												style={{ display: "flex", gap: "5px", width: "100%" }}
-											>
-												<div
-													style={{
-														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "8px",
-														height: "92px",
-														padding: "6px 5px",
-														display: "flex",
-														flexDirection: "column",
-														gap: "6px",
-														boxSizing: "border-box",
-														minWidth: "0",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Mon"}
-													</span>
-													<span
-														style={{
-															background: "#E7F3EB",
-															color: "#1F6B40",
-															borderRadius: "4px",
-															padding: "3px 4px",
-															fontSize: "10.5px",
-															fontWeight: "600",
-															lineHeight: "1.2",
-															overflow: "hidden",
-															whiteSpace: "nowrap",
-															textOverflow: "ellipsis",
-														}}
-													>
-														{"\u2713 Blog"}
-													</span>
-												</div>
-												<div
-													style={{
-														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "8px",
-														height: "92px",
-														padding: "6px 5px",
-														display: "flex",
-														flexDirection: "column",
-														gap: "6px",
-														boxSizing: "border-box",
-														minWidth: "0",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Tue"}
-													</span>
-												</div>
-												<div
-													style={{
-														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "8px",
-														height: "92px",
-														padding: "6px 5px",
-														display: "flex",
-														flexDirection: "column",
-														gap: "6px",
-														boxSizing: "border-box",
-														minWidth: "0",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Wed"}
-													</span>
-													<span
-														style={{
-															background: "#FDEBD3",
-															color: "#B54708",
-															borderRadius: "4px",
-															padding: "3px 4px",
-															fontSize: "10.5px",
-															fontWeight: "600",
-															lineHeight: "1.2",
-															overflow: "hidden",
-															whiteSpace: "nowrap",
-															textOverflow: "ellipsis",
-														}}
-													>
-														{"Launch"}
-													</span>
-												</div>
-												<div
-													style={{
-														flex: "1",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "8px",
-														height: "92px",
-														padding: "6px 5px",
-														display: "flex",
-														flexDirection: "column",
-														gap: "6px",
-														boxSizing: "border-box",
-														minWidth: "0",
-													}}
-												>
-													<span
-														style={{
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "10.5px",
-															color: "#78716C",
-														}}
-													>
-														{"Thu"}
-													</span>
-													<span
-														style={{
-															background: "#EDF0FA",
-															color: "#2F5DA8",
-															borderRadius: "4px",
-															padding: "3px 4px",
-															fontSize: "10.5px",
-															fontWeight: "600",
-															lineHeight: "1.2",
-															overflow: "hidden",
-															whiteSpace: "nowrap",
-															textOverflow: "ellipsis",
-														}}
-													>
-														{"News"}
-													</span>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>{"Content calendar"}</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"See this week's posts. Ask an agent to mark them as published."
-											}
-										</span>
-									</div>
-								</div>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#FDF0EA",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "6px",
-											}}
-										>
-											<img
-												src="/landing/brand-granola.svg"
-												alt="Granola"
-												style={{
-													width: "24px",
-													height: "24px",
-													display: "block",
-													flexShrink: "0",
-												}}
-											/>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													fill="none"
-													stroke="#78716C"
-													strokeWidth="1.3"
-													style={{ flexShrink: "0" }}
-												>
-													<rect
-														x="1.5"
-														y="2.5"
-														width="13"
-														height="11"
-														rx="1.8"
-													/>
-													<path d="M1.5 6.3 h13 M6 6.3 v7.2" />
-												</svg>
-												{"meetings"}
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<svg
-													width="12"
-													height="12"
-													viewBox="0 0 16 16"
-													style={{ flexShrink: "0" }}
-												>
-													<rect
-														x="4"
-														y="1"
-														width="11"
-														height="14"
-														rx="1.6"
-														fill="#ED6C47"
-													/>
-													<rect
-														x="1"
-														y="4"
-														width="9"
-														height="8"
-														rx="1.3"
-														fill="#C43E1C"
-													/>
-												</svg>
-												{"decks"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												justifyContent: "center",
-											}}
-										>
-											<div
-												style={{
-													position: "relative",
-													width: "236px",
-													height: "92px",
-												}}
-											>
-												<div
-													style={{
-														position: "absolute",
-														left: "6px",
-														bottom: "0",
-														width: "108px",
-														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
-														transform: "rotate(-8deg)",
-														transformOrigin: "bottom center",
-														zIndex: "1",
-														overflow: "hidden",
-														display: "flex",
-														flexDirection: "column",
-													}}
-												>
-													<div
-														style={{ height: "14px", background: "#ED6C47" }}
-													></div>
-													<div
-														style={{
-															padding: "6px 8px",
-															display: "flex",
-															flexDirection: "column",
-															gap: "4px",
-														}}
-													>
-														<b style={{ fontSize: "11px" }}>{"Globex"}</b>
-														<div
-															style={{
-																display: "flex",
-																alignItems: "flex-end",
-																gap: "3px",
-																height: "22px",
-															}}
-														>
-															<span
-																style={{
-																	width: "8px",
-																	height: "9px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "15px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "22px",
-																	background: "#ED6C47",
-																}}
-															></span>
-															<span style={{ flex: "1" }}></span>
-															<span
-																style={{
-																	width: "30px",
-																	height: "3px",
-																	background: "#E2DCD3",
-																	alignSelf: "center",
-																}}
-															></span>
-														</div>
-													</div>
-												</div>
-												<div
-													style={{
-														position: "absolute",
-														left: "122px",
-														bottom: "0",
-														width: "108px",
-														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
-														transform: "rotate(8deg)",
-														transformOrigin: "bottom center",
-														zIndex: "1",
-														overflow: "hidden",
-														display: "flex",
-														flexDirection: "column",
-													}}
-												>
-													<div
-														style={{ height: "14px", background: "#ED6C47" }}
-													></div>
-													<div
-														style={{
-															padding: "6px 8px",
-															display: "flex",
-															flexDirection: "column",
-															gap: "4px",
-														}}
-													>
-														<b
-															style={{
-																fontSize: "11px",
-																alignSelf: "flex-end",
-															}}
-														>
-															{"Nexa"}
-														</b>
-														<div
-															style={{
-																display: "flex",
-																alignItems: "flex-end",
-																gap: "3px",
-																height: "22px",
-															}}
-														>
-															<span
-																style={{
-																	width: "8px",
-																	height: "9px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "15px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "22px",
-																	background: "#ED6C47",
-																}}
-															></span>
-															<span style={{ flex: "1" }}></span>
-															<span
-																style={{
-																	width: "30px",
-																	height: "3px",
-																	background: "#E2DCD3",
-																	alignSelf: "center",
-																}}
-															></span>
-														</div>
-													</div>
-												</div>
-												<div
-													style={{
-														position: "absolute",
-														left: "64px",
-														bottom: "0",
-														width: "108px",
-														height: "72px",
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.10)",
-														transform: "rotate(0deg)",
-														transformOrigin: "bottom center",
-														zIndex: "2",
-														overflow: "hidden",
-														display: "flex",
-														flexDirection: "column",
-													}}
-												>
-													<div
-														style={{ height: "14px", background: "#ED6C47" }}
-													></div>
-													<div
-														style={{
-															padding: "6px 8px",
-															display: "flex",
-															flexDirection: "column",
-															gap: "4px",
-														}}
-													>
-														<b style={{ fontSize: "11px" }}>{"Acme"}</b>
-														<div
-															style={{
-																display: "flex",
-																alignItems: "flex-end",
-																gap: "3px",
-																height: "22px",
-															}}
-														>
-															<span
-																style={{
-																	width: "8px",
-																	height: "9px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "15px",
-																	background: "#F4B9A6",
-																}}
-															></span>
-															<span
-																style={{
-																	width: "8px",
-																	height: "22px",
-																	background: "#ED6C47",
-																}}
-															></span>
-															<span style={{ flex: "1" }}></span>
-															<span
-																style={{
-																	width: "30px",
-																	height: "3px",
-																	background: "#E2DCD3",
-																	alignSelf: "center",
-																}}
-															></span>
-														</div>
-													</div>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>
-											{"Per-customer pitch decks"}
-										</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"Ask an agent to build a deck from a customer's meeting notes."
-											}
-										</span>
-									</div>
-								</div>
-								<div
-									style={{
-										background: "#FFFFFF",
-										border: "1px solid #E2DCD3",
-										borderRadius: "16px",
-										overflow: "hidden",
-										display: "flex",
-										flexDirection: "column",
-									}}
-								>
-									<div
-										style={{
-											background: "#F1F5EE",
-											padding: "16px 16px 18px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "14px",
-											height: "190px",
-											boxSizing: "border-box",
-										}}
-									>
-										<div
-											style={{
-												display: "flex",
-												alignItems: "center",
-												gap: "6px",
-											}}
-										>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												<img
-													src="/landing/icon-folder.svg"
-													alt=""
-													style={{ width: "12px", height: "12px" }}
-												/>
-												{"skills"}
-											</span>
-											<span style={{ color: "#A8A29E" }}>{"\u2192"}</span>
-											<span
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "5px",
-													background: "#FFFFFF",
-													border: "1px solid #E2DCD3",
-													borderRadius: "99px",
-													padding: "2px 9px",
-													fontFamily: "ui-monospace, Menlo, monospace",
-													fontSize: "12px",
-													whiteSpace: "nowrap",
-												}}
-											>
-												{"every agent"}
-											</span>
-										</div>
-										<div
-											style={{
-												flex: "1",
-												display: "flex",
-												alignItems: "flex-end",
-												justifyContent: "center",
-											}}
-										>
-											<div
-												style={{
-													display: "flex",
-													alignItems: "center",
-													gap: "0",
-												}}
-											>
-												<div
-													style={{
-														background: "#FFFFFF",
-														border: "1px solid #E2DCD3",
-														borderRadius: "8px",
-														width: "108px",
-														padding: "9px 10px",
-														display: "flex",
-														flexDirection: "column",
-														gap: "6px",
-														boxShadow: "0 6px 14px rgba(28,25,23,0.08)",
-													}}
-												>
-													<span
-														style={{
-															display: "flex",
-															alignItems: "center",
-															gap: "5px",
-															fontFamily: "ui-monospace, Menlo, monospace",
-															fontSize: "11.5px",
-															fontWeight: "600",
-														}}
-													>
-														<img
-															src="/landing/icon-sq-md.svg"
-															alt=""
-															style={{
-																width: "12px",
-																height: "12px",
-																flexShrink: "0",
-															}}
-														/>
-														{"tone.md"}
-													</span>
-													<span
-														style={{
-															height: "3px",
-															background: "#E2DCD3",
-															width: "90%",
-														}}
-													></span>
-													<span
-														style={{
-															height: "3px",
-															background: "#E2DCD3",
-															width: "70%",
-														}}
-													></span>
-													<span
-														style={{
-															height: "3px",
-															background: "#E2DCD3",
-															width: "80%",
-														}}
-													></span>
-												</div>
-												<svg
-													width="56"
-													height="92"
-													viewBox="0 0 56 92"
-													fill="none"
-													stroke="#A8A29E"
-													strokeWidth="1.5"
-												>
-													<path d="M0 46 C28 46 28 12 56 12" />
-													<path d="M0 46 H56" />
-													<path d="M0 46 C28 46 28 80 56 80" />
-												</svg>
-												<div
-													style={{
-														display: "flex",
-														flexDirection: "column",
-														gap: "10px",
-													}}
-												>
-													<span
-														style={{
-															width: "24px",
-															height: "24px",
-															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
-															display: "flex",
-															alignItems: "center",
-															justifyContent: "center",
-															boxSizing: "border-box",
-															flexShrink: "0",
-														}}
-													>
-														<img
-															src="/landing/claude-spark.svg"
-															alt=""
-															style={{ width: "14px", height: "14px" }}
-														/>
-													</span>
-													<span
-														style={{
-															width: "24px",
-															height: "24px",
-															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
-															display: "flex",
-															alignItems: "center",
-															justifyContent: "center",
-															boxSizing: "border-box",
-															flexShrink: "0",
-														}}
-													>
-														<img
-															src="/landing/brand-openai.svg"
-															alt=""
-															style={{ width: "14px", height: "14px" }}
-														/>
-													</span>
-													<span
-														style={{
-															width: "24px",
-															height: "24px",
-															borderRadius: "6px",
-															background: "#FFFFFF",
-															border: "1px solid #E2DCD3",
-															display: "flex",
-															alignItems: "center",
-															justifyContent: "center",
-															boxSizing: "border-box",
-															flexShrink: "0",
-														}}
-													>
-														<img
-															src="/landing/brand-gemini.svg"
-															alt=""
-															style={{ width: "14px", height: "14px" }}
-														/>
-													</span>
-												</div>
-											</div>
-										</div>
-									</div>
-									<div
-										style={{
-											padding: "14px 16px 16px",
-											display: "flex",
-											flexDirection: "column",
-											gap: "5px",
-											borderTop: "1px solid #EDEAE6",
-											flex: "1",
-										}}
-									>
-										<b style={{ fontSize: "16px" }}>{"Sharing skills"}</b>
-										<span
-											style={{
-												fontSize: "14px",
-												lineHeight: "1.5",
-												color: "#57534E",
-												textWrap: "pretty",
-											}}
-										>
-											{
-												"Write down how your team does a task, once. Every agent can read it."
-											}
-										</span>
-									</div>
-								</div>
-							</div>
+							<ExampleCards />
 						</div>
-					</div>
-					<div
-						style={{
-							display: "flex",
-							flexDirection: "column",
-							gap: "20px",
-							paddingTop: "56px",
-							borderTop: "1px solid #D6CFC6",
-						}}
-					>
-						<h3
-							style={{
-								margin: "0",
-								fontSize: "34px",
-								fontWeight: "700",
-								letterSpacing: "-0.02em",
-							}}
-						>
-							{"How it compares"}
-						</h3>
-						<CompareTable />
 					</div>
 				</div>
 			</main>
