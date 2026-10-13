@@ -1,6 +1,6 @@
 # LixRay
 
-**Control plane for managing multiple lix repositories.**
+**Control plane for managing multiple lix repositories in the cloud.**
 
 ## Connect an agent
 
