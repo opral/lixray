@@ -1553,12 +1553,23 @@ export function RepositoryAtelier({
 								? scopedLix
 								: withNativeFileWorkingScope(scopedLix, { fileId });
 						},
-						onError: (error) =>
-							captureExceptionTelemetry(error, {
-								operation: "atelier_view_render",
-								lix_id: repositoryId,
-								namespace_id: namespace,
-							}),
+						onError: (error, info) => {
+							fileOpenTrace.run(
+								() =>
+									captureExceptionTelemetry(error, {
+										operation: info.operation ?? "atelier_view_render",
+										view_kind: info.viewKind,
+										component_stack: info.componentStack,
+										repository_id: repositoryId,
+										lix_id: repositoryId,
+										file_id: info.fileId,
+										surface: "web",
+										$exception_handled: true,
+									}),
+								info.fileId,
+							);
+							fileOpenTrace.failed(info.fileId);
+						},
 						readOnly: isReadOnly,
 						// Links to this repository's own file URLs behave like
 						// relative links; mentions write the permanent form.

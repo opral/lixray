@@ -255,3 +255,29 @@ are not performance samples through this gateway. Existing first-party opening
 failure diagnostics remain independent.
 
 The versioned [repository opening profile](./repository-opening-profile.md) adds native initialization versus cached/session reuse, retry/migration/RPC measurements, SDK startup boundaries and passive browser resource/long-task context. It defines the limits of each measurement and provides lifecycle-separated PostHog queries.
+
+
+### Handled editor failures and native read recovery
+
+Atelier forwards nested render boundaries and caught extension load/observe failures
+through the host `onError` callback. LixRay captures them as handled `$exception`
+events with `operation` (`extension_load`, `extension_observe`, `extension_render`),
+`view_kind`, `repository_id`, optional `file_id`, and the React `component_stack`.
+Capture runs inside the matching file-open trace before that trace is marked failed.
+The existing exception pipeline adds release, error ID, and trace/span correlation.
+File paths and document content are not added to this context. A bounded cause-chain
+walk preserves the native `lix_error_code` and HTTP status through RPC wrappers.
+
+Native read fulfillment chooses new operation validity from the transport's latest
+authenticated baseline lease rather than the opening receipt. A server-requested
+restart cleans the old scratch/remote operation, renews the same immutable lease,
+and retries once with a fresh identity and expiry. Network replay keeps the original
+identity and validity. Recovery logs use `operation=read_fulfillment` and
+`recovery_stage=operation_restarted` / `recovered`; repeated rejection remains an
+error. A fully expired baseline returns to the existing descriptor reconciliation
+path. This does not replay application writes or reset browser storage.
+
+Unknown extension errors remain visible and captured. The Retry action reopens the
+loader and observer while retaining the mounted host and any already-loaded document.
+Runtime recovery is limited to operations whose replay/renewal contract is known;
+arbitrary errors do not trigger speculative edits or destructive resets.

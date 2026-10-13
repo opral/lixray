@@ -123,3 +123,20 @@ void test("operational failures are captured as exceptions, not product events",
 		assert.match(source, /captureExceptionTelemetry/u);
 	}
 });
+
+void test("wrapped RPC exceptions expose the native cause code without private details", () => {
+	const cause = Object.assign(new Error("private CSV content"), {
+		name: "LixError",
+		code: "LIX_READ_FULFILLMENT_RESTART",
+		status: 410,
+		details: { sql: "SELECT private content" },
+	});
+	const wrapper = new Error("RPC failed", { cause });
+	const captured = lixErrorTelemetryProperties(wrapper);
+	assert.equal(captured.lix_error_code, "LIX_READ_FULFILLMENT_RESTART");
+	assert.equal(captured.lix_error_status, 410);
+	assert.doesNotMatch(JSON.stringify(captured), /private|CSV|SELECT/);
+	const cycle = new Error("cycle");
+	cycle.cause = cycle;
+	assert.deepEqual(lixErrorTelemetryProperties(cycle), {});
+});
