@@ -18,7 +18,7 @@ import appCss from "../styles.css?url";
 
 const title = "LixRay — Shared repository for you and every AI agent you use.";
 const description =
-	"Files and SQL tables in one open-source repository. Claude, ChatGPT, Codex and your scripts read and write the same data.";
+	"Files and SQL tables under version control, in one open-source repository. Claude, ChatGPT, Codex and your scripts read and write the same data.";
 // Absolute URL: link-preview crawlers do not resolve relative image paths.
 const ogImage = "https://lixray.com/og.png";
 
