@@ -28,7 +28,7 @@ function row(page: Page, name: string) {
 }
 
 async function expectShell(page: Page) {
-	await expect(page.locator("[data-app-titlebar]")).toBeVisible();
+	await expect(page.locator('[data-atelier-part="top-bar"]')).toBeVisible();
 	await expect(
 		page.getByText("Unable to render Atelier", { exact: true }),
 	).toHaveCount(0);

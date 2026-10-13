@@ -150,10 +150,6 @@ function SnapshotSession({
 						>
 							<SnapshotAtelier
 								lix={lix}
-								topBarProps={{
-									"data-app-titlebar": true,
-									className: "border-b border-border-subtle bg-bg",
-								}}
 								slots={{ navbarBrand, navbarEnd: closeButton }}
 							/>
 						</Suspense>

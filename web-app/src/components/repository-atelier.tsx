@@ -2109,10 +2109,10 @@ function DelayedOpeningLabel() {
 	return visible ? <>Connecting to repository…</> : null;
 }
 
-const REPOSITORY_TOP_BAR_PROPS = {
-	"data-app-titlebar": true,
-	className: "border-b border-border-subtle bg-bg",
-} as const;
+// The top bar is the main island's header now, drawn by Atelier with its own
+// edge on the white island. Installed-app title-bar dragging is styled on the
+// sidebar and island header rows (styles.css), not on a full-width bar.
+const REPOSITORY_TOP_BAR_PROPS = {} as const;
 
 function RepositoryNavbarBrand({
 	signedIn,
