@@ -3,15 +3,17 @@ import {
 	type ExecuteResult as LixExecuteResult,
 	type StatementResult as LixStatementResult,
 	type Lix,
-	type ResultArrayRow,
 	type ResultColumnType,
 	type SqlParam,
+	type JsonValue,
 	Value,
+	json,
 } from "@lix-js/sdk";
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "~/components/auth-provider";
 import { useRepository } from "~/components/repository-provider";
 import { base64ToBytes, bytesToBase64 } from "./base64";
+import { executeBatch } from "./execute-batch.ts";
 
 type WireValue =
 	| { kind: "null"; value?: null }
@@ -183,7 +185,6 @@ export function useLixrayApi() {
 						toWireResult(
 							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
 								...body.options,
-								rowMode: "array",
 							}),
 						),
 					);
@@ -194,12 +195,13 @@ export function useLixrayApi() {
 						await lix.switchBranch({ branchId: body.branchId });
 					}
 					return toWireBatch(
-						await lix.executeBatch(
+						await executeBatch(
+							lix,
 							body.statements.map((statement) => ({
 								sql: statement.sql,
 								params: (statement.params ?? []).map(toSqlParam),
 							})),
-							{ ...body.options, rowMode: "array" },
+							body.options,
 						),
 					);
 				}),
@@ -209,7 +211,6 @@ export function useLixrayApi() {
 						toWireResult(
 							await lix.execute(body.sql, (body.params ?? []).map(toSqlParam), {
 								...body.options,
-								rowMode: "array",
 							}),
 						),
 					),
@@ -217,12 +218,13 @@ export function useLixrayApi() {
 			executeBatchActive: (body: Omit<ExecuteBatchRequest, "branchId">) =>
 				serialized(async (lix) =>
 					toWireBatch(
-						await lix.executeBatch(
+						await executeBatch(
+							lix,
 							body.statements.map((statement) => ({
 								sql: statement.sql,
 								params: (statement.params ?? []).map(toSqlParam),
 							})),
-							{ ...body.options, rowMode: "array" },
+							body.options,
 						),
 					),
 				),
@@ -243,20 +245,18 @@ function toSqlParam(value: WireValue): SqlParam {
 		case "timestamp":
 			return Value.timestamptz(value.value);
 		case "json":
-			return value.value as SqlParam;
+			return json(value.value as JsonValue);
 		case "blob":
 			return base64ToBytes(value.base64);
 	}
 }
 
-function toWireResult(
-	result: LixExecuteResult<ResultArrayRow>,
-): ExecuteResponse {
+function toWireResult(result: LixExecuteResult): ExecuteResponse {
 	return {
 		columns: result.columns.map((column) => column.name),
 		rows: result.rows.map((row) =>
-			result.columns.map((column, index) =>
-				toWireValue(row[index], column.type),
+			result.columns.map((column) =>
+				toWireValue(row[column.name], column.type),
 			),
 		),
 		rowsAffected: result.rowsAffected,
@@ -372,7 +372,7 @@ function toWireSingle(result: ExecuteResponse): ExecuteScriptResponse {
 	return { results: [statement], commit };
 }
 function toWireBatch(batch: {
-	results: readonly LixStatementResult<ResultArrayRow>[];
+	results: readonly LixStatementResult[];
 	commit: ExecuteResponse["commit"];
 }): ExecuteScriptResponse {
 	return {

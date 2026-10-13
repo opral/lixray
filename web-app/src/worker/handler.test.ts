@@ -1086,12 +1086,18 @@ void test("MCP reuses successful lix authorization only within one HTTP request"
 		`/lix/v1/${LIX_A}/`,
 		`/lix/v1/${LIX_A}/execute`,
 		`/lix/v1/${LIX_A}/execute`,
-		"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+		`/lix/v1/${LIX_A}/transaction/begin`,
+		`/lix/v1/${LIX_A}/transaction/execute`,
+		`/lix/v1/${LIX_A}/transaction/execute`,
+		`/lix/v1/${LIX_A}/transaction/commit`,
 		`/lix/v1/${LIX_A}/session`,
 		`/lix/v1/${LIX_A}/`,
 		`/lix/v1/${LIX_A}/execute`,
 		`/lix/v1/${LIX_A}/execute`,
-		"/lix/v1/11111111-1111-4111-8111-111111111111/execute-batch",
+		`/lix/v1/${LIX_A}/transaction/begin`,
+		`/lix/v1/${LIX_A}/transaction/execute`,
+		`/lix/v1/${LIX_A}/transaction/execute`,
+		`/lix/v1/${LIX_A}/transaction/commit`,
 		`/lix/v1/${LIX_A}/session`,
 	]);
 });
@@ -3117,6 +3123,20 @@ function mcpLixFetch(protocolPaths: string[], sessionId: string) {
 				rowsAffected: 0,
 				notices: [],
 			});
+		}
+		if (path === `/lix/v1/${LIX_A}/transaction/begin`) {
+			return Response.json({ transactionId: "transaction-1" });
+		}
+		if (path === `/lix/v1/${LIX_A}/transaction/execute`) {
+			return Response.json({
+				columns: [],
+				rows: [],
+				rowsAffected: 0,
+				notices: [],
+			});
+		}
+		if (path === `/lix/v1/${LIX_A}/transaction/commit`) {
+			return Response.json({ commit: null });
 		}
 		assert.equal(
 			path,

@@ -194,3 +194,23 @@ void test("publication failure tracking has a finite pending-operation bound", (
 		"1 additional 503 publication response(s) exceeded exact-replay tracking bounds",
 	]);
 });
+
+void test("typed merge storage 503 recovers only after the exact body and lease replay", () => {
+	const url = pushUrl.replace("/push", "/merge");
+	const tracker = createTransientPublicationRecoveryTracker();
+	tracker.classify(tracker.observe(response(503, { url })), storageFailure);
+	for (const replacement of [
+		response(200, { url, body: new TextEncoder().encode("different") }),
+		response(200, { url, source: "left" }),
+		response(200, { url, sessionId: "session-b" }),
+		response(200, { url, replicaId: "replica-b" }),
+		response(200, { url, baselineLeaseId: "lease-b" }),
+		response(200, { url, baselineLeaseId: null }),
+	]) {
+		tracker.observe(replacement);
+		assert.deepEqual(tracker.failures(), [`503 ${url}`]);
+	}
+	tracker.observe(response(200, { url }));
+	assert.deepEqual(tracker.failures(), []);
+	assert.equal(tracker.recovered().length, 1);
+});
