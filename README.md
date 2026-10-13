@@ -1,26 +1,6 @@
 # LixRay
 
-**A shared repository for you and your AI agents.**
-
-Files and SQL tables live together with version history. Claude, ChatGPT, Codex,
-and your scripts read and write the same repository through MCP or the Lix SDK.
-Use the hosted app at [lixray.com](https://lixray.com).
-
-LixRay is built on [Lix](https://github.com/opral/lix), the MIT-licensed engine
-for files, tables, and version control, and [Atelier](https://github.com/opral/atelier),
-the repository UI. This repository contains LixRay's web app, MCP server, and
-control plane for accounts, access, sharing, and hosting. It is [MIT licensed](LICENSE).
-
-## What you can do
-
-- Keep documents, files, and SQL tables in one repository.
-- Connect multiple agents to the same data through one MCP endpoint.
-- Inspect changes, create branches and checkpoints, undo edits, and restore history.
-- Use the SDK and SQL to build scripts and apps around your data.
-
-Connections to Google Drive, Notion, GitHub, and Granola are
-[planned](https://github.com/opral/lix/issues/1934). Automations are also planned.
-Agent edits are attributed to the connected user's account.
+**Control plane for managing multiple lix repositories.**
 
 ## Connect an agent
 
