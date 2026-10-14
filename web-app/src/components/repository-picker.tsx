@@ -21,7 +21,9 @@ import {
 } from "~/components/ui/dropdown-menu";
 
 /**
- * Repository switcher shown in the workspace top bar, beside the logo.
+ * Repository switcher shown beside the logo in the workspace: in the open
+ * sidebar's header (on the canvas) or, with the sidebar collapsed, in the
+ * main island's header (on white), so hovers take the island's fill there.
  * Lists the current namespace's repositories; visitors without membership
  * (public readers) get a plain, non-interactive repository label instead.
  */
@@ -67,7 +69,7 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: namespaceHandle }}
 					aria-label={`View the @${namespaceHandle} profile`}
-					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					className="block h-7 max-w-[120px] min-w-0 shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{namespaceHandle}
 				</Link>
@@ -106,7 +108,7 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: organization.handle }}
 					aria-label={`View the @${organization.handle} profile`}
-					className="flex h-7 max-w-[120px] shrink-0 items-center truncate rounded-[7px] px-[5px] text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+					className="block h-7 max-w-[120px] min-w-0 shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{organization.handle}
 				</Link>
@@ -118,7 +120,7 @@ export function RepositoryPicker({
 							data-testid="repository-picker"
 							data-repository-id={activeRepository.id}
 							aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
-							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-fg transition-colors hover:bg-bg-hover-strong focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring data-[state=open]:bg-bg-active"
+							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-fg transition-colors hover:bg-bg-hover-strong focus-visible:outline-2 [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover focus-visible:outline-offset-1 focus-visible:outline-ring data-[state=open]:bg-bg-active"
 						>
 							<span className="max-w-[180px] truncate">
 								{activeRepository.name}

@@ -1,3 +1,4 @@
+import { WorkspaceTitlebarStrip } from "~/components/workspace-titlebar-strip";
 import { entityRoutePath, resolvePublishedEntity } from "~/lib/entity-url";
 import { Atelier } from "@opral/atelier";
 import { fileIconUrl } from "@opral/atelier/file-icons";
@@ -359,46 +360,49 @@ export function PublishedFileView({
 
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
+			className="fixed inset-0 flex h-full w-full flex-col overflow-hidden bg-bg"
 			onClickCapture={routePublishedLink}
 			onAuxClickCapture={routePublishedLink}
 		>
-			<Atelier
-				lix={lix}
-				location={{ path: resource.path, fileId }}
-				navigation={{
-					href: (location) =>
-						"path" in location
-							? `#published-file=${encodeURIComponent(location.path)}`
-							: "#",
-				}}
-				readOnly
-				defaultOpenPanels={[]}
-				slots={{
-					navbarBrand: (
-						<a
-							href={`/@${namespace}/${repositorySlug}`}
-							className="truncate font-semibold"
-						>
-							{repositoryName}
-						</a>
-					),
-					navbarEnd: (
-						<div className="flex items-center gap-2">
-							<span className="rounded-full border border-border px-2 py-1 text-xs text-fg-subtle">
-								Public · read-only
-							</span>
-							{objectUrl ? (
-								<Button asChild variant="outline" size="sm">
-									<a href={objectUrl} download={fileName(resource.path)}>
-										<Download className="size-4" /> Download
-									</a>
-								</Button>
-							) : null}
-						</div>
-					),
-				}}
-			/>
+			<WorkspaceTitlebarStrip />
+			<div className="min-h-0 flex-1">
+				<Atelier
+					lix={lix}
+					location={{ path: resource.path, fileId }}
+					navigation={{
+						href: (location) =>
+							"path" in location
+								? `#published-file=${encodeURIComponent(location.path)}`
+								: "#",
+					}}
+					readOnly
+					defaultOpenPanels={[]}
+					slots={{
+						navbarBrand: (
+							<a
+								href={`/@${namespace}/${repositorySlug}`}
+								className="truncate font-semibold"
+							>
+								{repositoryName}
+							</a>
+						),
+						navbarEnd: (
+							<div className="flex items-center gap-2">
+								<span className="rounded-full border border-border px-2 py-1 text-xs text-fg-subtle">
+									Public · read-only
+								</span>
+								{objectUrl ? (
+									<Button asChild variant="outline" size="sm">
+										<a href={objectUrl} download={fileName(resource.path)}>
+											<Download className="size-4" /> Download
+										</a>
+									</Button>
+								) : null}
+							</div>
+						),
+					}}
+				/>
+			</div>
 			{error ? (
 				<div className="absolute bottom-4 left-4">
 					<PublishedError>{error}</PublishedError>

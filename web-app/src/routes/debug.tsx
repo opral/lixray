@@ -1,3 +1,4 @@
+import { WorkspaceTitlebarStrip } from "~/components/workspace-titlebar-strip";
 import { openLix, type Lix } from "@lix-js/sdk";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
@@ -119,7 +120,7 @@ function SnapshotSession({
 		<Link
 			to="/home"
 			aria-label="LixRay home"
-			className="-ml-1.5 inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+			className="inline-flex shrink-0 items-center rounded-[5px] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
 		>
 			<img className="size-6" src="/lixray-mark.svg" alt="" />
 		</Link>
@@ -129,16 +130,24 @@ function SnapshotSession({
 			Close snapshot
 		</Button>
 	);
+	// In the island's header, before Close: the workspace's first row is the
+	// sidebar's and the island's headers, with nothing above them.
+	const snapshotActions = (
+		<div className="flex min-w-0 items-center gap-2">
+			<span
+				className="max-w-[320px] truncate text-xs text-fg-subtle"
+				title={file.name}
+			>
+				{file.name} · In memory · discarded on close or refresh
+			</span>
+			{closeButton}
+		</div>
+	);
 	return (
 		<>
 			{lix ? (
 				<div className="relative flex min-h-0 flex-1 flex-col">
-					<div
-						className="shrink-0 truncate px-3.5 py-1 text-xs text-fg-subtle"
-						title={file.name}
-					>
-						{file.name} · <span>In memory · discarded on close or refresh</span>
-					</div>
+					<WorkspaceTitlebarStrip />
 					{/* Atelier's default session, preference, and review stores are all in memory. */}
 					<div className="min-h-0 flex-1">
 						<Suspense
@@ -150,7 +159,7 @@ function SnapshotSession({
 						>
 							<SnapshotAtelier
 								lix={lix}
-								slots={{ navbarBrand, navbarEnd: closeButton }}
+								slots={{ navbarBrand, navbarEnd: snapshotActions }}
 							/>
 						</Suspense>
 					</div>

@@ -34,6 +34,9 @@ export const TINTS: ReadonlyArray<{
 	readonly color: string;
 }> = [
 	// The review glow: the top inset shadow over the shell, at the corner.
+	// In window-controls-overlay mode the sample lands on the workspace's
+	// title-bar strip, above the shell, so the controls stay canvas there;
+	// this applies to the browser-tab sample at the top of the shell.
 	{
 		selector: '[data-review-mode="true"]',
 		color: "rgba(194, 65, 12, 0.24)", // token-literal: --atelier-accent (light) at the glow's 24%; the composite runs on numbers, not var()
