@@ -126,7 +126,7 @@ export function RepositoryPicker({
 							data-testid="repository-picker"
 							data-repository-id={activeRepository.id}
 							aria-label={`Switch repository — current: ${organization.handle} / ${activeRepository.name}`}
-							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-fg transition-colors hover:bg-bg-hover-strong focus-visible:outline-2 [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover focus-visible:outline-offset-1 focus-visible:outline-ring data-[state=open]:bg-bg-active"
+							className="flex h-7 min-w-0 cursor-pointer items-center gap-1 overflow-hidden rounded-[7px] border-0 bg-transparent py-0 pr-1 pl-[5px] text-[13px] font-semibold text-fg transition-colors hover:bg-bg-hover-strong focus-visible:outline-2 [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover focus-visible:outline-offset-1 focus-visible:outline-ring data-[state=open]:bg-bg-active"
 						>
 							<span className="max-w-[180px] truncate">
 								{activeRepository.name}

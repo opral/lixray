@@ -152,6 +152,15 @@
 	}
 }
 
+/* The same with the sidebar collapsed, when the brand sits in the island's
+   header beside the tabs: a narrow window keeps the repository name and
+   the tabs' room rather than the namespace. */
+@container atelier-top-bar (width < 560px) {
+	[data-shows-identity="true"] [data-repository-namespace] {
+		display: none;
+	}
+}
+
 /* Shown only as an installed app's title bar; see the media query below. */
 [data-workspace-titlebar] {
 	display: none;
