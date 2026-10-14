@@ -49,7 +49,7 @@ export function AccountMenu({ className }: { className?: string }) {
 						// the bar, so the two ends of the header weigh the same.
 						// On the white island (the workspace header) the white fill
 						// would hide an initial-only avatar: canvas there instead.
-						"inline-flex size-6 cursor-pointer items-center justify-center rounded-full bg-panel p-0 [[data-atelier-part=top-bar]_&]:bg-bg text-[11px] font-semibold text-fg-muted transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
+						"inline-flex size-6 cursor-pointer items-center justify-center rounded-full bg-panel p-0 [[data-atelier-part=top-bar]_&]:bg-bg [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover text-[11px] font-semibold text-fg-muted transition-colors hover:bg-bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
 						className,
 					)}
 					type="button"

@@ -50,11 +50,12 @@ export function RepositoryAccessScreen({
 				<WorkspaceTitlebarStrip />
 				{/* The workspace's own frame — sidebar column, then the white
 				    island with its 40px header — so nothing moves when it loads.
-				    The sidebar opens from 768px, as the workspace opens it. */}
-				<div className="flex min-h-0 flex-1 px-2 pt-2 pb-2">
+				    The sidebar opens from 768px, as the workspace opens it, 20% of
+				    the row less its gutters; pb-6 is the status bar's room. */}
+				<div className="flex min-h-0 flex-1 px-2 pt-2 pb-6">
 					<div
 						data-repository-access-sidebar
-						className="mr-1 hidden w-[20%] min-w-0 shrink-0 flex-col md:flex"
+						className="mr-1 hidden w-[calc((100%-8px)*0.2)] min-w-0 shrink-0 flex-col md:flex"
 					>
 						<div className="flex h-10 min-w-0 items-center gap-2 px-1.5">
 							<PendingBrand title={title} />
