@@ -30,7 +30,24 @@ let initializationPromise: Promise<PostHog | null> | null = null;
 /** Extracts the stable, non-content fields exposed by the Lix remote SDK. */
 export function lixErrorTelemetryProperties(error: unknown): Properties {
 	if (!error || typeof error !== "object") return {};
-	const candidate = error as {
+	// Worker/RPC wrappers retain the native error in cause. Keep its stable
+	// code queryable without forwarding messages, SQL, or arbitrary details.
+	let nativeError: object = error;
+	const seen = new Set<object>();
+	for (let current: unknown = error, depth = 0; depth < 8; depth += 1) {
+		if (!current || typeof current !== "object" || seen.has(current)) break;
+		seen.add(current);
+		try {
+			if ("code" in current && safeLixErrorCode(current.code)) {
+				nativeError = current;
+				break;
+			}
+			current = "cause" in current ? current.cause : undefined;
+		} catch {
+			break;
+		}
+	}
+	const candidate = nativeError as {
 		name?: unknown;
 		code?: unknown;
 		status?: unknown;
@@ -59,7 +76,7 @@ export function lixErrorTelemetryProperties(error: unknown): Properties {
 				: undefined;
 
 	return {
-		...repositoryOpenDiagnostics(error),
+		...repositoryOpenDiagnostics(nativeError),
 		...(rustOrigin ? { rust_origin: rustOrigin } : {}),
 		...(locatedRustOrigin?.causeIndex !== undefined
 			? { rust_origin_cause_index: locatedRustOrigin.causeIndex }

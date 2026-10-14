@@ -828,3 +828,28 @@ void test("owner point-read budget failure spans preserve only bounded counts", 
 	assert.equal(finished.attributes["lix.payload.budget"], 65_536);
 	assert.doesNotMatch(JSON.stringify(finished.attributes), /private|secret/);
 });
+
+void test("handled shell failures close the file-open root and old-file errors cannot", () => {
+	exporter.reset();
+	const controller = createBrowserFileOpenTraceController(
+		"repo",
+		"partial_replica",
+		tracer,
+	);
+	controller.ensureRoute("current-file");
+	controller.run(
+		() => trace.getActiveSpan()?.setStatus({ code: SpanStatusCode.ERROR }),
+		"old-file",
+	);
+	controller.failed("old-file");
+	assert.equal(exporter.getFinishedSpans().length, 0);
+	controller.failed();
+	const [root] = exporter.getFinishedSpans();
+	assert.equal(
+		root?.attributes["lixray.file.open.outcome"],
+		"file_open_failed",
+	);
+	assert.equal(root?.status.code, SpanStatusCode.ERROR);
+	controller.cancel();
+	assert.equal(exporter.getFinishedSpans().length, 1);
+});

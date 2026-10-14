@@ -283,15 +283,16 @@ export function createBrowserFileOpenTraceController(
 				maybeFinishLoaded(scope);
 			}, DOCUMENT_EFFECT_GRACE_MS);
 		},
-		failed(fileId: string): void {
-			if (active?.fileId === fileId) finish(active, "file_open_failed", true);
+		failed(fileId?: string): void {
+			if (active && (fileId === undefined || active.fileId === fileId))
+				finish(active, "file_open_failed", true);
 		},
 		cancel(): void {
 			if (active) finish(active, "cancelled");
 			completedFileId = undefined;
 		},
-		run<T>(operation: () => T): T {
-			return active
+		run<T>(operation: () => T, fileId?: string): T {
+			return active && (fileId === undefined || active.fileId === fileId)
 				? context.with(active.context, operation)
 				: repositoryOpenTrace.run(operation);
 		},
