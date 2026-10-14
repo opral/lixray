@@ -168,10 +168,7 @@
 	   island's header share the first row, so both drag the window, and the
 	   one carrying the brand clears the window controls. */
 	.atelier-root
-		:is(
-			[data-atelier-part="sidebar-header"],
-			[data-atelier-part="top-bar"]
-		) {
+		:is([data-atelier-part="sidebar-header"], [data-atelier-part="top-bar"]) {
 		-webkit-user-select: none;
 		user-select: none;
 		-webkit-app-region: drag;
