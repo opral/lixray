@@ -143,6 +143,15 @@
 	}
 }
 
+/* A sidebar too narrow for "namespace / repository" keeps the repository:
+   the name the picker switches. The namespace stays one click away in the
+   picker's menu. Atelier names the sidebar header as a size container. */
+@container atelier-sidebar-header (width < 180px) {
+	[data-repository-namespace] {
+		display: none;
+	}
+}
+
 /* Shown only as an installed app's title bar; see the media query below. */
 [data-workspace-titlebar] {
 	display: none;

@@ -69,11 +69,14 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: namespaceHandle }}
 					aria-label={`View the @${namespaceHandle} profile`}
+					data-repository-namespace
 					className="block h-7 max-w-[120px] min-w-[calc(3ch+10px)] shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{namespaceHandle}
 				</Link>
-				<span className="shrink-0 text-fg-subtle">/</span>
+				<span data-repository-namespace className="shrink-0 text-fg-subtle">
+					/
+				</span>
 				<span className="max-w-[180px] truncate pl-1">{repositoryName}</span>
 			</span>
 		);
@@ -108,11 +111,14 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: organization.handle }}
 					aria-label={`View the @${organization.handle} profile`}
+					data-repository-namespace
 					className="block h-7 max-w-[120px] min-w-[calc(3ch+10px)] shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{organization.handle}
 				</Link>
-				<span className="shrink-0 text-fg-subtle">/</span>
+				<span data-repository-namespace className="shrink-0 text-fg-subtle">
+					/
+				</span>
 				<DropdownMenu>
 					<DropdownMenuTrigger asChild>
 						<button
