@@ -177,7 +177,7 @@ function RepositoryShellSkeleton({
 	...props
 }: RepositoryShellSkeletonProps) {
 	return (
-		<div className="relative h-full">
+		<div className="relative min-h-0 flex-1">
 			<AtelierSkeleton {...props} />
 			<div className="pointer-events-none absolute inset-0 grid place-content-center">
 				{children}
@@ -1820,6 +1820,7 @@ export function RepositoryAtelier({
 			className="fixed inset-0 flex h-full w-full flex-col overflow-hidden bg-bg"
 			aria-busy={!shellProps && !error}
 		>
+			<WorkspaceTitlebarStrip />
 			{shellProps ? (
 				<RepositoryDefaultBranchContext.Provider
 					value={repositoryDefaultBranchId}
@@ -2110,9 +2111,31 @@ function DelayedOpeningLabel() {
 }
 
 // The top bar is the main island's header now, drawn by Atelier with its own
-// edge on the white island. Installed-app title-bar dragging is styled on the
-// sidebar and island header rows (styles.css), not on a full-width bar.
+// edge on the white island.
 const REPOSITORY_TOP_BAR_PROPS = {} as const;
+
+/**
+ * The installed app's title bar over the workspace: an empty canvas strip as
+ * tall as the window-controls area, rendered only in window-controls-overlay
+ * mode (styles.css sizes it and makes it drag the window).
+ *
+ * The workspace has no full-width bar of its own — the sidebar and the main
+ * island each start with a header — so without it the macOS traffic lights
+ * sat over the sidebar's logo and Chrome's controls over the island's Share
+ * button. Chrome also paints every controls region in one theme colour, and
+ * the left ones sat on the grey canvas while the right ones sat on the white
+ * island: no single colour matched both. On this strip both sit on canvas.
+ */
+function WorkspaceTitlebarStrip() {
+	return (
+		<div
+			aria-hidden="true"
+			data-app-titlebar
+			data-workspace-titlebar
+			className="shrink-0 bg-bg"
+		/>
+	);
+}
 
 function RepositoryNavbarBrand({
 	signedIn,
@@ -2176,9 +2199,10 @@ export function RepositoryOpeningSkeleton({
 }) {
 	return (
 		<div
-			className="fixed inset-0 h-full w-full overflow-hidden bg-bg"
+			className="fixed inset-0 flex h-full w-full flex-col overflow-hidden bg-bg"
 			aria-busy
 		>
+			<WorkspaceTitlebarStrip />
 			<RepositoryShellSkeleton
 				topBarProps={REPOSITORY_TOP_BAR_PROPS}
 				slots={{

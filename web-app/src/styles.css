@@ -143,6 +143,11 @@
 	}
 }
 
+/* Shown only as an installed app's title bar; see the media query below. */
+[data-workspace-titlebar] {
+	display: none;
+}
+
 @media (display-mode: window-controls-overlay) {
 	[data-app-titlebar] {
 		box-sizing: border-box;
@@ -164,33 +169,13 @@
 		min-width: 0;
 	}
 
-	/* The workspace has no full-width bar: the sidebar's header and the main
-	   island's header share the first row, so both drag the window, and the
-	   one carrying the brand clears the window controls. */
-	.atelier-root
-		:is(
-			[data-atelier-part="sidebar-header"],
-			[data-atelier-part="top-bar"]
-		) {
-		-webkit-user-select: none;
-		user-select: none;
-		-webkit-app-region: drag;
-		app-region: drag;
+	/* The workspace's title-bar strip (WorkspaceTitlebarStrip) exists only
+	   here; in a browser tab the shell starts at the top of the page. */
+	[data-workspace-titlebar] {
+		display: block;
 	}
 
-	.atelier-root
-		:is(
-			[data-atelier-part="sidebar-header"],
-			[data-atelier-part="top-bar"][data-shows-identity="true"]
-		) {
-		padding-left: max(6px, calc(env(titlebar-area-x, 0px) - 8px));
-	}
-
-	:is(
-			[data-app-titlebar],
-			.atelier-root [data-atelier-part="sidebar-header"],
-			.atelier-root [data-atelier-part="top-bar"]
-		)
+	[data-app-titlebar]
 		:is(
 			a,
 			button,
