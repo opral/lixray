@@ -69,7 +69,7 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: namespaceHandle }}
 					aria-label={`View the @${namespaceHandle} profile`}
-					className="block h-7 max-w-[120px] min-w-0 shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
+					className="block h-7 max-w-[120px] min-w-[calc(3ch+10px)] shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{namespaceHandle}
 				</Link>
@@ -108,7 +108,7 @@ export function RepositoryPicker({
 					to="/@{$namespace}"
 					params={{ namespace: organization.handle }}
 					aria-label={`View the @${organization.handle} profile`}
-					className="block h-7 max-w-[120px] min-w-0 shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
+					className="block h-7 max-w-[120px] min-w-[calc(3ch+10px)] shrink truncate rounded-[7px] px-[5px] leading-7 text-fg-muted no-underline transition-colors hover:bg-bg-hover-strong hover:text-fg focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring [[data-atelier-part=top-bar]_&]:hover:bg-bg-hover"
 				>
 					{organization.handle}
 				</Link>
@@ -133,6 +133,9 @@ export function RepositoryPicker({
 					</DropdownMenuTrigger>
 					<DropdownMenuContent
 						align="start"
+						// A long repository list stops 8px short of the window's
+						// edge instead of touching it.
+						collisionPadding={8}
 						sideOffset={6}
 						className="w-[248px] min-w-[248px] rounded-[10px] border-border bg-panel p-[5px] shadow-lg [&_[data-slot=dropdown-menu-item]]:gap-[9px] [&_[data-slot=dropdown-menu-item]]:rounded-[7px] [&_[data-slot=dropdown-menu-item]]:px-2 [&_[data-slot=dropdown-menu-item]]:py-[7px] [&_[data-slot=dropdown-menu-item]]:text-[13px] [&_[data-slot=dropdown-menu-item]]:leading-tight [&_[data-slot=dropdown-menu-item]]:text-fg-muted [&_[data-slot=dropdown-menu-item]:focus]:bg-bg-hover [&_[data-slot=dropdown-menu-separator]]:mx-2 [&_[data-slot=dropdown-menu-separator]]:my-[5px] [&_[data-slot=dropdown-menu-separator]]:bg-border-subtle"
 					>

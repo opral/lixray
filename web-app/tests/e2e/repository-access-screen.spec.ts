@@ -19,7 +19,10 @@ test("initial HTML includes the opening skeleton and accessible MCP instructions
 		await expect(
 			page.getByRole("heading", { name: "Opening file..." }),
 		).toBeVisible();
-		await expect(page.locator("[data-app-titlebar]")).toBeVisible();
+		// The workspace's frame: the island and its header, before any access.
+		await expect(
+			page.locator('[data-repository-access="pending"] main'),
+		).toBeVisible();
 		await expect(
 			page.locator("[data-repository-access-skeleton]"),
 		).toHaveAttribute("aria-hidden", "true");

@@ -1,9 +1,5 @@
 import { useRouterState } from "@tanstack/react-router";
-import {
-	AppTitlebar,
-	AppTitlebarBrand,
-	AppTitlebarTitle,
-} from "./app-titlebar";
+import { WorkspaceTitlebarStrip } from "./workspace-titlebar-strip";
 import { RepositoryMcpGuidance } from "./repository-mcp-guidance";
 
 // The namespace parent also disables SSR, so it must share this fallback.
@@ -42,37 +38,47 @@ export function RepositoryAccessScreen({
 	} catch {
 		// A malformed URL can still be displayed safely as text.
 	}
+	const title = path.split("/").slice(1, 3).join(" / ");
 	if (status === "pending") {
 		// Only the URL and decorative placeholders are available before access resolves.
 		// Keep this independent of Atelier and any repository data or auth controls.
 		return (
 			<div
-				className="flex min-h-svh flex-col bg-bg text-fg"
+				className="flex h-svh flex-col overflow-hidden bg-bg text-fg"
 				data-repository-access="pending"
 			>
-				<AppTitlebar>
-					<AppTitlebarBrand href="/" />
-					<AppTitlebarTitle>
-						{path.split("/").slice(1, 3).join(" / ")}
-					</AppTitlebarTitle>
-				</AppTitlebar>
-				<div className="flex flex-1">
+				<WorkspaceTitlebarStrip />
+				{/* The workspace's own frame — sidebar column, then the white
+				    island with its 40px header — so nothing moves when it loads.
+				    The sidebar opens from 768px, as the workspace opens it. */}
+				<div className="flex min-h-0 flex-1 px-2 pt-2 pb-2">
 					<div
-						aria-hidden="true"
-						className="hidden w-12 shrink-0 flex-col items-center gap-5 border-r border-border-subtle py-5 sm:flex"
+						data-repository-access-sidebar
+						className="mr-1 hidden w-[20%] min-w-0 shrink-0 flex-col md:flex"
 					>
-						{[0, 1, 2, 3].map((item) => (
-							<div key={item} className="size-4 rounded bg-fg-faint/20" />
-						))}
-					</div>
-					<main className="mx-2 mb-2 min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-panel">
-						<div
-							aria-hidden="true"
-							className="flex h-10 items-center border-b border-border-subtle px-6"
-						>
-							<div className="h-2 w-20 rounded bg-fg-faint/20" />
+						<div className="flex h-10 min-w-0 items-center gap-2 px-1.5">
+							<PendingBrand title={title} />
 						</div>
-						<div className="mx-auto w-full max-w-5xl px-6 py-10 sm:px-12 sm:py-14">
+						<div aria-hidden="true" className="mt-3 flex flex-col gap-3 px-1.5">
+							{["w-16", "w-24", "w-20", "w-24", "w-16"].map((width, index) => (
+								<div key={index} className="flex h-4 items-center gap-2">
+									<div className="size-3.5 shrink-0 rounded bg-fg-faint/20" />
+									<div className={`h-2 rounded bg-fg-faint/20 ${width}`} />
+								</div>
+							))}
+						</div>
+					</div>
+					<main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-[10px] border border-border bg-panel">
+						<div className="flex h-10 shrink-0 items-center gap-2 border-b border-border-subtle px-1.5">
+							<div className="flex min-w-0 items-center gap-2 md:hidden">
+								<PendingBrand title={title} />
+							</div>
+							<div
+								aria-hidden="true"
+								className="ml-1 h-2 w-20 rounded bg-fg-faint/20"
+							/>
+						</div>
+						<div className="mx-auto w-full max-w-5xl overflow-hidden px-6 py-10 sm:px-12 sm:py-14">
 							<div
 								role="status"
 								className="flex items-center gap-3 text-fg-subtle"
@@ -179,5 +185,23 @@ export function RepositoryAccessScreen({
 				</details>
 			</main>
 		</div>
+	);
+}
+
+/** The workspace brand's place and size, as text: nothing to press yet. */
+function PendingBrand({ title }: { title: string }) {
+	return (
+		<>
+			<a
+				href="/"
+				aria-label="LixRay home"
+				className="inline-flex shrink-0 items-center rounded-[5px]"
+			>
+				<img className="size-6" src="/lixray-mark.svg" alt="" />
+			</a>
+			<span className="min-w-0 truncate text-[13px] font-semibold text-fg">
+				{title}
+			</span>
+		</>
 	);
 }

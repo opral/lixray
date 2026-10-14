@@ -179,7 +179,14 @@ function RepositoryShellSkeleton({
 }: RepositoryShellSkeletonProps) {
 	return (
 		<div className="relative min-h-0 flex-1">
-			<AtelierSkeleton {...props} />
+			<AtelierSkeleton
+				// The workspace opens the sidebar from 768px (defaultOpenPanels);
+				// the skeleton draws it the same so the brand does not jump.
+				isLeftSidebarVisible={
+					typeof window !== "undefined" && window.innerWidth >= 768
+				}
+				{...props}
+			/>
 			<div className="pointer-events-none absolute inset-0 grid place-content-center">
 				{children}
 			</div>
